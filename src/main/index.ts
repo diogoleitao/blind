@@ -45,16 +45,41 @@ app.whenReady().then(() => {
     });
   }
 
+  // Shows the Session's window at once and hides the one it replaces, with no fade.
+  function swapToWindow(sessionId: SessionId) {
+    const window = windowFor(sessionId);
+    window.setOpacity(1);
+    window.show();
+    window.focus();
+    windows.forEach((other, otherId) => {
+      if (otherId !== sessionId && other.isVisible()) other.hide();
+    });
+  }
+
+  // With no window left on screen, e.g. once the last Open Session's window closed, there's nothing to fade.
+  function hideApp() {
+    const visible = [...windows.values()].filter((window) => window.isVisible());
+    if (visible.length === 0) app.hide();
+    visible.forEach(hideWindow);
+  }
+
   core.onEffect((effect) => {
-    if (effect.type === "closeWindow") windows.get(effect.sessionId)?.close();
-    if (effect.type === "showApp") windows.forEach(showWindow);
-    if (effect.type === "hideApp") windows.forEach(hideWindow);
+    if (effect.type === "closeWindow") {
+      const window = windows.get(effect.sessionId);
+      windows.delete(effect.sessionId);
+      window?.close();
+    }
+    if (effect.type === "showApp") showWindow(windowFor(effect.sessionId));
+    if (effect.type === "hideApp") hideApp();
+    if (effect.type === "showSession") swapToWindow(effect.sessionId);
   });
 
   if (!globalShortcut.register(hotkey, () => core.hotkeyPressed())) {
     console.error(`Couldn't register the Hotkey ${hotkey}; another app may own it.`);
   }
   app.on("will-quit", () => globalShortcut.unregisterAll());
+  // Closing the last Open Session's window leaves the app running, so the Hotkey can open a new Session.
+  app.on("window-all-closed", () => {});
   app.on("did-resign-active", () => core.focusLost());
 
   function sessionView(sessionId: SessionId): SessionView | undefined {
@@ -85,8 +110,8 @@ app.whenReady().then(() => {
     ArrowDown: "down",
   };
 
-  // The Tab and Pane shortcuts, taken before the Pane's terminal sees them. Brackets match by character or by key
-  // position, since Shift turns `[` into `{` on some layouts.
+  // The Session, Tab and Pane shortcuts, taken before the Pane's terminal sees them. Brackets and the backtick match by
+  // key position too, since Shift turns them into other characters on some layouts.
   function handleShortcut(sessionId: SessionId, input: Electron.Input) {
     if (input.type !== "keyDown" || !input.meta || input.control) return false;
     const key = input.key.toLowerCase();
@@ -96,7 +121,11 @@ app.whenReady().then(() => {
       const direction = arrowDirections[input.key];
       if (input.shift || !direction) return false;
       core.focusPaneInDirection(sessionId, direction);
-    } else if (!input.shift && key === "t") core.newTab(sessionId);
+    } else if (input.code === "Backquote") {
+      if (input.shift) core.focusPreviousSession();
+      else core.focusNextSession();
+    } else if (!input.shift && key === "n") core.newSession();
+    else if (!input.shift && key === "t") core.newTab(sessionId);
     else if (key === "d") core.splitPane(sessionId, input.shift ? "horizontal" : "vertical");
     else if (!input.shift && key === "w") core.closePane(sessionId);
     else if (!input.shift && /^[1-9]$/.test(key)) core.focusTab(sessionId, Number(key) - 1);
@@ -119,10 +148,10 @@ app.whenReady().then(() => {
   ipcMain.on(channels.writeToPane, (_event, paneId: PaneId, data: string) => shellHost.write(paneId, data));
   ipcMain.on(channels.resizePane, (_event, paneId: PaneId, size: TerminalSize) => shellHost.resize(paneId, size));
 
-  core.start();
-
-  for (const session of core.state().sessions) {
-    if (session.status !== "open") continue;
+  // One window per Open Session, made the first time the Session is shown.
+  function windowFor(sessionId: SessionId) {
+    const existing = windows.get(sessionId);
+    if (existing) return existing;
     // A panel floats above other apps, fullscreen ones included.
     const window = new BrowserWindow({
       ...screen.getPrimaryDisplay().workArea,
@@ -143,15 +172,18 @@ app.whenReady().then(() => {
     });
     window.setAlwaysOnTop(true, "screen-saver");
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
-    windows.set(session.id, window);
-    window.on("closed", () => windows.delete(session.id));
-    window.webContents.on("did-finish-load", () => sendSessionView(session.id, window));
+    windows.set(sessionId, window);
+    window.on("closed", () => windows.delete(sessionId));
+    window.webContents.on("did-finish-load", () => sendSessionView(sessionId, window));
     window.webContents.on("before-input-event", (event, input) => {
-      if (handleShortcut(session.id, input)) event.preventDefault();
+      if (handleShortcut(sessionId, input)) event.preventDefault();
     });
-    // The app starts shown; showing now, not on ready-to-show, keeps the window in step with the core.
-    showWindow(window);
     if (process.env.ELECTRON_RENDERER_URL) window.loadURL(process.env.ELECTRON_RENDERER_URL);
     else window.loadFile(join(import.meta.dirname, "../renderer/index.html"));
+    return window;
   }
+
+  core.start();
+  // The app starts shown; showing now, not on ready-to-show, keeps the window in step with the core.
+  showWindow(windowFor(core.state().currentSessionId!));
 });

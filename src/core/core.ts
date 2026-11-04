@@ -10,7 +10,20 @@ import {
 import type { Clock, ShellHost, StateStore } from "./ports";
 import type { CoreState, Pane, PaneId, Session, SessionId, SplitDirection, Tab, TabId } from "./state";
 
-export type Effect = { type: "closeWindow"; sessionId: SessionId } | { type: "showApp" } | { type: "hideApp" };
+export type Effect =
+  | { type: "closeWindow"; sessionId: SessionId }
+  // Fades the app in with the Session visible.
+  | { type: "showApp"; sessionId: SessionId }
+  | { type: "hideApp" }
+  // Makes the Session the visible one in place of the Session shown before, without a fade.
+  | { type: "showSession"; sessionId: SessionId };
+
+// The order Open Sessions are cycled through: by name, by most recent use, or by creation.
+export type CycleOrder = "alphabetical" | "recent" | "created";
+
+export interface Settings {
+  cycleOrder: CycleOrder;
+}
 
 export interface CoreDependencies {
   shellHost: ShellHost;
@@ -25,6 +38,15 @@ export interface Core {
   hotkeyPressed(): void;
   // Blind stopped being the active app, e.g. because another app was clicked.
   focusLost(): void;
+  // Settings start at their defaults: alphabetical cycle order.
+  settingsChanged(settings: Settings): void;
+  // Opens an Unnamed Session with one Tab at the home directory and makes it the Current Session.
+  newSession(): void;
+  // Gives the Session a name, freeing its label number.
+  renameSession(sessionId: SessionId, name: string): void;
+  // Both move the Current Session through the Open Sessions in cycle order, wrapping around.
+  focusPreviousSession(): void;
+  focusNextSession(): void;
   // Opens a Tab after the others, in the current Pane's working directory, and focuses it.
   newTab(sessionId: SessionId): void;
   // Focuses the Tab at a zero-based position, if there is one.
@@ -45,6 +67,10 @@ export interface Core {
   focusPane(paneId: PaneId): void;
   // The focused Pane's running program, or its working directory's folder name while the Shell is idle.
   tabTitle(tabId: TabId): string | undefined;
+  // The Session's name, or for an Unnamed Session `Session N (<dir>)` with the focused Pane's working directory.
+  sessionLabel(sessionId: SessionId): string | undefined;
+  // Every Session, Open or Closed, in the order cycling follows: Unnamed Sessions after the named ones.
+  sessionsInCycleOrder(): Session[];
   // Where each of the Tab's Panes sits, in layout order.
   paneRects(tabId: TabId): PaneRect[];
   onEffect(listener: (effect: Effect) => void): void;
@@ -55,6 +81,9 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
   let state: CoreState = { sessions: [] };
   // Whether the app is on screen. Not part of the snapshot: it says nothing about Sessions.
   let appShown = true;
+  let settings: Settings = { cycleOrder: "alphabetical" };
+  // The Session order taken at the first of a run of consecutive cycle presses; absent outside one.
+  let cycleStreak: SessionId[] | undefined;
   const effectListeners: ((effect: Effect) => void)[] = [];
   const stateListeners: ((state: CoreState) => void)[] = [];
   let lastId = 0;
@@ -87,11 +116,12 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
     if (!session) return;
     const updated = update(session);
     if (updated === session) return;
-    setState({ sessions: state.sessions.map((candidate) => (candidate === session ? updated : candidate)) });
+    setState({ ...state, sessions: state.sessions.map((candidate) => (candidate === session ? updated : candidate)) });
   }
 
   function updatePane(paneId: PaneId, update: (pane: Pane) => Pane) {
     setState({
+      ...state,
       sessions: state.sessions.map((session) => ({
         ...session,
         tabs: session.tabs.map((tab) => ({
@@ -190,7 +220,99 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
       const position = focusedTabPosition(session);
       return { ...session, tabs, focusedTabId: tabs[Math.min(position, tabs.length - 1)].id };
     });
-    if (tabs.length === 0) emit({ type: "closeWindow", sessionId: session.id });
+    if (tabs.length > 0) return;
+    emit({ type: "closeWindow", sessionId: session.id });
+    if (session.id === state.currentSessionId) replaceCurrentSession();
+  }
+
+  // After the Current Session closes, the most recently used Open Session takes its place; with none left, the app
+  // hides.
+  function replaceCurrentSession() {
+    const open = state.sessions.filter((session) => session.status === "open");
+    const next = open.toSorted((a, b) => b.lastUsedAt - a.lastUsedAt)[0];
+    if (next) return makeCurrent(next.id);
+    setState({ ...state, currentSessionId: undefined });
+    if (!appShown) return;
+    appShown = false;
+    emit({ type: "hideApp" });
+  }
+
+  // The smallest label number no Unnamed Session holds, starting at 1.
+  function freeLabelNumber() {
+    const taken = new Set(state.sessions.map((session) => session.labelNumber));
+    let number = 1;
+    while (taken.has(number)) number += 1;
+    return number;
+  }
+
+  function openSession(): Session {
+    const now = clock.now();
+    const tab = openTab(homeDirectory);
+    return {
+      id: nextId("session"),
+      labelNumber: freeLabelNumber(),
+      status: "open",
+      createdAt: now,
+      lastUsedAt: now,
+      tabs: [tab],
+      focusedTabId: tab.id,
+    };
+  }
+
+  // Named Sessions before Unnamed Sessions, each group in the cycle order setting's order. Alphabetically, Unnamed
+  // Sessions go by label number.
+  function compareInCycleOrder(a: Session, b: Session) {
+    if ((a.name === undefined) !== (b.name === undefined)) return a.name === undefined ? 1 : -1;
+    if (settings.cycleOrder === "recent") return b.lastUsedAt - a.lastUsedAt;
+    if (settings.cycleOrder === "created") return a.createdAt - b.createdAt;
+    if (a.name !== undefined) return a.name.localeCompare(b.name!, undefined, { numeric: true });
+    return a.labelNumber! - b.labelNumber!;
+  }
+
+  function sessionsInCycleOrder() {
+    return state.sessions.toSorted(compareInCycleOrder);
+  }
+
+  // Wraps a command so that it ends any run of cycle presses.
+  function command<Args extends unknown[]>(run: (...args: Args) => void) {
+    return (...args: Args) => {
+      cycleStreak = undefined;
+      run(...args);
+    };
+  }
+
+  // Makes the Session the Current Session, marking it as the most recently used, and swaps it in while the app is shown.
+  function makeCurrent(sessionId: SessionId) {
+    const now = clock.now();
+    setState({
+      ...state,
+      currentSessionId: sessionId,
+      sessions: state.sessions.map((session) => (session.id === sessionId ? { ...session, lastUsedAt: now } : session)),
+    });
+    if (appShown) emit({ type: "showSession", sessionId });
+  }
+
+  // Consecutive presses keep the order from the first one, so that marking each Session as used on the way doesn't
+  // re-sort the `recent` order under them.
+  function focusSessionBy(offset: number) {
+    const order = cycleStreak ?? sessionsInCycleOrder().map((session) => session.id);
+    const open = order.filter((sessionId) => findSession(sessionId)?.status === "open");
+    if (open.length < 2) return;
+    const position = open.indexOf(state.currentSessionId!);
+    makeCurrent(open[(position + offset + open.length) % open.length]);
+    cycleStreak = order;
+  }
+
+  // Opens a new Session as the Current Session.
+  function addSession() {
+    const session = openSession();
+    setState({ sessions: [...state.sessions, session], currentSessionId: session.id });
+  }
+
+  // The directory with the home directory shown as `~`.
+  function displayDirectory(directory: string) {
+    if (directory === homeDirectory) return "~";
+    return directory.startsWith(`${homeDirectory}/`) ? `~${directory.slice(homeDirectory.length)}` : directory;
   }
 
   shellHost.subscribe((event) => {
@@ -204,40 +326,42 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
   });
 
   return {
-    start() {
-      const now = clock.now();
-      const tab = openTab(homeDirectory);
-      setState({
-        sessions: [
-          {
-            id: nextId("session"),
-            status: "open",
-            createdAt: now,
-            lastUsedAt: now,
-            tabs: [tab],
-            focusedTabId: tab.id,
-          },
-        ],
-      });
-    },
+    start: command(() => {
+      const session = openSession();
+      setState({ sessions: [session], currentSessionId: session.id });
+    }),
     state: () => state,
-    hotkeyPressed() {
+    hotkeyPressed: command(() => {
       appShown = !appShown;
-      emit({ type: appShown ? "showApp" : "hideApp" });
-    },
-    focusLost() {
+      if (!appShown) return emit({ type: "hideApp" });
+      if (state.currentSessionId === undefined) addSession();
+      emit({ type: "showApp", sessionId: state.currentSessionId! });
+    }),
+    focusLost: command(() => {
       if (!appShown) return;
       appShown = false;
       emit({ type: "hideApp" });
-    },
-    newTab(sessionId) {
+    }),
+    settingsChanged: command((next) => {
+      settings = next;
+    }),
+    newSession: command(() => {
+      addSession();
+      emit({ type: "showSession", sessionId: state.currentSessionId! });
+    }),
+    renameSession: command((sessionId, name) => {
+      updateSession(sessionId, ({ labelNumber: _freed, ...session }) => ({ ...session, name }));
+    }),
+    focusPreviousSession: () => focusSessionBy(-1),
+    focusNextSession: () => focusSessionBy(1),
+    newTab: command((sessionId) => {
       const session = findSession(sessionId);
       const current = session && focusedTab(session);
       if (!current) return;
       const tab = openTab(focusedPane(current).workingDirectory);
       updateSession(sessionId, (session) => ({ ...session, tabs: [...session.tabs, tab], focusedTabId: tab.id }));
-    },
-    splitPane(sessionId, direction) {
+    }),
+    splitPane: command((sessionId, direction) => {
       updateFocusedTab(sessionId, (tab) => {
         const current = focusedPane(tab);
         const pane = openPane(current.workingDirectory);
@@ -253,44 +377,53 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
           focusedPaneId: pane.id,
         };
       });
-    },
-    closePane(sessionId) {
+    }),
+    closePane: command((sessionId) => {
       const session = findSession(sessionId);
       const tab = session && focusedTab(session);
       if (!tab) return;
       removePaneFromSession(tab.focusedPaneId);
       shellHost.stop(tab.focusedPaneId);
-    },
-    focusPreviousPane: (sessionId) => focusPaneBy(sessionId, -1),
-    focusNextPane: (sessionId) => focusPaneBy(sessionId, 1),
-    focusPaneInDirection(sessionId, direction) {
+    }),
+    focusPreviousPane: command((sessionId) => focusPaneBy(sessionId, -1)),
+    focusNextPane: command((sessionId) => focusPaneBy(sessionId, 1)),
+    focusPaneInDirection: command((sessionId, direction) => {
       updateFocusedTab(sessionId, (tab) => {
         const neighbour = neighbourOf(tab.layout, tab.focusedPaneId, direction);
         return neighbour ? withFocusedPane(tab, neighbour) : tab;
       });
-    },
-    focusPane(paneId) {
+    }),
+    focusPane: command((paneId) => {
       const session = findSessionWithPane(paneId);
       if (!session) return;
       updateSession(session.id, (session) => ({
         ...session,
         tabs: session.tabs.map((tab) => (hasPane(tab, paneId) ? withFocusedPane(tab, paneId) : tab)),
       }));
-    },
-    focusTab(sessionId, position) {
+    }),
+    focusTab: command((sessionId, position) => {
       updateSession(sessionId, (session) => {
         const tab = session.tabs[position];
         return tab && tab.id !== session.focusedTabId ? { ...session, focusedTabId: tab.id } : session;
       });
-    },
-    focusPreviousTab: (sessionId) => focusTabBy(sessionId, -1),
-    focusNextTab: (sessionId) => focusTabBy(sessionId, 1),
+    }),
+    focusPreviousTab: command((sessionId) => focusTabBy(sessionId, -1)),
+    focusNextTab: command((sessionId) => focusTabBy(sessionId, 1)),
     tabTitle(tabId) {
       const tab = findTab(tabId);
       if (!tab) return undefined;
       const pane = focusedPane(tab);
       return pane.runningProgram ?? folderName(pane.workingDirectory);
     },
+    sessionLabel(sessionId) {
+      const session = findSession(sessionId);
+      if (!session) return undefined;
+      if (session.name !== undefined) return session.name;
+      const tab = focusedTab(session);
+      const directory = tab ? focusedPane(tab).workingDirectory : homeDirectory;
+      return `Session ${session.labelNumber} (${displayDirectory(directory)})`;
+    },
+    sessionsInCycleOrder,
     paneRects(tabId) {
       const tab = findTab(tabId);
       return tab ? paneRects(tab.layout) : [];

@@ -4,10 +4,16 @@ export type PaneId = string;
 
 export interface CoreState {
   sessions: Session[];
+  // Absent while there are no Open Sessions.
+  currentSessionId?: SessionId;
 }
 
 export interface Session {
   id: SessionId;
+  // Absent for an Unnamed Session.
+  name?: string;
+  // The N in an Unnamed Session's `Session N (<dir>)` label, kept until the Session is named.
+  labelNumber?: number;
   status: "open" | "closed";
   createdAt: number;
   lastUsedAt: number;
