@@ -4,7 +4,7 @@ import { app, BrowserWindow, globalShortcut, ipcMain, screen } from "electron";
 import { createCore } from "../core/core";
 import { createInMemoryStateStore } from "../core/in-memory-state-store";
 import type { PaneId, SessionId } from "../core/state";
-import { channels, type TerminalSize } from "../shared/ipc";
+import { channels, type SessionView, type TerminalSize } from "../shared/ipc";
 import { fadeWindow } from "./fade";
 import { createNodePtyShellHost } from "./node-pty-shell-host";
 
@@ -56,15 +56,35 @@ app.whenReady().then(() => {
   app.on("will-quit", () => globalShortcut.unregisterAll());
   app.on("did-resign-active", () => core.focusLost());
 
-  function sessionOf(window: BrowserWindow | null) {
-    for (const [sessionId, candidate] of windows) {
-      if (candidate === window) return core.state().sessions.find((session) => session.id === sessionId);
-    }
+  function sessionView(sessionId: SessionId): SessionView | undefined {
+    const session = core.state().sessions.find((candidate) => candidate.id === sessionId);
+    if (!session) return undefined;
+    return {
+      tabs: session.tabs.map((tab) => ({ id: tab.id, title: core.tabTitle(tab.id) ?? "", paneId: tab.panes[0].id })),
+      focusedTabId: session.focusedTabId,
+    };
   }
 
-  ipcMain.handle(channels.sessionPane, (event) => {
-    return sessionOf(BrowserWindow.fromWebContents(event.sender))?.tabs[0]?.panes[0]?.id;
-  });
+  function sendSessionView(sessionId: SessionId, window: BrowserWindow) {
+    const view = sessionView(sessionId);
+    if (view && !window.isDestroyed()) window.webContents.send(channels.sessionView, view);
+  }
+
+  core.onStateChange(() => windows.forEach((window, sessionId) => sendSessionView(sessionId, window)));
+
+  // The Tab shortcuts, taken before the Pane's terminal sees them. Brackets match by character or by key position,
+  // since Shift turns `[` into `{` on some layouts.
+  function handleTabShortcut(sessionId: SessionId, input: Electron.Input) {
+    if (input.type !== "keyDown" || !input.meta || input.control || input.alt) return false;
+    const key = input.key.toLowerCase();
+    if (!input.shift && key === "t") core.newTab(sessionId);
+    else if (!input.shift && /^[1-9]$/.test(key)) core.focusTab(sessionId, Number(key) - 1);
+    else if (input.shift && (key === "{" || key === "[" || input.code === "BracketLeft")) core.focusPreviousTab(sessionId);
+    else if (input.shift && (key === "}" || key === "]" || input.code === "BracketRight")) core.focusNextTab(sessionId);
+    else return false;
+    return true;
+  }
+
   ipcMain.handle(channels.attachPane, (event, paneId: PaneId, size: TerminalSize) => {
     shellHost.resize(paneId, size);
     shellHost.attach(paneId, (data) => {
@@ -100,6 +120,10 @@ app.whenReady().then(() => {
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
     windows.set(session.id, window);
     window.on("closed", () => windows.delete(session.id));
+    window.webContents.on("did-finish-load", () => sendSessionView(session.id, window));
+    window.webContents.on("before-input-event", (event, input) => {
+      if (handleTabShortcut(session.id, input)) event.preventDefault();
+    });
     // The app starts shown; showing now, not on ready-to-show, keeps the window in step with the core.
     showWindow(window);
     if (process.env.ELECTRON_RENDERER_URL) window.loadURL(process.env.ELECTRON_RENDERER_URL);

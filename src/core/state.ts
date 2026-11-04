@@ -12,6 +12,8 @@ export interface Session {
   createdAt: number;
   lastUsedAt: number;
   tabs: Tab[];
+  // Absent once the Session has no Tabs.
+  focusedTabId?: TabId;
 }
 
 export interface Tab {
@@ -22,4 +24,6 @@ export interface Tab {
 export interface Pane {
   id: PaneId;
   workingDirectory: string;
+  // Absent while the Shell is idle at a prompt.
+  runningProgram?: string;
 }

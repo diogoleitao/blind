@@ -16,13 +16,18 @@ export function createFakeShellHost() {
       listeners.push(listener);
     },
   };
+  const emit = (event: ShellEvent) => {
+    for (const listener of listeners) listener(event);
+  };
   return {
     ...host,
     started,
     stopped,
-    exit: (paneId: PaneId) => {
-      for (const listener of listeners) listener({ type: "shellExited", paneId });
-    },
+    exit: (paneId: PaneId) => emit({ type: "shellExited", paneId }),
+    changeWorkingDirectory: (paneId: PaneId, workingDirectory: string) =>
+      emit({ type: "workingDirectoryChanged", paneId, workingDirectory }),
+    changeRunningProgram: (paneId: PaneId, runningProgram: string | undefined) =>
+      emit({ type: "runningProgramChanged", paneId, runningProgram }),
   };
 }
 

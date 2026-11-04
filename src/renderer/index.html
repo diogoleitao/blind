@@ -6,23 +6,58 @@
     <title>Blind</title>
     <style>
       html,
-      body,
-      #pane {
+      body {
         margin: 0;
         height: 100%;
       }
       /* About 25% transparent, over the window's native blur. */
       body {
+        display: flex;
+        flex-direction: column;
         background: rgba(0, 0, 0, 0.75);
       }
+      #panes {
+        position: relative;
+        flex: 1;
+      }
+      .pane {
+        position: absolute;
+        inset: 0;
+      }
+      .pane.hidden {
+        visibility: hidden;
+      }
       /* xterm's stylesheet paints the viewport opaque black, which would cover the body's background. */
-      #pane .xterm .xterm-viewport {
+      .pane .xterm .xterm-viewport {
         background-color: transparent;
+      }
+      #tab-bar {
+        display: flex;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        font: 12px system-ui, sans-serif;
+        color: rgba(255, 255, 255, 0.55);
+      }
+      #tab-bar[hidden] {
+        display: none;
+      }
+      .tab {
+        flex: 1;
+        min-width: 0;
+        padding: 5px 8px;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tab.focused {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.08);
       }
     </style>
   </head>
   <body>
-    <div id="pane"></div>
+    <div id="panes"></div>
+    <div id="tab-bar" hidden></div>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>
