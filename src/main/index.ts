@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { app, BrowserWindow, globalShortcut, ipcMain, screen } from "electron";
 import { createCore } from "../core/core";
 import { createInMemoryStateStore } from "../core/in-memory-state-store";
+import type { FocusDirection } from "../core/layout";
 import type { PaneId, SessionId } from "../core/state";
 import { channels, type SessionView, type TerminalSize } from "../shared/ipc";
 import { fadeWindow } from "./fade";
@@ -60,7 +61,12 @@ app.whenReady().then(() => {
     const session = core.state().sessions.find((candidate) => candidate.id === sessionId);
     if (!session) return undefined;
     return {
-      tabs: session.tabs.map((tab) => ({ id: tab.id, title: core.tabTitle(tab.id) ?? "", paneId: tab.panes[0].id })),
+      tabs: session.tabs.map((tab) => ({
+        id: tab.id,
+        title: core.tabTitle(tab.id) ?? "",
+        panes: core.paneRects(tab.id),
+        focusedPaneId: tab.focusedPaneId,
+      })),
       focusedTabId: session.focusedTabId,
     };
   }
@@ -72,18 +78,37 @@ app.whenReady().then(() => {
 
   core.onStateChange(() => windows.forEach((window, sessionId) => sendSessionView(sessionId, window)));
 
-  // The Tab shortcuts, taken before the Pane's terminal sees them. Brackets match by character or by key position,
-  // since Shift turns `[` into `{` on some layouts.
-  function handleTabShortcut(sessionId: SessionId, input: Electron.Input) {
-    if (input.type !== "keyDown" || !input.meta || input.control || input.alt) return false;
+  const arrowDirections: Record<string, FocusDirection> = {
+    ArrowLeft: "left",
+    ArrowRight: "right",
+    ArrowUp: "up",
+    ArrowDown: "down",
+  };
+
+  // The Tab and Pane shortcuts, taken before the Pane's terminal sees them. Brackets match by character or by key
+  // position, since Shift turns `[` into `{` on some layouts.
+  function handleShortcut(sessionId: SessionId, input: Electron.Input) {
+    if (input.type !== "keyDown" || !input.meta || input.control) return false;
     const key = input.key.toLowerCase();
-    if (!input.shift && key === "t") core.newTab(sessionId);
+    const leftBracket = key === "{" || key === "[" || input.code === "BracketLeft";
+    const rightBracket = key === "}" || key === "]" || input.code === "BracketRight";
+    if (input.alt) {
+      const direction = arrowDirections[input.key];
+      if (input.shift || !direction) return false;
+      core.focusPaneInDirection(sessionId, direction);
+    } else if (!input.shift && key === "t") core.newTab(sessionId);
+    else if (key === "d") core.splitPane(sessionId, input.shift ? "horizontal" : "vertical");
+    else if (!input.shift && key === "w") core.closePane(sessionId);
     else if (!input.shift && /^[1-9]$/.test(key)) core.focusTab(sessionId, Number(key) - 1);
-    else if (input.shift && (key === "{" || key === "[" || input.code === "BracketLeft")) core.focusPreviousTab(sessionId);
-    else if (input.shift && (key === "}" || key === "]" || input.code === "BracketRight")) core.focusNextTab(sessionId);
+    else if (input.shift && leftBracket) core.focusPreviousTab(sessionId);
+    else if (input.shift && rightBracket) core.focusNextTab(sessionId);
+    else if (leftBracket) core.focusPreviousPane(sessionId);
+    else if (rightBracket) core.focusNextPane(sessionId);
     else return false;
     return true;
   }
+
+  ipcMain.on(channels.focusPane, (_event, paneId: PaneId) => core.focusPane(paneId));
 
   ipcMain.handle(channels.attachPane, (event, paneId: PaneId, size: TerminalSize) => {
     shellHost.resize(paneId, size);
@@ -122,7 +147,7 @@ app.whenReady().then(() => {
     window.on("closed", () => windows.delete(session.id));
     window.webContents.on("did-finish-load", () => sendSessionView(session.id, window));
     window.webContents.on("before-input-event", (event, input) => {
-      if (handleTabShortcut(session.id, input)) event.preventDefault();
+      if (handleShortcut(session.id, input)) event.preventDefault();
     });
     // The app starts shown; showing now, not on ready-to-show, keeps the window in step with the core.
     showWindow(window);

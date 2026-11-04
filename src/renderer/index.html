@@ -22,10 +22,19 @@
       }
       .pane {
         position: absolute;
-        inset: 0;
+        box-sizing: border-box;
+      }
+      .pane.divided-left {
+        border-left: 1px solid rgba(255, 255, 255, 0.2);
+      }
+      .pane.divided-top {
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
       }
       .pane.hidden {
         visibility: hidden;
+      }
+      .pane .terminal {
+        height: 100%;
       }
       /* xterm's stylesheet paints the viewport opaque black, which would cover the body's background. */
       .pane .xterm .xterm-viewport {

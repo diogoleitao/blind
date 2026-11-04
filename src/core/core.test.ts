@@ -18,6 +18,17 @@ function startCore() {
   return { core, shellHost, clock, effects };
 }
 
+// A Pane on the left, and on the right one on top of another, which is focused.
+function startWithThreePanes() {
+  const started = startCore();
+  const sessionId = started.core.state().sessions[0].id;
+  started.core.splitPane(sessionId, "vertical");
+  started.core.splitPane(sessionId, "horizontal");
+  const tab = started.core.state().sessions[0].tabs[0];
+  const [left, topRight, bottomRight] = tab.panes.map((pane) => pane.id);
+  return { ...started, sessionId, tabId: tab.id, left, topRight, bottomRight };
+}
+
 describe("starting", () => {
   it("opens one Session with one Tab holding one Pane in the home directory", () => {
     const { core } = startCore();
@@ -108,6 +119,172 @@ describe("a new Tab", () => {
     expect(focusedTabId).toBe(tabs[1].id);
     expect(tabs[1].panes[0].workingDirectory).toBe("/Users/me/code/api");
     expect(shellHost.started.at(-1)).toEqual({ paneId: tabs[1].panes[0].id, workingDirectory: "/Users/me/code/api" });
+  });
+});
+
+describe("splitting a Pane", () => {
+  it("starts a new Pane's Shell in the current Pane's working directory and focuses the new Pane", () => {
+    const { core, shellHost } = startCore();
+    const session = core.state().sessions[0];
+    const firstPaneId = session.tabs[0].panes[0].id;
+    shellHost.changeWorkingDirectory(firstPaneId, "/Users/me/code/api");
+
+    core.splitPane(session.id, "vertical");
+
+    const tab = core.state().sessions[0].tabs[0];
+    expect(tab.panes.map((pane) => pane.workingDirectory)).toEqual(["/Users/me/code/api", "/Users/me/code/api"]);
+    expect(tab.focusedPaneId).toBe(tab.panes[1].id);
+    expect(shellHost.started.at(-1)).toEqual({ paneId: tab.panes[1].id, workingDirectory: "/Users/me/code/api" });
+  });
+
+  it("halves the Pane side by side when vertical and stacked when horizontal, nesting without limit", () => {
+    const { core } = startCore();
+    const sessionId = core.state().sessions[0].id;
+
+    core.splitPane(sessionId, "vertical");
+    core.splitPane(sessionId, "horizontal");
+    core.splitPane(sessionId, "vertical");
+
+    const tab = core.state().sessions[0].tabs[0];
+    const [left, topRight, bottomRightLeft, bottomRightRight] = tab.panes.map((pane) => pane.id);
+    expect(core.paneRects(tab.id)).toEqual([
+      { paneId: left, x: 0, y: 0, width: 0.5, height: 1 },
+      { paneId: topRight, x: 0.5, y: 0, width: 0.5, height: 0.5 },
+      { paneId: bottomRightLeft, x: 0.5, y: 0.5, width: 0.25, height: 0.5 },
+      { paneId: bottomRightRight, x: 0.75, y: 0.5, width: 0.25, height: 0.5 },
+    ]);
+  });
+});
+
+describe("moving focus between Panes", () => {
+  function focusedPaneId(core: ReturnType<typeof startCore>["core"]) {
+    return core.state().sessions[0].tabs[0].focusedPaneId;
+  }
+
+  it("goes to the previous and next Pane in layout order, wrapping around", () => {
+    const { core, sessionId, left, topRight, bottomRight } = startWithThreePanes();
+
+    core.focusPreviousPane(sessionId);
+    expect(focusedPaneId(core)).toBe(topRight);
+
+    core.focusPreviousPane(sessionId);
+    core.focusPreviousPane(sessionId);
+    expect(focusedPaneId(core)).toBe(bottomRight);
+
+    core.focusNextPane(sessionId);
+    expect(focusedPaneId(core)).toBe(left);
+  });
+
+  it("goes to the neighbouring Pane in a direction", () => {
+    const { core, sessionId, left, topRight, bottomRight } = startWithThreePanes();
+
+    core.focusPaneInDirection(sessionId, "up");
+    expect(focusedPaneId(core)).toBe(topRight);
+
+    core.focusPaneInDirection(sessionId, "down");
+    expect(focusedPaneId(core)).toBe(bottomRight);
+
+    core.focusPaneInDirection(sessionId, "left");
+    expect(focusedPaneId(core)).toBe(left);
+  });
+
+  it("goes to the earliest Pane in layout order when several touch the same length of edge", () => {
+    const { core, sessionId, left, topRight } = startWithThreePanes();
+    core.focusPane(left);
+
+    core.focusPaneInDirection(sessionId, "right");
+
+    expect(focusedPaneId(core)).toBe(topRight);
+  });
+
+  it("stays put when there's no Pane in that direction", () => {
+    const { core, sessionId, topRight } = startWithThreePanes();
+    core.focusPane(topRight);
+
+    core.focusPaneInDirection(sessionId, "up");
+    core.focusPaneInDirection(sessionId, "right");
+
+    expect(focusedPaneId(core)).toBe(topRight);
+  });
+
+  it("focuses a Pane by its id, as a click on it does", () => {
+    const { core, left } = startWithThreePanes();
+
+    core.focusPane(left);
+
+    expect(focusedPaneId(core)).toBe(left);
+  });
+});
+
+describe("closing a Pane", () => {
+  it("stops its Shell and lets its sibling fill the space, focusing the sibling", () => {
+    const { core, shellHost, sessionId, tabId, left, topRight, bottomRight } = startWithThreePanes();
+
+    core.closePane(sessionId);
+
+    expect(shellHost.stopped).toEqual([bottomRight]);
+    expect(core.paneRects(tabId)).toEqual([
+      { paneId: left, x: 0, y: 0, width: 0.5, height: 1 },
+      { paneId: topRight, x: 0.5, y: 0, width: 0.5, height: 1 },
+    ]);
+    expect(core.state().sessions[0].tabs[0].focusedPaneId).toBe(topRight);
+  });
+
+  it("happens when its Shell exits, keeping the focus where it was", () => {
+    const { core, shellHost, tabId, left, topRight, bottomRight } = startWithThreePanes();
+
+    shellHost.exit(left);
+
+    expect(core.paneRects(tabId)).toEqual([
+      { paneId: topRight, x: 0, y: 0, width: 1, height: 0.5 },
+      { paneId: bottomRight, x: 0, y: 0.5, width: 1, height: 0.5 },
+    ]);
+    expect(core.state().sessions[0].tabs[0].focusedPaneId).toBe(bottomRight);
+  });
+
+  it("focuses the Pane nearest to it in the split that fills its space", () => {
+    const { core, sessionId, left, topRight } = startWithThreePanes();
+    core.focusPane(left);
+
+    core.closePane(sessionId);
+
+    expect(core.state().sessions[0].tabs[0].focusedPaneId).toBe(topRight);
+  });
+
+  it("as the last Pane of a Tab, closes the Tab and leaves the Session open", () => {
+    const { core, effects } = startCore();
+    const sessionId = core.state().sessions[0].id;
+    core.newTab(sessionId);
+    const [first] = core.state().sessions[0].tabs;
+
+    core.closePane(sessionId);
+
+    const session = core.state().sessions[0];
+    expect(session.status).toBe("open");
+    expect(session.tabs.map((tab) => tab.id)).toEqual([first.id]);
+    expect(session.focusedTabId).toBe(first.id);
+    expect(effects).toEqual([]);
+  });
+
+  it("as the last Pane of the last Tab, closes the Session and requests its window to close", () => {
+    const { core, effects } = startCore();
+    const sessionId = core.state().sessions[0].id;
+
+    core.closePane(sessionId);
+
+    expect(core.state().sessions[0].status).toBe("closed");
+    expect(effects).toEqual([{ type: "closeWindow", sessionId }]);
+  });
+
+  it("ignores the stopped Shell's exit that follows", () => {
+    const { core, shellHost, sessionId, bottomRight } = startWithThreePanes();
+    core.closePane(sessionId);
+    const announced: unknown[] = [];
+    core.onStateChange((state) => announced.push(state));
+
+    shellHost.exit(bottomRight);
+
+    expect(announced).toEqual([]);
   });
 });
 

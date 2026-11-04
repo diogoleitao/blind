@@ -1,5 +1,14 @@
+import {
+  type FocusDirection,
+  neighbourOf,
+  type PaneRect,
+  paneRects,
+  removePane,
+  replacePane,
+  successorOf,
+} from "./layout";
 import type { Clock, ShellHost, StateStore } from "./ports";
-import type { CoreState, Pane, PaneId, Session, SessionId, Tab, TabId } from "./state";
+import type { CoreState, Pane, PaneId, Session, SessionId, SplitDirection, Tab, TabId } from "./state";
 
 export type Effect = { type: "closeWindow"; sessionId: SessionId } | { type: "showApp" } | { type: "hideApp" };
 
@@ -23,8 +32,21 @@ export interface Core {
   // Both wrap around between the first and last Tab.
   focusPreviousTab(sessionId: SessionId): void;
   focusNextTab(sessionId: SessionId): void;
+  // Splits the focused Pane in two, starting the new half's Shell in the same working directory, and focuses it.
+  splitPane(sessionId: SessionId, direction: SplitDirection): void;
+  // Closes the focused Pane and stops its Shell, following the same chain as the Shell exiting.
+  closePane(sessionId: SessionId): void;
+  // Both move through the focused Tab's Panes in layout order, wrapping around between the first and last.
+  focusPreviousPane(sessionId: SessionId): void;
+  focusNextPane(sessionId: SessionId): void;
+  // Moves to the Pane across the focused Pane's edge, if there is one.
+  focusPaneInDirection(sessionId: SessionId, direction: FocusDirection): void;
+  // Focuses a Pane within its Tab, e.g. because it was clicked.
+  focusPane(paneId: PaneId): void;
   // The focused Pane's running program, or its working directory's folder name while the Shell is idle.
   tabTitle(tabId: TabId): string | undefined;
+  // Where each of the Tab's Panes sits, in layout order.
+  paneRects(tabId: TabId): PaneRect[];
   onEffect(listener: (effect: Effect) => void): void;
   onStateChange(listener: (state: CoreState) => void): void;
 }
@@ -55,6 +77,10 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
     return state.sessions.find((session) => session.id === sessionId);
   }
 
+  function findTab(tabId: TabId) {
+    return state.sessions.flatMap((session) => session.tabs).find((tab) => tab.id === tabId);
+  }
+
   // Leaves the state, and its listeners, alone when `update` returns the Session unchanged.
   function updateSession(sessionId: SessionId, update: (session: Session) => Session) {
     const session = findSession(sessionId);
@@ -76,9 +102,43 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
     });
   }
 
-  // Each Tab holds a single Pane until Panes can be split, so it is always the focused one.
+  function focusedTab(session: Session) {
+    return session.tabs.find((tab) => tab.id === session.focusedTabId);
+  }
+
   function focusedPane(tab: Tab) {
-    return tab.panes[0];
+    return tab.panes.find((pane) => pane.id === tab.focusedPaneId)!;
+  }
+
+  // Like `updateSession`, leaves the state alone when `update` returns the Tab unchanged.
+  function updateFocusedTab(sessionId: SessionId, update: (tab: Tab) => Tab) {
+    updateSession(sessionId, (session) => {
+      const tab = focusedTab(session);
+      if (!tab) return session;
+      const updated = update(tab);
+      if (updated === tab) return session;
+      return { ...session, tabs: session.tabs.map((candidate) => (candidate === tab ? updated : candidate)) };
+    });
+  }
+
+  function withFocusedPane(tab: Tab, paneId: PaneId): Tab {
+    return paneId === tab.focusedPaneId ? tab : { ...tab, focusedPaneId: paneId };
+  }
+
+  function hasPane(tab: Tab, paneId: PaneId) {
+    return tab.panes.some((pane) => pane.id === paneId);
+  }
+
+  function findSessionWithPane(paneId: PaneId) {
+    return state.sessions.find((session) => session.tabs.some((tab) => hasPane(tab, paneId)));
+  }
+
+  function focusPaneBy(sessionId: SessionId, offset: number) {
+    updateFocusedTab(sessionId, (tab) => {
+      const count = tab.panes.length;
+      const position = tab.panes.findIndex((pane) => pane.id === tab.focusedPaneId);
+      return withFocusedPane(tab, tab.panes[(position + offset + count) % count].id);
+    });
   }
 
   function focusedTabPosition(session: Session) {
@@ -90,11 +150,16 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
     return directory.split("/").filter(Boolean).at(-1) ?? "/";
   }
 
-  // A new Tab with one Pane, whose Shell starts in `workingDirectory`.
-  function openTab(workingDirectory: string): Tab {
+  // A new Pane whose Shell starts in `workingDirectory`.
+  function openPane(workingDirectory: string): Pane {
     const pane = { id: nextId("pane"), workingDirectory };
     shellHost.start(pane.id, { workingDirectory });
-    return { id: nextId("tab"), panes: [pane] };
+    return pane;
+  }
+
+  function openTab(workingDirectory: string): Tab {
+    const pane = openPane(workingDirectory);
+    return { id: nextId("tab"), panes: [pane], layout: { type: "pane", paneId: pane.id }, focusedPaneId: pane.id };
   }
 
   function focusTabBy(sessionId: SessionId, offset: number) {
@@ -106,30 +171,30 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
     });
   }
 
-  // Closing the last Pane closes its Tab; closing the last Tab closes the Session.
-  // When the focused Tab closes, the Tab that takes its place is focused, or the new last Tab.
-  function closePane(paneId: PaneId) {
-    const closedSessions: SessionId[] = [];
-    setState({
-      sessions: state.sessions.map((session) => {
-        if (!session.tabs.some((tab) => tab.panes.some((pane) => pane.id === paneId))) return session;
-        const tabs = session.tabs
-          .map((tab) => ({ ...tab, panes: tab.panes.filter((pane) => pane.id !== paneId) }))
-          .filter((tab) => tab.panes.length > 0);
-        if (tabs.length > 0) {
-          if (tabs.some((tab) => tab.id === session.focusedTabId)) return { ...session, tabs };
-          const position = focusedTabPosition(session);
-          return { ...session, tabs, focusedTabId: tabs[Math.min(position, tabs.length - 1)].id };
-        }
-        closedSessions.push(session.id);
-        return { ...session, status: "closed", tabs, focusedTabId: undefined } satisfies Session;
-      }),
+  // The Pane's sibling fills its space; closing the last Pane closes its Tab, and closing the last Tab closes the Session.
+  // When the focused Pane closes, the Pane nearest to it in that sibling is focused. When the focused Tab closes, the
+  // Tab that takes its place is focused, or the new last Tab.
+  function removePaneFromSession(paneId: PaneId) {
+    const session = findSessionWithPane(paneId);
+    if (!session) return;
+    const tabs = session.tabs.flatMap((tab): Tab[] => {
+      if (!hasPane(tab, paneId)) return [tab];
+      const layout = removePane(tab.layout, paneId);
+      if (!layout) return [];
+      const focusedPaneId = tab.focusedPaneId === paneId ? successorOf(tab.layout, paneId)! : tab.focusedPaneId;
+      return [{ ...tab, panes: tab.panes.filter((pane) => pane.id !== paneId), layout, focusedPaneId }];
     });
-    for (const sessionId of closedSessions) emit({ type: "closeWindow", sessionId });
+    updateSession(session.id, (session) => {
+      if (tabs.length === 0) return { ...session, status: "closed", tabs, focusedTabId: undefined };
+      if (tabs.some((tab) => tab.id === session.focusedTabId)) return { ...session, tabs };
+      const position = focusedTabPosition(session);
+      return { ...session, tabs, focusedTabId: tabs[Math.min(position, tabs.length - 1)].id };
+    });
+    if (tabs.length === 0) emit({ type: "closeWindow", sessionId: session.id });
   }
 
   shellHost.subscribe((event) => {
-    if (event.type === "shellExited") closePane(event.paneId);
+    if (event.type === "shellExited") removePaneFromSession(event.paneId);
     if (event.type === "workingDirectoryChanged") {
       updatePane(event.paneId, (pane) => ({ ...pane, workingDirectory: event.workingDirectory }));
     }
@@ -167,10 +232,50 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
     },
     newTab(sessionId) {
       const session = findSession(sessionId);
-      const focusedTab = session?.tabs.find((tab) => tab.id === session.focusedTabId);
-      if (!focusedTab) return;
-      const tab = openTab(focusedPane(focusedTab).workingDirectory);
+      const current = session && focusedTab(session);
+      if (!current) return;
+      const tab = openTab(focusedPane(current).workingDirectory);
       updateSession(sessionId, (session) => ({ ...session, tabs: [...session.tabs, tab], focusedTabId: tab.id }));
+    },
+    splitPane(sessionId, direction) {
+      updateFocusedTab(sessionId, (tab) => {
+        const current = focusedPane(tab);
+        const pane = openPane(current.workingDirectory);
+        return {
+          ...tab,
+          panes: tab.panes.flatMap((candidate) => (candidate === current ? [current, pane] : [candidate])),
+          layout: replacePane(tab.layout, current.id, {
+            type: "split",
+            direction,
+            first: { type: "pane", paneId: current.id },
+            second: { type: "pane", paneId: pane.id },
+          }),
+          focusedPaneId: pane.id,
+        };
+      });
+    },
+    closePane(sessionId) {
+      const session = findSession(sessionId);
+      const tab = session && focusedTab(session);
+      if (!tab) return;
+      removePaneFromSession(tab.focusedPaneId);
+      shellHost.stop(tab.focusedPaneId);
+    },
+    focusPreviousPane: (sessionId) => focusPaneBy(sessionId, -1),
+    focusNextPane: (sessionId) => focusPaneBy(sessionId, 1),
+    focusPaneInDirection(sessionId, direction) {
+      updateFocusedTab(sessionId, (tab) => {
+        const neighbour = neighbourOf(tab.layout, tab.focusedPaneId, direction);
+        return neighbour ? withFocusedPane(tab, neighbour) : tab;
+      });
+    },
+    focusPane(paneId) {
+      const session = findSessionWithPane(paneId);
+      if (!session) return;
+      updateSession(session.id, (session) => ({
+        ...session,
+        tabs: session.tabs.map((tab) => (hasPane(tab, paneId) ? withFocusedPane(tab, paneId) : tab)),
+      }));
     },
     focusTab(sessionId, position) {
       updateSession(sessionId, (session) => {
@@ -181,10 +286,14 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
     focusPreviousTab: (sessionId) => focusTabBy(sessionId, -1),
     focusNextTab: (sessionId) => focusTabBy(sessionId, 1),
     tabTitle(tabId) {
-      const tab = state.sessions.flatMap((session) => session.tabs).find((candidate) => candidate.id === tabId);
+      const tab = findTab(tabId);
       if (!tab) return undefined;
       const pane = focusedPane(tab);
       return pane.runningProgram ?? folderName(pane.workingDirectory);
+    },
+    paneRects(tabId) {
+      const tab = findTab(tabId);
+      return tab ? paneRects(tab.layout) : [];
     },
     onEffect(listener) {
       effectListeners.push(listener);

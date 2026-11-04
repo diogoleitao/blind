@@ -18,8 +18,19 @@ export interface Session {
 
 export interface Tab {
   id: TabId;
+  // In layout order: left to right and top to bottom through the splits.
   panes: Pane[];
+  layout: Layout;
+  focusedPaneId: PaneId;
 }
+
+// A vertical split puts its halves side by side with a vertical divider; a horizontal one stacks them.
+export type SplitDirection = "vertical" | "horizontal";
+
+// A Tab's Panes as a tree of splits, each dividing its space in half.
+export type Layout =
+  | { type: "pane"; paneId: PaneId }
+  | { type: "split"; direction: SplitDirection; first: Layout; second: Layout };
 
 export interface Pane {
   id: PaneId;

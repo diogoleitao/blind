@@ -1,3 +1,4 @@
+import type { PaneRect } from "../core/layout";
 import type { PaneId, TabId } from "../core/state";
 
 export interface TerminalSize {
@@ -5,14 +6,15 @@ export interface TerminalSize {
   rows: number;
 }
 
-// What a Session's window draws: its Tabs, in order, each showing its one Pane.
+// What a Session's window draws: its Tabs, in order, each with where its Panes sit.
 export interface SessionView {
-  tabs: { id: TabId; title: string; paneId: PaneId }[];
+  tabs: { id: TabId; title: string; panes: PaneRect[]; focusedPaneId: PaneId }[];
   focusedTabId?: TabId;
 }
 
 export const channels = {
   sessionView: "session:view",
+  focusPane: "pane:focus",
   attachPane: "pane:attach",
   writeToPane: "pane:write",
   resizePane: "pane:resize",
@@ -23,6 +25,7 @@ export const channels = {
 export interface BlindApi {
   // Called once the page has loaded, and again whenever the Session changes.
   onSessionView(listener: (view: SessionView) => void): void;
+  focusPane(paneId: PaneId): void;
   attachPane(paneId: PaneId, size: TerminalSize): Promise<void>;
   writeToPane(paneId: PaneId, data: string): void;
   resizePane(paneId: PaneId, size: TerminalSize): void;
