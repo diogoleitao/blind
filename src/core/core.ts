@@ -1,7 +1,7 @@
 import type { Clock, ShellHost, StateStore } from "./ports";
 import type { CoreState, PaneId, Session, SessionId } from "./state";
 
-export type Effect = { type: "closeWindow"; sessionId: SessionId };
+export type Effect = { type: "closeWindow"; sessionId: SessionId } | { type: "showApp" } | { type: "hideApp" };
 
 export interface CoreDependencies {
   shellHost: ShellHost;
@@ -13,11 +13,16 @@ export interface CoreDependencies {
 export interface Core {
   start(): void;
   state(): CoreState;
+  hotkeyPressed(): void;
+  // Blind stopped being the active app, e.g. because another app was clicked.
+  focusLost(): void;
   onEffect(listener: (effect: Effect) => void): void;
 }
 
 export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies): Core {
   let state: CoreState = { sessions: [] };
+  // Whether the app is on screen. Not part of the snapshot: it says nothing about Sessions.
+  let appShown = true;
   const effectListeners: ((effect: Effect) => void)[] = [];
 
   function emit(effect: Effect) {
@@ -63,6 +68,15 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
       shellHost.start(pane.id, { workingDirectory: pane.workingDirectory });
     },
     state: () => state,
+    hotkeyPressed() {
+      appShown = !appShown;
+      emit({ type: appShown ? "showApp" : "hideApp" });
+    },
+    focusLost() {
+      if (!appShown) return;
+      appShown = false;
+      emit({ type: "hideApp" });
+    },
     onEffect(listener) {
       effectListeners.push(listener);
     },

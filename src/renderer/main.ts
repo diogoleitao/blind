@@ -13,7 +13,8 @@ const { blind } = window;
 const paneId = await blind.sessionPane();
 
 if (paneId) {
-  const terminal = new Terminal();
+  // The page's background shows through, keeping the window's transparency and blur.
+  const terminal = new Terminal({ allowTransparency: true, theme: { background: "#00000000" } });
   const fit = new FitAddon();
   terminal.loadAddon(fit);
   terminal.open(document.getElementById("pane")!);

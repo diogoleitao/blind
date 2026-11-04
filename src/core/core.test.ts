@@ -46,6 +46,55 @@ describe("starting", () => {
   });
 });
 
+describe("the Hotkey", () => {
+  it("hides the app when pressed after starting, since the app starts shown", () => {
+    const { core, effects } = startCore();
+
+    core.hotkeyPressed();
+
+    expect(effects).toEqual([{ type: "hideApp" }]);
+  });
+
+  it("toggles between hiding and showing the app on each press", () => {
+    const { core, effects } = startCore();
+
+    core.hotkeyPressed();
+    core.hotkeyPressed();
+    core.hotkeyPressed();
+
+    expect(effects).toEqual([{ type: "hideApp" }, { type: "showApp" }, { type: "hideApp" }]);
+  });
+});
+
+describe("focus loss", () => {
+  it("hides the app while it's shown", () => {
+    const { core, effects } = startCore();
+
+    core.focusLost();
+
+    expect(effects).toEqual([{ type: "hideApp" }]);
+  });
+
+  it("requests nothing while the app is hidden", () => {
+    const { core, effects } = startCore();
+    core.hotkeyPressed();
+    effects.length = 0;
+
+    core.focusLost();
+
+    expect(effects).toEqual([]);
+  });
+
+  it("leaves the app hidden, so the next Hotkey press shows it", () => {
+    const { core, effects } = startCore();
+    core.focusLost();
+
+    core.hotkeyPressed();
+
+    expect(effects).toEqual([{ type: "hideApp" }, { type: "showApp" }]);
+  });
+});
+
 describe("a Shell exiting", () => {
   it("closes its Pane, and as the last Pane, closes the Session and requests its window to close", () => {
     const { core, shellHost, effects } = startCore();

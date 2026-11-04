@@ -10,7 +10,14 @@
       #pane {
         margin: 0;
         height: 100%;
-        background: #000;
+      }
+      /* About 25% transparent, over the window's native blur. */
+      body {
+        background: rgba(0, 0, 0, 0.75);
+      }
+      /* xterm's stylesheet paints the viewport opaque black, which would cover the body's background. */
+      #pane .xterm .xterm-viewport {
+        background-color: transparent;
       }
     </style>
   </head>
