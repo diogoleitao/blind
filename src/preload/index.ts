@@ -12,6 +12,14 @@ const api: BlindApi = {
   onPaneData: (listener) => {
     ipcRenderer.on(channels.paneData, (_event, paneId, data) => listener(paneId, data));
   },
+  reportScrollback: (paneId, scrollback) => ipcRenderer.send(channels.reportScrollback, paneId, scrollback),
+  // Messages from one page arrive in order, so the main process has every report once it hears back.
+  onFlushScrollback: (listener) => {
+    ipcRenderer.on(channels.flushScrollback, () => {
+      listener();
+      ipcRenderer.send(channels.scrollbackFlushed);
+    });
+  },
 };
 
 contextBridge.exposeInMainWorld("blind", api);

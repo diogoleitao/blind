@@ -7,8 +7,19 @@ import {
   replacePane,
   successorOf,
 } from "./layout";
-import type { Clock, ShellHost, StateStore } from "./ports";
-import type { CoreState, Pane, PaneId, Session, SessionId, SplitDirection, Tab, TabId } from "./state";
+import type { Clock, SavedScrollback, ShellHost, Snapshot, StateStore } from "./ports";
+import { capScrollback } from "./scrollback";
+import {
+  type CoreState,
+  idsIn,
+  type Pane,
+  type PaneId,
+  type Session,
+  type SessionId,
+  type SplitDirection,
+  type Tab,
+  type TabId,
+} from "./state";
 
 export type Effect =
   | { type: "closeWindow"; sessionId: SessionId }
@@ -16,7 +27,11 @@ export type Effect =
   | { type: "showApp"; sessionId: SessionId }
   | { type: "hideApp" }
   // Makes the Session the visible one in place of the Session shown before, without a fade.
-  | { type: "showSession"; sessionId: SessionId };
+  | { type: "showSession"; sessionId: SessionId }
+  // Asks the user whether to quit, answered with `quitConfirmed`.
+  | { type: "confirmQuit" }
+  // Everything is saved; the app can exit.
+  | { type: "quit" };
 
 // The order Open Sessions are cycled through: by name, by most recent use, or by creation.
 export type CycleOrder = "alphabetical" | "recent" | "created";
@@ -38,10 +53,16 @@ export interface Core {
   hotkeyPressed(): void;
   // Blind stopped being the active app, e.g. because another app was clicked.
   focusLost(): void;
+  // Quitting always asks for confirmation first.
+  quitRequested(): void;
+  quitConfirmed(): void;
   // Settings start at their defaults: alphabetical cycle order.
   settingsChanged(settings: Settings): void;
   // Opens an Unnamed Session with one Tab at the home directory and makes it the Current Session.
   newSession(): void;
+  // Opens a Closed Session again as the Current Session, restoring it as Restore does. One closed through its last Tab
+  // gets a fresh Tab at its Root directory, or the home directory without one.
+  reopenSession(sessionId: SessionId): void;
   // Gives the Session a name, freeing its label number.
   renameSession(sessionId: SessionId, name: string): void;
   // Both move the Current Session through the Open Sessions in cycle order, wrapping around.
@@ -73,12 +94,19 @@ export interface Core {
   sessionsInCycleOrder(): Session[];
   // Where each of the Tab's Panes sits, in layout order.
   paneRects(tabId: TabId): PaneRect[];
+  // A Pane's terminal reported its serialized scrollback, which is kept up to its last `scrollbackLineLimit` lines and
+  // stamped with the clock's time.
+  scrollbackChanged(paneId: PaneId, scrollback: string): void;
+  // The Pane's saved scrollback, for its terminal to replay when it opens.
+  scrollback(paneId: PaneId): SavedScrollback | undefined;
   onEffect(listener: (effect: Effect) => void): void;
   onStateChange(listener: (state: CoreState) => void): void;
 }
 
-export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies): Core {
+export function createCore({ shellHost, stateStore, clock, homeDirectory }: CoreDependencies): Core {
   let state: CoreState = { sessions: [] };
+  // Kept out of the state: terminals report it far more often than anything else changes.
+  let scrollback: Record<PaneId, SavedScrollback> = {};
   // Whether the app is on screen. Not part of the snapshot: it says nothing about Sessions.
   let appShown = true;
   let settings: Settings = { cycleOrder: "alphabetical" };
@@ -97,8 +125,13 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
     for (const listener of effectListeners) listener(effect);
   }
 
+  function save() {
+    stateStore.save({ state, scrollback });
+  }
+
   function setState(next: CoreState) {
     state = next;
+    save();
     for (const listener of stateListeners) listener(state);
   }
 
@@ -187,6 +220,30 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
     return pane;
   }
 
+  // The Session's Panes with a fresh Shell each, in their working directories. Nothing that ran before runs again.
+  function restartShells(session: Session): Session {
+    return {
+      ...session,
+      tabs: session.tabs.map((tab) => ({
+        ...tab,
+        panes: tab.panes.map(({ runningProgram: _stopped, ...pane }) => {
+          shellHost.start(pane.id, { workingDirectory: pane.workingDirectory });
+          return pane;
+        }),
+      })),
+    };
+  }
+
+  // Brings back the saved Sessions, starting Shells for the Open ones. New ids continue after the saved ones.
+  function restore(saved: Snapshot) {
+    lastId = Math.max(lastId, ...idsIn(saved.state).map((id) => Number(id.split("-").at(-1))));
+    scrollback = saved.scrollback;
+    const sessions = saved.state.sessions.map((session) =>
+      session.status === "open" ? restartShells(session) : session,
+    );
+    setState({ ...saved.state, sessions });
+  }
+
   function openTab(workingDirectory: string): Tab {
     const pane = openPane(workingDirectory);
     return { id: nextId("tab"), panes: [pane], layout: { type: "pane", paneId: pane.id }, focusedPaneId: pane.id };
@@ -207,6 +264,8 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
   function removePaneFromSession(paneId: PaneId) {
     const session = findSessionWithPane(paneId);
     if (!session) return;
+    const { [paneId]: _dropped, ...kept } = scrollback;
+    scrollback = kept;
     const tabs = session.tabs.flatMap((tab): Tab[] => {
       if (!hasPane(tab, paneId)) return [tab];
       const layout = removePane(tab.layout, paneId);
@@ -327,8 +386,10 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
 
   return {
     start: command(() => {
-      const session = openSession();
-      setState({ sessions: [session], currentSessionId: session.id });
+      const saved = stateStore.load();
+      if (saved) restore(saved);
+      // The app starts shown, so it needs a Session to show.
+      if (state.currentSessionId === undefined) addSession();
     }),
     state: () => state,
     hotkeyPressed: command(() => {
@@ -342,12 +403,26 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
       appShown = false;
       emit({ type: "hideApp" });
     }),
+    quitRequested: command(() => emit({ type: "confirmQuit" })),
+    quitConfirmed: command(() => {
+      stateStore.flush();
+      emit({ type: "quit" });
+    }),
     settingsChanged: command((next) => {
       settings = next;
     }),
     newSession: command(() => {
       addSession();
       emit({ type: "showSession", sessionId: state.currentSessionId! });
+    }),
+    reopenSession: command((sessionId) => {
+      if (findSession(sessionId)?.status !== "closed") return;
+      updateSession(sessionId, (session) => {
+        if (session.tabs.length > 0) return { ...restartShells(session), status: "open" };
+        const tab = openTab(session.rootDirectory ?? homeDirectory);
+        return { ...session, status: "open", tabs: [tab], focusedTabId: tab.id };
+      });
+      makeCurrent(sessionId);
     }),
     renameSession: command((sessionId, name) => {
       updateSession(sessionId, ({ labelNumber: _freed, ...session }) => ({ ...session, name }));
@@ -428,6 +503,12 @@ export function createCore({ shellHost, clock, homeDirectory }: CoreDependencies
       const tab = findTab(tabId);
       return tab ? paneRects(tab.layout) : [];
     },
+    scrollbackChanged(paneId, reported) {
+      if (!findSessionWithPane(paneId)) return;
+      scrollback = { ...scrollback, [paneId]: { text: capScrollback(reported), savedAt: clock.now() } };
+      save();
+    },
+    scrollback: (paneId) => scrollback[paneId],
     onEffect(listener) {
       effectListeners.push(listener);
     },

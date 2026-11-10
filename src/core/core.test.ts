@@ -2,20 +2,18 @@ import { describe, expect, it } from "vitest";
 import { createCore } from "./core";
 import { createControllableClock, createFakeShellHost } from "./fakes";
 import { createInMemoryStateStore } from "./in-memory-state-store";
+import type { StateStore } from "./ports";
+import { idsIn, panesIn, type Session } from "./state";
 
-function startCore() {
+// Passing the state store of an earlier core relaunches the app from what that core saved.
+function startCore(stateStore: StateStore = createInMemoryStateStore()) {
   const shellHost = createFakeShellHost();
   const clock = createControllableClock(1_000);
-  const core = createCore({
-    shellHost,
-    stateStore: createInMemoryStateStore(),
-    clock,
-    homeDirectory: "/Users/me",
-  });
+  const core = createCore({ shellHost, stateStore, clock, homeDirectory: "/Users/me" });
   const effects: unknown[] = [];
   core.onEffect((effect) => effects.push(effect));
   core.start();
-  return { core, shellHost, clock, effects };
+  return { core, shellHost, clock, effects, stateStore };
 }
 
 // A Pane on the left, and on the right one on top of another, which is focused.
@@ -751,5 +749,263 @@ describe("a Shell exiting", () => {
     shellHost.exit(first.panes[0].id);
 
     expect(core.state().sessions[0].focusedTabId).toBe(second.id);
+  });
+});
+
+describe("Restore", () => {
+  // An `api` Session with two Tabs, the first split in two, and an Unnamed Session, each Pane somewhere of its own.
+  function startWithWork() {
+    const started = startCore();
+    const { core, shellHost } = started;
+    const api = core.state().sessions[0].id;
+    core.renameSession(api, "api");
+    core.splitPane(api, "vertical");
+    core.newTab(api);
+    core.newSession();
+    const directories = ["/Users/me/code/api", "/Users/me/code/api/src", "/tmp", "/Users/me/code/web"];
+    panesIn(core.state()).forEach((pane, index) => shellHost.changeWorkingDirectory(pane.id, directories[index]));
+    return started;
+  }
+
+  it("brings back every Session with its Tabs, Pane layout and working directories, starting a fresh Shell per Pane", () => {
+    const before = startWithWork();
+
+    const after = startCore(before.stateStore);
+
+    expect(after.core.state()).toEqual(before.core.state());
+    expect(after.shellHost.started).toEqual([
+      { paneId: expect.any(String), workingDirectory: "/Users/me/code/api" },
+      { paneId: expect.any(String), workingDirectory: "/Users/me/code/api/src" },
+      { paneId: expect.any(String), workingDirectory: "/tmp" },
+      { paneId: expect.any(String), workingDirectory: "/Users/me/code/web" },
+    ]);
+  });
+
+  it("doesn't bring back the running program, since the Shells start fresh", () => {
+    const before = startCore();
+    const tab = before.core.state().sessions[0].tabs[0];
+    before.shellHost.changeRunningProgram(tab.panes[0].id, "vim");
+
+    const after = startCore(before.stateStore);
+
+    expect(after.core.state().sessions[0].tabs[0].panes[0].runningProgram).toBeUndefined();
+    expect(after.core.tabTitle(tab.id)).toBe("me");
+  });
+
+  it("makes the most recently used Open Session the Current Session", () => {
+    const before = startCore();
+    before.clock.advance(1_000);
+    before.core.newSession();
+    before.clock.advance(1_000);
+    before.core.focusNextSession();
+
+    const after = startCore(before.stateStore);
+
+    expect(after.core.state().currentSessionId).toBe(before.core.state().sessions[0].id);
+  });
+
+  it("keeps Closed Sessions closed, without starting Shells for them", () => {
+    const before = startCore();
+    const closed = before.core.state().sessions[0];
+    before.core.newSession();
+    before.shellHost.exit(closed.tabs[0].panes[0].id);
+
+    const after = startCore(before.stateStore);
+
+    expect(after.core.state().sessions[0]).toEqual({ ...closed, status: "closed", tabs: [], focusedTabId: undefined });
+    expect(after.shellHost.started).toHaveLength(1);
+  });
+
+  it("with no Open Sessions saved, opens a new Session at the home directory as the Current Session", () => {
+    const before = startCore();
+    const closed = before.core.state().sessions[0];
+    before.shellHost.changeWorkingDirectory(closed.tabs[0].panes[0].id, "/Users/me/code/api");
+    before.shellHost.exit(closed.tabs[0].panes[0].id);
+
+    const after = startCore(before.stateStore);
+
+    const [, session] = after.core.state().sessions;
+    expect(session.status).toBe("open");
+    expect(after.core.state().currentSessionId).toBe(session.id);
+    expect(after.core.sessionLabel(session.id)).toBe("Session 2 (~)");
+    expect(after.shellHost.started).toEqual([{ paneId: session.tabs[0].panes[0].id, workingDirectory: "/Users/me" }]);
+  });
+
+  it("gives Sessions, Tabs and Panes opened afterwards ids no restored one holds", () => {
+    const before = startWithWork();
+    const after = startCore(before.stateStore);
+    const sessionId = after.core.state().currentSessionId!;
+
+    after.core.newSession();
+    after.core.newTab(sessionId);
+    after.core.splitPane(sessionId, "vertical");
+
+    const ids = idsIn(after.core.state());
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("brings back each Pane's scrollback as its terminal last reported it, with the clock's time of that report", () => {
+    const before = startWithThreePanes();
+    before.core.scrollbackChanged(before.left, "$ ls\r\nsrc");
+    before.clock.advance(60_000);
+    before.core.scrollbackChanged(before.left, "$ ls\r\nsrc\r\n$ pwd\r\n/Users/me");
+
+    const after = startCore(before.stateStore);
+
+    expect(after.core.scrollback(before.left)).toEqual({ text: "$ ls\r\nsrc\r\n$ pwd\r\n/Users/me", savedAt: 61_000 });
+    expect(after.core.scrollback(before.topRight)).toBeUndefined();
+  });
+
+  it("caps a Pane's scrollback at its last 10,000 lines", () => {
+    const { core } = startCore();
+    const paneId = core.state().sessions[0].tabs[0].panes[0].id;
+    const lines = Array.from({ length: 10_005 }, (_, index) => `line ${index + 1}`);
+
+    core.scrollbackChanged(paneId, lines.join("\r\n"));
+
+    const kept = core.scrollback(paneId)!.text.split("\r\n");
+    expect(kept).toHaveLength(10_000);
+    expect(kept[0]).toBe("line 6");
+    expect(kept.at(-1)).toBe("line 10005");
+  });
+
+  it("drops a closed Pane's scrollback, even when its terminal reports it after the close", () => {
+    const before = startWithThreePanes();
+    before.core.scrollbackChanged(before.bottomRight, "$ ls");
+
+    before.core.closePane(before.sessionId);
+    before.core.scrollbackChanged(before.bottomRight, "$ ls\r\nsrc");
+    const after = startCore(before.stateStore);
+
+    expect(after.core.scrollback(before.bottomRight)).toBeUndefined();
+  });
+});
+
+describe("quitting", () => {
+  it("asks for confirmation, without quitting yet", () => {
+    const { core, effects } = startCore();
+
+    core.quitRequested();
+
+    expect(effects).toEqual([{ type: "confirmQuit" }]);
+  });
+
+  it("once confirmed, writes everything pending to the state store before quitting", () => {
+    const calls: string[] = [];
+    const inMemory = createInMemoryStateStore();
+    const stateStore: StateStore = {
+      load: inMemory.load,
+      save: (snapshot) => inMemory.save(snapshot),
+      flush: () => calls.push("flush"),
+    };
+    const { core } = startCore(stateStore);
+    core.onEffect((effect) => calls.push(effect.type));
+
+    core.quitConfirmed();
+
+    expect(calls).toEqual(["flush", "quit"]);
+  });
+});
+
+describe("reopening a Closed Session", () => {
+  // Relaunches from the saved snapshot with each Session changed by `update`, standing in for what later commands do,
+  // such as closing a Session with its Tabs or setting its Root directory.
+  function relaunchWith(stateStore: StateStore, update: (session: Session) => Session) {
+    const { state, scrollback } = stateStore.load()!;
+    stateStore.save({ state: { ...state, sessions: state.sessions.map(update) }, scrollback });
+    return startCore(stateStore);
+  }
+
+  // A closed `api` Session with two Tabs, the first split in two, and an Open Unnamed Session that is current.
+  function startWithClosedApi() {
+    const before = startCore();
+    const { core, shellHost } = before;
+    const api = core.state().sessions[0].id;
+    core.renameSession(api, "api");
+    core.splitPane(api, "vertical");
+    core.newTab(api);
+    core.newSession();
+    const panes = core.state().sessions[0].tabs.flatMap((tab) => tab.panes);
+    ["/Users/me/code/api", "/Users/me/code/api/src", "/tmp"].forEach((directory, index) =>
+      shellHost.changeWorkingDirectory(panes[index].id, directory),
+    );
+    core.scrollbackChanged(panes[0].id, "$ ls\r\nsrc");
+    const after = relaunchWith(before.stateStore, (session) =>
+      session.id === api ? { ...session, status: "closed" } : session,
+    );
+    after.effects.length = 0;
+    return { ...after, api, saved: before.core.state().sessions[0], firstPaneId: panes[0].id };
+  }
+
+  it("brings back its Tabs, Pane layout and working directories with fresh Shells, as the Current Session", () => {
+    const { core, shellHost, clock, effects, api, saved } = startWithClosedApi();
+    expect(shellHost.started).toHaveLength(1);
+    clock.advance(1_000);
+
+    core.reopenSession(api);
+
+    expect(core.state().sessions[0]).toEqual({ ...saved, lastUsedAt: 2_000 });
+    expect(core.state().currentSessionId).toBe(api);
+    expect(shellHost.started.slice(1)).toEqual([
+      { paneId: expect.any(String), workingDirectory: "/Users/me/code/api" },
+      { paneId: expect.any(String), workingDirectory: "/Users/me/code/api/src" },
+      { paneId: expect.any(String), workingDirectory: "/tmp" },
+    ]);
+    expect(effects).toEqual([{ type: "showSession", sessionId: api }]);
+  });
+
+  it("brings back its scrollback", () => {
+    const { core, api, firstPaneId } = startWithClosedApi();
+
+    core.reopenSession(api);
+
+    expect(core.scrollback(firstPaneId)).toEqual({ text: "$ ls\r\nsrc", savedAt: 1_000 });
+  });
+
+  it("closed through its last Tab, gives it one fresh Tab at the home directory", () => {
+    const { core, shellHost } = startCore();
+    const closed = core.state().sessions[0];
+    shellHost.changeWorkingDirectory(closed.tabs[0].panes[0].id, "/Users/me/code/api");
+    core.newSession();
+    shellHost.exit(closed.tabs[0].panes[0].id);
+
+    core.reopenSession(closed.id);
+
+    const session = core.state().sessions[0];
+    expect(session.status).toBe("open");
+    expect(session.tabs).toHaveLength(1);
+    expect(session.focusedTabId).toBe(session.tabs[0].id);
+    expect(session.tabs[0].panes[0].workingDirectory).toBe("/Users/me");
+    expect(shellHost.started.at(-1)).toEqual({ paneId: session.tabs[0].panes[0].id, workingDirectory: "/Users/me" });
+    expect(core.state().currentSessionId).toBe(closed.id);
+  });
+
+  it("closed through its last Tab, starts that Tab at its Root directory when it has one", () => {
+    const before = startCore();
+    const closed = before.core.state().sessions[0];
+    before.core.newSession();
+    before.shellHost.exit(closed.tabs[0].panes[0].id);
+    const after = relaunchWith(before.stateStore, (session) =>
+      session.id === closed.id ? { ...session, rootDirectory: "/Users/me/code/api" } : session,
+    );
+
+    after.core.reopenSession(closed.id);
+
+    const session = after.core.state().sessions[0];
+    expect(session.tabs[0].panes[0].workingDirectory).toBe("/Users/me/code/api");
+    expect(after.shellHost.started.at(-1)?.workingDirectory).toBe("/Users/me/code/api");
+  });
+
+  it("leaves an Open Session alone", () => {
+    const { core, shellHost, effects } = startCore();
+    const sessionId = core.state().sessions[0].id;
+    const announced: unknown[] = [];
+    core.onStateChange((state) => announced.push(state));
+
+    core.reopenSession(sessionId);
+
+    expect(shellHost.started).toHaveLength(1);
+    expect(announced).toEqual([]);
+    expect(effects).toEqual([]);
   });
 });

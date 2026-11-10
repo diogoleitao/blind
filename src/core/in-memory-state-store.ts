@@ -1,12 +1,12 @@
-import type { StateStore } from "./ports";
-import type { CoreState } from "./state";
+import type { Snapshot, StateStore } from "./ports";
 
 export function createInMemoryStateStore(): StateStore {
-  let snapshot: CoreState | undefined;
+  let snapshot: Snapshot | undefined;
   return {
     load: () => snapshot,
     save: (next) => {
       snapshot = next;
     },
+    flush: () => {},
   };
 }

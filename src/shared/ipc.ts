@@ -19,6 +19,9 @@ export const channels = {
   writeToPane: "pane:write",
   resizePane: "pane:resize",
   paneData: "pane:data",
+  reportScrollback: "pane:scrollback",
+  flushScrollback: "scrollback:flush",
+  scrollbackFlushed: "scrollback:flushed",
 } as const;
 
 // What the preload script exposes to the renderer as `window.blind`.
@@ -30,4 +33,8 @@ export interface BlindApi {
   writeToPane(paneId: PaneId, data: string): void;
   resizePane(paneId: PaneId, size: TerminalSize): void;
   onPaneData(listener: (paneId: PaneId, data: string) => void): void;
+  // Sends a Pane's serialized terminal, for Restore.
+  reportScrollback(paneId: PaneId, scrollback: string): void;
+  // Called before the app quits. The listener reports every Pane's scrollback before it returns.
+  onFlushScrollback(listener: () => void): void;
 }

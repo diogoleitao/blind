@@ -1,7 +1,9 @@
 import { FitAddon } from "@xterm/addon-fit";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import type { PaneRect } from "../core/layout";
+import { scrollbackLineLimit } from "../core/scrollback";
 import type { PaneId } from "../core/state";
 import type { BlindApi, SessionView } from "../shared/ipc";
 
@@ -11,10 +13,16 @@ declare global {
   }
 }
 
+// How long after output starts a Pane's scrollback is reported, so a burst of output is reported once.
+const reportDelayMilliseconds = 1_000;
+
 interface PaneTerminal {
   element: HTMLDivElement;
   terminal: Terminal;
   fit: FitAddon;
+  serialize: SerializeAddon;
+  // Pending while output waits to be reported.
+  reportTimer?: ReturnType<typeof setTimeout>;
 }
 
 const { blind } = window;
@@ -47,16 +55,41 @@ function openPane(rect: PaneRect): PaneTerminal {
   element.append(terminalElement);
   panesElement.append(element);
   // The page's background shows through, keeping the window's transparency and blur.
-  const terminal = new Terminal({ allowTransparency: true, theme: { background: "#00000000" } });
+  const terminal = new Terminal({
+    allowTransparency: true,
+    theme: { background: "#00000000" },
+    scrollback: scrollbackLineLimit,
+  });
   const fit = new FitAddon();
+  const serialize = new SerializeAddon();
   terminal.loadAddon(fit);
+  terminal.loadAddon(serialize);
   terminal.open(terminalElement);
   fit.fit();
   terminal.onData((data) => blind.writeToPane(paneId, data));
   terminal.onResize((size) => blind.resizePane(paneId, size));
   element.addEventListener("mousedown", () => blind.focusPane(paneId));
   void blind.attachPane(paneId, { cols: terminal.cols, rows: terminal.rows });
-  return { element, terminal, fit };
+  return { element, terminal, fit, serialize };
+}
+
+// A full-screen program's screen and the modes it set belong to a process that won't be there after Restore.
+function reportScrollback(paneId: PaneId, pane: PaneTerminal) {
+  clearTimeout(pane.reportTimer);
+  pane.reportTimer = undefined;
+  const scrollback = pane.serialize.serialize({
+    scrollback: scrollbackLineLimit,
+    excludeAltBuffer: true,
+    excludeModes: true,
+  });
+  blind.reportScrollback(paneId, scrollback);
+}
+
+function writeToTerminal(paneId: PaneId, data: string) {
+  const pane = terminals.get(paneId);
+  if (!pane) return;
+  pane.terminal.write(data);
+  pane.reportTimer ??= setTimeout(() => reportScrollback(paneId, pane), reportDelayMilliseconds);
 }
 
 function renderTabBar(view: SessionView) {
@@ -79,6 +112,7 @@ function render(view: SessionView) {
   const paneIds = new Set(panes.map(({ rect }) => rect.paneId));
   for (const [paneId, pane] of terminals) {
     if (paneIds.has(paneId)) continue;
+    clearTimeout(pane.reportTimer);
     pane.terminal.dispose();
     pane.element.remove();
     terminals.delete(paneId);
@@ -98,7 +132,8 @@ function render(view: SessionView) {
   }
 }
 
-blind.onPaneData((paneId, data) => terminals.get(paneId)?.terminal.write(data));
+blind.onPaneData(writeToTerminal);
+blind.onFlushScrollback(() => terminals.forEach((pane, paneId) => reportScrollback(paneId, pane)));
 blind.onSessionView(render);
 window.addEventListener("resize", () => {
   for (const pane of terminals.values()) pane.fit.fit();

@@ -14,6 +14,8 @@ export interface Session {
   name?: string;
   // The N in an Unnamed Session's `Session N (<dir>)` label, kept until the Session is named.
   labelNumber?: number;
+  // Absent until set explicitly.
+  rootDirectory?: string;
   status: "open" | "closed";
   createdAt: number;
   lastUsedAt: number;
@@ -43,4 +45,17 @@ export interface Pane {
   workingDirectory: string;
   // Absent while the Shell is idle at a prompt.
   runningProgram?: string;
+}
+
+// Every Pane, Session by Session and Tab by Tab.
+export function panesIn(state: CoreState): Pane[] {
+  return state.sessions.flatMap((session) => session.tabs.flatMap((tab) => tab.panes));
+}
+
+// Every Session, Tab and Pane id.
+export function idsIn(state: CoreState): string[] {
+  return state.sessions.flatMap((session) => [
+    session.id,
+    ...session.tabs.flatMap((tab) => [tab.id, ...tab.panes.map((pane) => pane.id)]),
+  ]);
 }
