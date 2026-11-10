@@ -1,4 +1,4 @@
-import type { PaletteResult } from "../core/core";
+import type { Effect, PaletteResult } from "../core/core";
 import type { PaneRect } from "../core/layout";
 import type { PaneId, TabId } from "../core/state";
 
@@ -13,6 +13,9 @@ export interface SessionView {
   focusedTabId?: TabId;
 }
 
+// What the Command Palette asks for in place of a search: a Session's name or a Tab's title.
+export type PalettePrompt = Extract<Effect, { type: "askSessionName" | "askTabTitle" }>;
+
 export const channels = {
   sessionView: "session:view",
   focusPane: "pane:focus",
@@ -26,6 +29,8 @@ export const channels = {
   openPalette: "palette:open",
   searchPalette: "palette:search",
   choosePaletteResult: "palette:choose",
+  promptPalette: "palette:prompt",
+  answerPalettePrompt: "palette:answer",
 } as const;
 
 // What the preload script exposes to the renderer as `window.blind`.
@@ -45,4 +50,7 @@ export interface BlindApi {
   onOpenPalette(listener: () => void): void;
   searchPalette(query: string): Promise<PaletteResult[]>;
   choosePaletteResult(result: PaletteResult): void;
+  // Called when an app action needs a name or title typed into the Command Palette.
+  onPalettePrompt(listener: (prompt: PalettePrompt) => void): void;
+  answerPalettePrompt(prompt: PalettePrompt, answer: string): void;
 }

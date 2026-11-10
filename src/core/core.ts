@@ -31,13 +31,26 @@ export type Effect =
   | { type: "showSession"; sessionId: SessionId }
   // Asks the user whether to quit, answered with `quitConfirmed`.
   | { type: "confirmQuit" }
+  // Asks the user for the Session's name, offering `suggestion`, answered with `renameSession`.
+  | { type: "askSessionName"; sessionId: SessionId; suggestion: string }
+  // Asks the user whether to delete the Session, answered with `deleteConfirmed`.
+  | { type: "confirmDelete"; sessionId: SessionId }
+  // Asks the user for the title of a Tab in the Session, offering `suggestion`, answered with `renameTab`.
+  | { type: "askTabTitle"; sessionId: SessionId; tabId: TabId; suggestion: string }
   // Everything is saved; the app can exit.
   | { type: "quit" };
 
 // Every app action, in the order the Command Palette offers them, by its label.
 const paletteActionLabels = {
   newSession: "New Session",
+  renameSession: "Rename Session",
+  setSessionRoot: "Set Session Root",
+  clearSessionRoot: "Clear Session Root",
+  closeSession: "Close Session",
+  deleteSession: "Delete Session",
   newTab: "New Tab",
+  renameTab: "Rename Tab",
+  clearTabTitle: "Clear Tab Title",
   splitPaneVertically: "Split Pane Vertically",
   splitPaneHorizontally: "Split Pane Horizontally",
   closePane: "Close Pane",
@@ -93,18 +106,33 @@ export interface Core {
   // Opens a Closed Session again as the Current Session, restoring it as Restore does. One closed through its last Tab
   // gets a fresh Tab at its Root directory, or the home directory without one.
   reopenSession(sessionId: SessionId): void;
-  // Gives the Session a name, freeing its label number.
+  // Gives the Session a name, freeing its label number. A name another Session holds gets the smallest free number from
+  // 2, e.g. `api 2`, so names stay unique; a blank name changes nothing.
   renameSession(sessionId: SessionId, name: string): void;
+  // Makes the current Pane's working directory the Session's Root directory.
+  setSessionRoot(sessionId: SessionId): void;
+  clearSessionRoot(sessionId: SessionId): void;
+  // Makes an Open Session a Closed Session at once, stopping its Shells and keeping its Tabs and Panes for Restore.
+  closeSession(sessionId: SessionId): void;
+  // Deleting always asks for confirmation first.
+  deleteRequested(sessionId: SessionId): void;
+  // Removes the Session, Open or Closed, for good, with its scrollback, stopping its Shells.
+  deleteConfirmed(sessionId: SessionId): void;
   // Both move the Current Session through the Open Sessions in cycle order, wrapping around.
   focusPreviousSession(): void;
   focusNextSession(): void;
-  // Opens a Tab after the others, in the current Pane's working directory, and focuses it.
+  // Opens a Tab after the others and focuses it, at the Session's Root directory, or without one, in the current Pane's
+  // working directory.
   newTab(sessionId: SessionId): void;
   // Focuses the Tab at a zero-based position, if there is one.
   focusTab(sessionId: SessionId, position: number): void;
   // Both wrap around between the first and last Tab.
   focusPreviousTab(sessionId: SessionId): void;
   focusNextTab(sessionId: SessionId): void;
+  // Fixes the Tab's title until it's cleared; a blank title clears it.
+  renameTab(tabId: TabId, title: string): void;
+  // The Tab's title follows its focused Pane again.
+  clearTabTitle(tabId: TabId): void;
   // Splits the focused Pane in two, starting the new half's Shell in the same working directory, and focuses it.
   splitPane(sessionId: SessionId, direction: SplitDirection): void;
   // Closes the focused Pane and stops its Shell, following the same chain as the Shell exiting.
@@ -116,7 +144,8 @@ export interface Core {
   focusPaneInDirection(sessionId: SessionId, direction: FocusDirection): void;
   // Focuses a Pane within its Tab, e.g. because it was clicked.
   focusPane(paneId: PaneId): void;
-  // The focused Pane's running program, or its working directory's folder name while the Shell is idle.
+  // The title the Tab was renamed to, or else the focused Pane's running program, or its working directory's folder name
+  // while the Shell is idle.
   tabTitle(tabId: TabId): string | undefined;
   // The Session's name, or for an Unnamed Session `Session N (<dir>)` with the focused Pane's working directory.
   sessionLabel(sessionId: SessionId): string | undefined;
@@ -210,14 +239,26 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
   }
 
   // Like `updateSession`, leaves the state alone when `update` returns the Tab unchanged.
-  function updateFocusedTab(sessionId: SessionId, update: (tab: Tab) => Tab) {
-    updateSession(sessionId, (session) => {
-      const tab = focusedTab(session);
-      if (!tab) return session;
+  function updateTab(tabId: TabId, update: (tab: Tab) => Tab) {
+    const session = state.sessions.find((candidate) => candidate.tabs.some((tab) => tab.id === tabId));
+    if (!session) return;
+    updateSession(session.id, (session) => {
+      const tab = session.tabs.find((candidate) => candidate.id === tabId)!;
       const updated = update(tab);
       if (updated === tab) return session;
       return { ...session, tabs: session.tabs.map((candidate) => (candidate === tab ? updated : candidate)) };
     });
+  }
+
+  // The Session's focused Tab; absent for an unknown Session or one without Tabs.
+  function focusedTabOf(sessionId: SessionId) {
+    const session = findSession(sessionId);
+    return session && focusedTab(session);
+  }
+
+  function updateFocusedTab(sessionId: SessionId, update: (tab: Tab) => Tab) {
+    const tab = focusedTabOf(sessionId);
+    if (tab) updateTab(tab.id, update);
   }
 
   function withFocusedPane(tab: Tab, paneId: PaneId): Tab {
@@ -316,8 +357,17 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
       return { ...session, tabs, focusedTabId: tabs[Math.min(position, tabs.length - 1)].id };
     });
     if (tabs.length > 0) return;
-    emit({ type: "closeWindow", sessionId: session.id });
-    if (session.id === state.currentSessionId) replaceCurrentSession();
+    closeWindow(session.id);
+  }
+
+  // When the Session's window was the one on screen, another Open Session takes its place.
+  function closeWindow(sessionId: SessionId) {
+    emit({ type: "closeWindow", sessionId });
+    if (sessionId === state.currentSessionId) replaceCurrentSession();
+  }
+
+  function paneIdsOf(session: Session) {
+    return session.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id));
   }
 
   // After the Current Session closes, the most recently used Open Session takes its place; with none left, the app
@@ -338,6 +388,15 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     let number = 1;
     while (taken.has(number)) number += 1;
     return number;
+  }
+
+  // The name, or when another Session holds it, the name with the smallest free number from 2, e.g. `api 2`.
+  function uniqueName(name: string, sessionId: SessionId) {
+    const taken = new Set(state.sessions.filter((session) => session.id !== sessionId).map((session) => session.name));
+    if (!taken.has(name)) return name;
+    let number = 2;
+    while (taken.has(`${name} ${number}`)) number += 1;
+    return `${name} ${number}`;
   }
 
   function openSession(): Session {
@@ -423,7 +482,13 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
   }
 
   function titleOf(tab: Tab) {
-    return paneTitle(focusedPane(tab));
+    return tab.title ?? paneTitle(focusedPane(tab));
+  }
+
+  function clearTitle(tab: Tab): Tab {
+    if (tab.title === undefined) return tab;
+    const { title: _cleared, ...cleared } = tab;
+    return cleared;
   }
 
   function sessionResults(): PaletteResult[] {
@@ -532,7 +597,9 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     }));
   }
 
+  // A stopped Shell can still report on its way out, and a Closed Session keeps its Panes as they were when it closed.
   shellHost.subscribe((event) => {
+    if (findSessionWithPane(event.paneId)?.status !== "open") return;
     if (event.type === "shellExited") removePaneFromSession(event.paneId);
     if (event.type === "workingDirectoryChanged") {
       updatePane(event.paneId, (pane) => ({ ...pane, workingDirectory: event.workingDirectory }));
@@ -544,7 +611,25 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
 
   // The app actions on the Current Session, by the core's own commands.
   const sessionActions: Record<Exclude<PaletteAction, "newSession" | "quit">, (sessionId: SessionId) => void> = {
+    renameSession: (sessionId) => {
+      const tab = focusedTabOf(sessionId);
+      if (!tab) return;
+      const suggestion = uniqueName(folderName(focusedPane(tab).workingDirectory), sessionId);
+      emit({ type: "askSessionName", sessionId, suggestion });
+    },
+    setSessionRoot: (sessionId) => core.setSessionRoot(sessionId),
+    clearSessionRoot: (sessionId) => core.clearSessionRoot(sessionId),
+    closeSession: (sessionId) => core.closeSession(sessionId),
+    deleteSession: (sessionId) => core.deleteRequested(sessionId),
     newTab: (sessionId) => core.newTab(sessionId),
+    renameTab: (sessionId) => {
+      const tab = focusedTabOf(sessionId);
+      if (tab) emit({ type: "askTabTitle", sessionId, tabId: tab.id, suggestion: titleOf(tab) });
+    },
+    clearTabTitle: (sessionId) => {
+      const tab = focusedTabOf(sessionId);
+      if (tab) core.clearTabTitle(tab.id);
+    },
     splitPaneVertically: (sessionId) => core.splitPane(sessionId, "vertical"),
     splitPaneHorizontally: (sessionId) => core.splitPane(sessionId, "horizontal"),
     closePane: (sessionId) => core.closePane(sessionId),
@@ -600,7 +685,53 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     }),
     reopenSession: command(reopenSession),
     renameSession: command((sessionId, name) => {
-      updateSession(sessionId, ({ labelNumber: _freed, ...session }) => ({ ...session, name }));
+      const trimmed = name.trim();
+      if (trimmed === "") return;
+      updateSession(sessionId, ({ labelNumber: _freed, ...session }) => ({
+        ...session,
+        name: uniqueName(trimmed, sessionId),
+      }));
+    }),
+    setSessionRoot: command((sessionId) => {
+      updateSession(sessionId, (session) => {
+        const tab = focusedTab(session);
+        if (!tab) return session;
+        const rootDirectory = focusedPane(tab).workingDirectory;
+        return rootDirectory === session.rootDirectory ? session : { ...session, rootDirectory };
+      });
+    }),
+    clearSessionRoot: command((sessionId) => {
+      updateSession(sessionId, (session) => {
+        if (session.rootDirectory === undefined) return session;
+        const { rootDirectory: _cleared, ...cleared } = session;
+        return cleared;
+      });
+    }),
+    closeSession: command((sessionId) => {
+      const session = findSession(sessionId);
+      if (session?.status !== "open") return;
+      updateSession(sessionId, (session) => ({ ...session, status: "closed" }));
+      for (const paneId of paneIdsOf(session)) shellHost.stop(paneId);
+      closeWindow(sessionId);
+    }),
+    deleteRequested: command((sessionId) => {
+      if (findSession(sessionId)) emit({ type: "confirmDelete", sessionId });
+    }),
+    deleteConfirmed: command((sessionId) => {
+      const session = findSession(sessionId);
+      if (!session) return;
+      const paneIds = paneIdsOf(session);
+      scrollback = Object.fromEntries(Object.entries(scrollback).filter(([paneId]) => !paneIds.includes(paneId)));
+      // The Current Session goes with it, so no state names a Session that no longer exists.
+      const wasCurrent = sessionId === state.currentSessionId;
+      setState({
+        sessions: state.sessions.filter((candidate) => candidate !== session),
+        currentSessionId: wasCurrent ? undefined : state.currentSessionId,
+      });
+      if (session.status !== "open") return;
+      for (const paneId of paneIds) shellHost.stop(paneId);
+      emit({ type: "closeWindow", sessionId });
+      if (wasCurrent) replaceCurrentSession();
     }),
     focusPreviousSession: () => focusSessionBy(-1),
     focusNextSession: () => focusSessionBy(1),
@@ -608,7 +739,7 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
       const session = findSession(sessionId);
       const current = session && focusedTab(session);
       if (!current) return;
-      const tab = openTab(focusedPane(current).workingDirectory);
+      const tab = openTab(session.rootDirectory ?? focusedPane(current).workingDirectory);
       updateSession(sessionId, (session) => ({ ...session, tabs: [...session.tabs, tab], focusedTabId: tab.id }));
     }),
     splitPane: command((sessionId, direction) => {
@@ -629,8 +760,7 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
       });
     }),
     closePane: command((sessionId) => {
-      const session = findSession(sessionId);
-      const tab = session && focusedTab(session);
+      const tab = focusedTabOf(sessionId);
       if (!tab) return;
       removePaneFromSession(tab.focusedPaneId);
       shellHost.stop(tab.focusedPaneId);
@@ -659,6 +789,14 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     }),
     focusPreviousTab: command((sessionId) => focusTabBy(sessionId, -1)),
     focusNextTab: command((sessionId) => focusTabBy(sessionId, 1)),
+    renameTab: command((tabId, title) => {
+      const trimmed = title.trim();
+      updateTab(tabId, (tab) => {
+        if (trimmed === "") return clearTitle(tab);
+        return trimmed === tab.title ? tab : { ...tab, title: trimmed };
+      });
+    }),
+    clearTabTitle: command((tabId) => updateTab(tabId, clearTitle)),
     tabTitle(tabId) {
       const tab = findTab(tabId);
       return tab && titleOf(tab);

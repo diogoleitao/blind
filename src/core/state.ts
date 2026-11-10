@@ -26,6 +26,8 @@ export interface Session {
 
 export interface Tab {
   id: TabId;
+  // Absent unless the Tab was renamed, fixing its title until cleared.
+  title?: string;
   // In layout order: left to right and top to bottom through the splits.
   panes: Pane[];
   layout: Layout;

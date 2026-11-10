@@ -25,6 +25,10 @@ const api: BlindApi = {
   },
   searchPalette: (query) => ipcRenderer.invoke(channels.searchPalette, query),
   choosePaletteResult: (result) => ipcRenderer.send(channels.choosePaletteResult, result),
+  onPalettePrompt: (listener) => {
+    ipcRenderer.on(channels.promptPalette, (_event, prompt) => listener(prompt));
+  },
+  answerPalettePrompt: (prompt, answer) => ipcRenderer.send(channels.answerPalettePrompt, prompt, answer),
 };
 
 contextBridge.exposeInMainWorld("blind", api);

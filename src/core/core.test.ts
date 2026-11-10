@@ -685,6 +685,63 @@ describe("a Tab's title", () => {
   });
 });
 
+describe("renaming a Tab", () => {
+  // A Session whose second Tab, which is focused, runs vim.
+  function startWithVim() {
+    const started = startCore();
+    const { core, shellHost } = started;
+    const sessionId = core.state().sessions[0].id;
+    core.newTab(sessionId);
+    const tab = core.state().sessions[0].tabs[1];
+    shellHost.changeRunningProgram(tab.panes[0].id, "vim");
+    return { ...started, sessionId, tabId: tab.id, paneId: tab.panes[0].id };
+  }
+
+  it("asks for a title, suggesting the focused Tab's current title", () => {
+    const { core, effects, sessionId, tabId } = startWithVim();
+
+    chooseAction(core, "Rename Tab");
+    core.renameTab(tabId, "notes");
+    chooseAction(core, "Rename Tab");
+
+    expect(effects).toEqual([
+      { type: "askTabTitle", sessionId, tabId, suggestion: "vim" },
+      { type: "askTabTitle", sessionId, tabId, suggestion: "notes" },
+    ]);
+  });
+
+  it("fixes the title, whatever the Pane runs or wherever it moves", () => {
+    const { core, shellHost, tabId, paneId } = startWithVim();
+
+    core.renameTab(tabId, "notes");
+    shellHost.changeRunningProgram(paneId, undefined);
+    shellHost.changeWorkingDirectory(paneId, "/Users/me/code/api");
+
+    expect(core.tabTitle(tabId)).toBe("notes");
+  });
+
+  it("goes back to the live title once cleared, by the action or by a blank title", () => {
+    const { core, tabId } = startWithVim();
+
+    core.renameTab(tabId, "notes");
+    chooseAction(core, "Clear Tab Title");
+    expect(core.tabTitle(tabId)).toBe("vim");
+
+    core.renameTab(tabId, "notes");
+    core.renameTab(tabId, "  ");
+    expect(core.tabTitle(tabId)).toBe("vim");
+  });
+
+  it("keeps the fixed title through Restore", () => {
+    const before = startWithVim();
+    before.core.renameTab(before.tabId, "notes");
+
+    const after = startCore(before.stateStore);
+
+    expect(after.core.tabTitle(before.tabId)).toBe("notes");
+  });
+});
+
 describe("state changes", () => {
   it("are announced for Tab commands and Shell events, with the new state", () => {
     const { core, shellHost } = startCore();
@@ -1010,6 +1067,271 @@ describe("reopening a Closed Session", () => {
   });
 });
 
+describe("renaming a Session", () => {
+  it("asks for a name, suggesting the current Pane's folder name", () => {
+    const { core, shellHost, effects } = startCore();
+    const sessionId = core.state().sessions[0].id;
+    shellHost.changeWorkingDirectory(core.state().sessions[0].tabs[0].panes[0].id, "/some/dir/somewhere");
+
+    chooseAction(core, "Rename Session");
+
+    expect(effects).toEqual([{ type: "askSessionName", sessionId, suggestion: "somewhere" }]);
+  });
+
+  // Sessions named `api` and `api 2`, and an Unnamed Session at ~/code/api, which is current.
+  function startWithTakenNames() {
+    const started = startCore();
+    const { core, shellHost } = started;
+    core.renameSession(core.state().sessions[0].id, "api");
+    core.newSession();
+    core.renameSession(core.state().sessions[1].id, "api 2");
+    core.newSession();
+    const unnamed = core.state().sessions[2];
+    shellHost.changeWorkingDirectory(unnamed.tabs[0].panes[0].id, "/Users/me/code/api");
+    started.effects.length = 0;
+    return { ...started, unnamed: unnamed.id };
+  }
+
+  it("suggests the folder name with the next free number when other Sessions hold it", () => {
+    const { core, effects, unnamed } = startWithTakenNames();
+
+    chooseAction(core, "Rename Session");
+
+    expect(effects).toEqual([{ type: "askSessionName", sessionId: unnamed, suggestion: "api 3" }]);
+  });
+
+  it("suggests the Session's own name without a number", () => {
+    const { core, shellHost, effects } = startCore();
+    const session = core.state().sessions[0];
+    shellHost.changeWorkingDirectory(session.tabs[0].panes[0].id, "/Users/me/code/api");
+    core.renameSession(session.id, "api");
+
+    chooseAction(core, "Rename Session");
+
+    expect(effects).toEqual([{ type: "askSessionName", sessionId: session.id, suggestion: "api" }]);
+  });
+
+  it("gives a name another Session holds the next free number, keeping names unique", () => {
+    const { core, unnamed } = startWithTakenNames();
+
+    core.renameSession(unnamed, "api");
+
+    expect(core.state().sessions.map((session) => session.name)).toEqual(["api", "api 2", "api 3"]);
+  });
+
+  it("keeps a Session's name when it's renamed to the name it already has", () => {
+    const { core } = startWithTakenNames();
+
+    core.renameSession(core.state().sessions[1].id, "api 2");
+
+    expect(core.state().sessions[1].name).toBe("api 2");
+  });
+
+  it("ignores a blank name, leaving the Session as it was", () => {
+    const { core, unnamed } = startWithTakenNames();
+
+    core.renameSession(unnamed, "   ");
+
+    expect(core.sessionLabel(unnamed)).toBe("Session 1 (~/code/api)");
+  });
+});
+
+describe("a Session's Root directory", () => {
+  // The Session's Root directory set at ~/code/api, with its Pane moved on to ~/code/api/src.
+  function startWithRoot() {
+    const started = startCore();
+    const { core, shellHost } = started;
+    const session = core.state().sessions[0];
+    const paneId = session.tabs[0].panes[0].id;
+    shellHost.changeWorkingDirectory(paneId, "/Users/me/code/api");
+    chooseAction(core, "Set Session Root");
+    shellHost.changeWorkingDirectory(paneId, "/Users/me/code/api/src");
+    return { ...started, sessionId: session.id };
+  }
+
+  it("is set to the current Pane's working directory", () => {
+    const { core } = startWithRoot();
+
+    expect(core.state().sessions[0].rootDirectory).toBe("/Users/me/code/api");
+  });
+
+  it("is where new Tabs start once set", () => {
+    const { core, shellHost, sessionId } = startWithRoot();
+
+    core.newTab(sessionId);
+
+    const tab = core.state().sessions[0].tabs[1];
+    expect(tab.panes[0].workingDirectory).toBe("/Users/me/code/api");
+    expect(shellHost.started.at(-1)).toEqual({ paneId: tab.panes[0].id, workingDirectory: "/Users/me/code/api" });
+  });
+
+  it("doesn't change where splits start, which is the current Pane's working directory", () => {
+    const { core, shellHost, sessionId } = startWithRoot();
+
+    core.splitPane(sessionId, "vertical");
+
+    expect(shellHost.started.at(-1)?.workingDirectory).toBe("/Users/me/code/api/src");
+  });
+
+  it("once cleared, is gone, and new Tabs start in the current Pane's working directory again", () => {
+    const { core, shellHost, sessionId } = startWithRoot();
+
+    chooseAction(core, "Clear Session Root");
+    core.newTab(sessionId);
+
+    expect(core.state().sessions[0].rootDirectory).toBeUndefined();
+    expect(shellHost.started.at(-1)?.workingDirectory).toBe("/Users/me/code/api/src");
+  });
+});
+
+describe("closing a Session", () => {
+  // A Session with two Tabs, the first split in two with scrollback in its left Pane, and a second Session, created
+  // later, that is current. The first Session is made current again.
+  function startWithSessionToClose() {
+    const started = startWithThreePanes();
+    const { core, clock, sessionId, left } = started;
+    core.closePane(sessionId);
+    core.newTab(sessionId);
+    core.scrollbackChanged(left, "$ ls\r\nsrc");
+    clock.advance(1_000);
+    core.newSession();
+    const other = core.state().sessions[1].id;
+    clock.advance(1_000);
+    core.focusNextSession();
+    started.shellHost.stopped.length = 0;
+    started.effects.length = 0;
+    return { ...started, other, saved: core.state().sessions[0] };
+  }
+
+  it("makes it a Closed Session that keeps its Tabs and Panes, stopping every Shell and closing its window", () => {
+    const { core, shellHost, effects, sessionId, saved, other } = startWithSessionToClose();
+
+    chooseAction(core, "Close Session");
+
+    expect(core.state().sessions[0]).toEqual({ ...saved, status: "closed" });
+    expect(shellHost.stopped).toEqual(saved.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id)));
+    expect(core.state().currentSessionId).toBe(other);
+    expect(effects).toEqual([
+      { type: "closeWindow", sessionId },
+      { type: "showSession", sessionId: other },
+    ]);
+  });
+
+  it("ignores what the stopped Shells report afterwards", () => {
+    const { core, shellHost, sessionId, saved } = startWithSessionToClose();
+    core.closeSession(sessionId);
+    const announced: unknown[] = [];
+    core.onStateChange((state) => announced.push(state));
+
+    for (const pane of saved.tabs.flatMap((tab) => tab.panes)) {
+      shellHost.changeWorkingDirectory(pane.id, "/tmp");
+      shellHost.exit(pane.id);
+    }
+
+    expect(announced).toEqual([]);
+    expect(core.state().sessions[0]).toEqual({ ...saved, status: "closed" });
+  });
+
+  it("brings back its Tabs, Panes and scrollback when reopened", () => {
+    const { core, shellHost, clock, sessionId, saved, left } = startWithSessionToClose();
+    core.closeSession(sessionId);
+    clock.advance(1_000);
+
+    core.reopenSession(sessionId);
+
+    expect(core.state().sessions[0]).toEqual({ ...saved, lastUsedAt: 4_000 });
+    expect(shellHost.started.slice(-3).map((started) => started.paneId)).toEqual(
+      saved.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id)),
+    );
+    expect(core.scrollback(left)).toEqual({ text: "$ ls\r\nsrc", savedAt: 1_000 });
+  });
+
+  it("as the last Open Session, leaves no Current Session and hides the app", () => {
+    const { core, effects } = startCore();
+    const sessionId = core.state().sessions[0].id;
+
+    core.closeSession(sessionId);
+
+    expect(core.state().currentSessionId).toBeUndefined();
+    expect(effects).toEqual([{ type: "closeWindow", sessionId }, { type: "hideApp" }]);
+  });
+});
+
+describe("deleting a Session", () => {
+  it("asks for confirmation, leaving the Session as it was", () => {
+    const { core, shellHost, effects } = startCore();
+    const before = core.state();
+
+    chooseAction(core, "Delete Session");
+
+    expect(effects).toEqual([{ type: "confirmDelete", sessionId: before.sessions[0].id }]);
+    expect(core.state()).toBe(before);
+    expect(shellHost.stopped).toEqual([]);
+  });
+
+  it("once confirmed, removes an Open Session for good, stopping its Shells and closing its window", () => {
+    const before = startWithThreePanes();
+    const { core, shellHost, effects, sessionId, left, topRight, bottomRight } = before;
+    core.scrollbackChanged(left, "$ ls");
+    core.newSession();
+    const other = core.state().sessions[1].id;
+    core.focusNextSession();
+    effects.length = 0;
+
+    core.deleteConfirmed(sessionId);
+
+    expect(core.state().sessions.map((session) => session.id)).toEqual([other]);
+    expect(core.state().currentSessionId).toBe(other);
+    expect(shellHost.stopped).toEqual([left, topRight, bottomRight]);
+    expect(effects).toEqual([
+      { type: "closeWindow", sessionId },
+      { type: "showSession", sessionId: other },
+    ]);
+    const after = startCore(before.stateStore);
+    expect(after.core.state().sessions.map((session) => session.id)).toEqual([other]);
+    expect(after.core.scrollback(left)).toBeUndefined();
+  });
+
+  it("never announces a state whose Current Session is gone", () => {
+    const { core } = startCore();
+    const deleted = core.state().sessions[0].id;
+    core.newSession();
+    core.focusNextSession();
+    const currentSessionIds: unknown[] = [];
+    core.onStateChange((state) => currentSessionIds.push(state.currentSessionId));
+
+    core.deleteConfirmed(deleted);
+
+    expect(currentSessionIds).not.toContain(deleted);
+    expect(currentSessionIds.at(-1)).toBe(core.state().sessions[0].id);
+  });
+
+  it("once confirmed, removes a Closed Session without anything to stop or close", () => {
+    const { core, shellHost, effects } = startCore();
+    const closed = core.state().sessions[0];
+    core.newSession();
+    shellHost.exit(closed.tabs[0].panes[0].id);
+    effects.length = 0;
+
+    core.deleteConfirmed(closed.id);
+
+    expect(core.state().sessions).toHaveLength(1);
+    expect(shellHost.stopped).toEqual([]);
+    expect(effects).toEqual([]);
+  });
+
+  it("frees an Unnamed Session's label number", () => {
+    const { core } = startCore();
+    const first = core.state().sessions[0].id;
+    core.newSession();
+    core.deleteConfirmed(first);
+
+    core.newSession();
+
+    expect(core.sessionLabel(core.state().sessions[1].id)).toBe("Session 1 (~)");
+  });
+});
+
 describe("the Command Palette", () => {
   // `web` with a Tab at ~/code/web and a second Tab split in two at ~/code/web/src, the right Pane running vim; `api`
   // at ~/code/api; `old`, closed through its last Tab; and an Unnamed Session at the home directory, which is current.
@@ -1104,7 +1426,14 @@ describe("the Command Palette", () => {
       "pane vim",
       "pane me",
       "action New Session",
+      "action Rename Session",
+      "action Set Session Root",
+      "action Clear Session Root",
+      "action Close Session",
+      "action Delete Session",
       "action New Tab",
+      "action Rename Tab",
+      "action Clear Tab Title",
       "action Split Pane Vertically",
       "action Split Pane Horizontally",
       "action Close Pane",
@@ -1146,8 +1475,11 @@ describe("the Command Palette", () => {
       "action New Tab",
       "action Next Tab",
       "action Split Pane Horizontally",
+      "action Rename Tab",
       "action Next Session",
       "action Next Pane",
+      "action Set Session Root",
+      "action Clear Session Root",
       "action Split Pane Vertically",
       "action Focus Pane Left",
       "action Focus Pane Right",
@@ -1155,6 +1487,8 @@ describe("the Command Palette", () => {
     expect(summarize(core.paletteResults("ab"))).toEqual([
       "action Focus Pane Above",
       "action New Tab",
+      "action Rename Tab",
+      "action Clear Tab Title",
       "action Next Tab",
       "action Previous Tab",
       "action Focus Pane Below",
@@ -1264,6 +1598,13 @@ describe("the Command Palette", () => {
     expect(effects.at(-1)).toEqual({ type: "confirmQuit" });
   });
 });
+
+// Runs the app action the Command Palette offers under `label`.
+function chooseAction(core: ReturnType<typeof startCore>["core"], label: string) {
+  const action = core.paletteResults("").find((result) => result.type === "action" && result.label === label);
+  if (!action) throw new Error(`No app action is labelled ${label}`);
+  core.choosePaletteResult(action);
+}
 
 // Each result as its type and label, e.g. `tab vim`.
 function summarize(results: PaletteResult[]) {

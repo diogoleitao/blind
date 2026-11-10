@@ -4,7 +4,7 @@ import { app, BrowserWindow, dialog, globalShortcut, ipcMain, powerMonitor, scre
 import { createCore, type PaletteResult } from "../core/core";
 import type { FocusDirection } from "../core/layout";
 import type { PaneId, SessionId } from "../core/state";
-import { channels, type SessionView, type TerminalSize } from "../shared/ipc";
+import { channels, type PalettePrompt, type SessionView, type TerminalSize } from "../shared/ipc";
 import { fadeWindow } from "./fade";
 import { createFileStateStore } from "./file-state-store";
 import { createNodePtyShellHost } from "./node-pty-shell-host";
@@ -81,16 +81,25 @@ app.whenReady().then(() => {
     visible.forEach(hideWindow);
   }
 
+  // Hidden at once, and closed once its terminals have reported their latest scrollback, which a Closed Session keeps.
+  function closeWindow(sessionId: SessionId) {
+    const window = windows.get(sessionId);
+    windows.delete(sessionId);
+    if (!window) return;
+    window.hide();
+    void flushScrollback([window]).then(() => window.close());
+  }
+
   core.onEffect((effect) => {
-    if (effect.type === "closeWindow") {
-      const window = windows.get(effect.sessionId);
-      windows.delete(effect.sessionId);
-      window?.close();
-    }
+    if (effect.type === "closeWindow") closeWindow(effect.sessionId);
     if (effect.type === "showApp") showWindow(windowFor(effect.sessionId));
     if (effect.type === "hideApp") hideApp();
     if (effect.type === "showSession") swapToWindow(effect.sessionId);
     if (effect.type === "confirmQuit") void confirmQuit();
+    if (effect.type === "confirmDelete") void confirmDelete(effect.sessionId);
+    if (effect.type === "askSessionName" || effect.type === "askTabTitle") {
+      windows.get(effect.sessionId)?.webContents.send(channels.promptPalette, effect);
+    }
     if (effect.type === "quit") {
       savedForQuit = true;
       app.quit();
@@ -104,9 +113,10 @@ app.whenReady().then(() => {
   // Each window waiting to report its scrollback, by its page.
   const scrollbackFlushes = new Map<WebContents, () => void>();
 
-  // Asks every window's terminals for their latest scrollback, waiting a bounded time for the answers.
-  function flushScrollback() {
-    const pages = [...windows.values()].filter((window) => !window.isDestroyed()).map((window) => window.webContents);
+  // Asks the windows' terminals, every window's by default, for their latest scrollback, waiting a bounded time for the
+  // answers.
+  function flushScrollback(targets = [...windows.values()]) {
+    const pages = targets.filter((window) => !window.isDestroyed()).map((window) => window.webContents);
     return Promise.all(
       pages.map(
         (page) =>
@@ -125,27 +135,46 @@ app.whenReady().then(() => {
   }
 
   // Attached to the visible window, if any, so the dialog shows above the floating panel. With none, e.g. when quit
-  // from outside while hidden, the app comes forward to show it.
+  // from outside while hidden, the app comes forward to show it. Answers with the chosen button's index.
+  async function ask(options: Electron.MessageBoxOptions) {
+    const parent = [...windows.values()].find((window) => window.isVisible());
+    if (!parent) app.focus({ steal: true });
+    const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+    return response;
+  }
+
   async function confirmQuit() {
     if (quitInProgress) return;
     quitInProgress = true;
-    const parent = [...windows.values()].find((window) => window.isVisible());
-    if (!parent) app.focus({ steal: true });
-    const options = {
-      type: "question" as const,
+    const response = await ask({
+      type: "question",
       message: "Quit Blind?",
       detail: "Every Shell stops. Sessions come back with fresh Shells the next time Blind starts.",
       buttons: ["Quit", "Cancel"],
       defaultId: 0,
       cancelId: 1,
-    };
-    const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+    });
     if (response !== 0) {
       quitInProgress = false;
       return;
     }
     await flushScrollback();
     core.quitConfirmed();
+  }
+
+  // Like the quit confirmation, Return accepts and Escape cancels.
+  async function confirmDelete(sessionId: SessionId) {
+    const label = core.sessionLabel(sessionId);
+    if (label === undefined) return;
+    const response = await ask({
+      type: "warning",
+      message: `Delete ${label}?`,
+      detail: "Its Shells stop, and its Tabs, Panes and scrollback are removed for good.",
+      buttons: ["Delete", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) core.deleteConfirmed(sessionId);
   }
 
   if (!globalShortcut.register(hotkey, () => core.hotkeyPressed())) {
@@ -227,6 +256,10 @@ app.whenReady().then(() => {
   ipcMain.on(channels.focusPane, (_event, paneId: PaneId) => core.focusPane(paneId));
   ipcMain.handle(channels.searchPalette, (_event, query: string) => core.paletteResults(query));
   ipcMain.on(channels.choosePaletteResult, (_event, result: PaletteResult) => core.choosePaletteResult(result));
+  ipcMain.on(channels.answerPalettePrompt, (_event, prompt: PalettePrompt, answer: string) => {
+    if (prompt.type === "askSessionName") core.renameSession(prompt.sessionId, answer);
+    else core.renameTab(prompt.tabId, answer);
+  });
 
   // A restored Pane's terminal gets its saved scrollback first, with no colour or style left over from it. The line the
   // cursor was on, usually the old Shell's idle prompt, gives way to a dim marker, and the fresh Shell's output follows.
@@ -273,7 +306,10 @@ app.whenReady().then(() => {
     window.setAlwaysOnTop(true, "screen-saver");
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
     windows.set(sessionId, window);
-    window.on("closed", () => windows.delete(sessionId));
+    // A window closing late, after its scrollback flush, leaves alone the window a reopened Session has since made.
+    window.on("closed", () => {
+      if (windows.get(sessionId) === window) windows.delete(sessionId);
+    });
     window.webContents.on("did-finish-load", () => sendSessionView(sessionId, window));
     window.webContents.on("before-input-event", (event, input) => {
       if (handleShortcut(sessionId, input)) event.preventDefault();

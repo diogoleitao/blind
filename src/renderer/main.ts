@@ -6,7 +6,7 @@ import type { PaletteResult } from "../core/core";
 import type { PaneRect } from "../core/layout";
 import { scrollbackLineLimit } from "../core/scrollback";
 import type { PaneId } from "../core/state";
-import type { BlindApi, SessionView } from "../shared/ipc";
+import type { BlindApi, PalettePrompt, SessionView } from "../shared/ipc";
 
 declare global {
   interface Window {
@@ -142,6 +142,13 @@ let selectedResult = 0;
 let searchCount = 0;
 // Settles once the latest search's results are shown, so Enter never chooses from a list typing has outdated.
 let latestSearch = Promise.resolve();
+// Set while the palette asks for a name or title instead of searching.
+let prompt: PalettePrompt | undefined;
+
+const promptPlaceholders: Record<PalettePrompt["type"], string> = {
+  askSessionName: "Session name",
+  askTabTitle: "Tab title, or empty to follow the running program",
+};
 
 const resultKinds: Record<PaletteResult["type"], string> = {
   session: "Session",
@@ -192,17 +199,40 @@ function searchPalette() {
 }
 
 function openPalette() {
+  prompt = undefined;
   palette.hidden = false;
+  paletteInput.placeholder = "";
   paletteInput.value = "";
   paletteInput.focus();
   searchPalette();
+}
+
+// Offers the suggestion selected, so typing replaces it and Enter accepts it. A search still in flight is dropped.
+function openPrompt(asked: PalettePrompt) {
+  prompt = asked;
+  searchCount += 1;
+  paletteResults = [];
+  renderPalette();
+  palette.hidden = false;
+  paletteInput.placeholder = promptPlaceholders[asked.type];
+  paletteInput.value = asked.suggestion;
+  paletteInput.focus();
+  paletteInput.select();
 }
 
 // The focused Pane's terminal takes the keyboard back.
 function closePalette() {
   if (palette.hidden) return;
   palette.hidden = true;
+  prompt = undefined;
   if (focusedPaneId) terminals.get(focusedPaneId)?.terminal.focus();
+}
+
+// The typed text answers the prompt that was showing; `closePalette` clears it.
+function answerPrompt(shown: PalettePrompt) {
+  const answer = paletteInput.value;
+  closePalette();
+  blind.answerPalettePrompt(shown, answer);
 }
 
 // Does nothing once the palette has closed, e.g. by Escape while Enter waited for a search.
@@ -220,9 +250,13 @@ function moveSelection(offset: number) {
   renderPalette();
 }
 
-paletteInput.addEventListener("input", searchPalette);
+paletteInput.addEventListener("input", () => {
+  if (!prompt) searchPalette();
+});
 paletteInput.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closePalette();
+  else if (event.key === "Enter" && prompt) answerPrompt(prompt);
+  else if (prompt) return;
   else if (event.key === "ArrowDown") moveSelection(1);
   else if (event.key === "ArrowUp") moveSelection(-1);
   else if (event.key === "Enter") void latestSearch.then(() => chooseResult(selectedResult));
@@ -236,6 +270,7 @@ palette.addEventListener("mousedown", (event) => {
 paletteInput.addEventListener("blur", closePalette);
 
 blind.onOpenPalette(openPalette);
+blind.onPalettePrompt(openPrompt);
 blind.onPaneData(writeToTerminal);
 blind.onFlushScrollback(() => terminals.forEach((pane, paneId) => reportScrollback(paneId, pane)));
 blind.onSessionView(render);
