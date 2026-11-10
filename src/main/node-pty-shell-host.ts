@@ -61,8 +61,8 @@ async function runningProgramOf(pid: number) {
   return (name.startsWith("/") ? basename(name) : name.split(" ")[0]) || undefined;
 }
 
-// Runs each Pane's Shell as a login shell in a pseudo-terminal.
-export function createNodePtyShellHost({ shell }: { shell: string }): NodePtyShellHost {
+// Runs each Pane's Shell as a login shell in a pseudo-terminal, `loginShell` unless the core asks for another.
+export function createNodePtyShellHost({ loginShell }: { loginShell: string }): NodePtyShellHost {
   const shells = new Map<PaneId, RunningShell>();
   const listeners: ((event: ShellEvent) => void)[] = [];
 
@@ -99,7 +99,7 @@ export function createNodePtyShellHost({ shell }: { shell: string }): NodePtyShe
   }
 
   return {
-    start(paneId, { workingDirectory }) {
+    start(paneId, { workingDirectory, shell = loginShell }) {
       const pty = spawn(shell, ["-l"], {
         name: "xterm-256color",
         cols: 80,

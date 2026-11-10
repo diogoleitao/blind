@@ -7,7 +7,9 @@ import {
   replacePane,
   successorOf,
 } from "./layout";
+import { defaultSettings, parseConfig, type Settings } from "./config";
 import { fuzzyScore } from "./fuzzy";
+import { type BoundAction, type KeyPress, matchesShortcut } from "./key-bindings";
 import type { Clock, SavedScrollback, ShellHost, Snapshot, StateStore } from "./ports";
 import { capScrollback } from "./scrollback";
 import {
@@ -26,6 +28,10 @@ export type Effect =
   | { type: "closeWindow"; sessionId: SessionId }
   // Fades the app in with the Session visible.
   | { type: "showApp"; sessionId: SessionId }
+  // Fades the app in with the Command Palette on its own, over no Session.
+  | { type: "showPalette" }
+  // Opens the Command Palette over the Session's window.
+  | { type: "openPalette"; sessionId: SessionId }
   | { type: "hideApp" }
   // Makes the Session the visible one in place of the Session shown before, without a fade.
   | { type: "showSession"; sessionId: SessionId }
@@ -37,8 +43,14 @@ export type Effect =
   | { type: "confirmDelete"; sessionId: SessionId }
   // Asks the user for the title of a Tab in the Session, offering `suggestion`, answered with `renameTab`.
   | { type: "askTabTitle"; sessionId: SessionId; tabId: TabId; suggestion: string }
+  // Opens the config file for editing.
+  | { type: "openSettings" }
   // Everything is saved; the app can exit.
-  | { type: "quit" };
+  | { type: "quit" }
+  // Tells the user the config file's settings that were rejected and fell back to their defaults.
+  | { type: "settingsRejected"; settings: string[] }
+  // Tells the user the config file couldn't be read as a JSON object, comments allowed, so the settings stay as they were.
+  | { type: "configUnreadable" };
 
 // Every app action, in the order the Command Palette offers them, by its label.
 const paletteActionLabels = {
@@ -64,6 +76,7 @@ const paletteActionLabels = {
   focusPaneRight: "Focus Pane Right",
   focusPaneUp: "Focus Pane Above",
   focusPaneDown: "Focus Pane Below",
+  openSettings: "Open Settings",
   quit: "Quit Blind",
 } as const;
 
@@ -76,13 +89,6 @@ export type PaletteResult =
   | { type: "pane"; paneId: PaneId; label: string; workingDirectory: string; sessionLabel: string }
   | { type: "action"; action: PaletteAction; label: string };
 
-// The order Open Sessions are cycled through: by name, by most recent use, or by creation.
-export type CycleOrder = "alphabetical" | "recent" | "created";
-
-export interface Settings {
-  cycleOrder: CycleOrder;
-}
-
 export interface CoreDependencies {
   shellHost: ShellHost;
   stateStore: StateStore;
@@ -93,14 +99,23 @@ export interface CoreDependencies {
 export interface Core {
   start(): void;
   state(): CoreState;
+  // With no Open Sessions, shows a new Session or the Command Palette on its own, as the setting says.
   hotkeyPressed(): void;
+  // The Command Palette closed without a choice. Shown on its own, with no Current Session, the app hides with it.
+  paletteDismissed(): void;
   // Blind stopped being the active app, e.g. because another app was clicked.
   focusLost(): void;
   // Quitting always asks for confirmation first.
   quitRequested(): void;
+  // With the Command Palette on its own, the only thing on screen, the app hides once the quit is cancelled.
+  quitCancelled(): void;
   quitConfirmed(): void;
-  // Settings start at their defaults: alphabetical cycle order.
-  settingsChanged(settings: Settings): void;
+  // The config file's text, or undefined without a file. Settings start at their defaults, as without a file. Text that
+  // isn't a JSON object, e.g. a save caught halfway through an edit, leaves the settings as they were.
+  configChanged(config: string | undefined): void;
+  // The config file exists but couldn't be opened; the settings stay as they were.
+  configUnreadable(): void;
+  settings(): Settings;
   // Opens an Unnamed Session with one Tab at the home directory and makes it the Current Session.
   newSession(): void;
   // Opens a Closed Session again as the Current Session, restoring it as Restore does. One closed through its last Tab
@@ -142,6 +157,9 @@ export interface Core {
   focusNextPane(sessionId: SessionId): void;
   // Moves to the Pane across the focused Pane's edge, if there is one.
   focusPaneInDirection(sessionId: SessionId, direction: FocusDirection): void;
+  // Runs the action the key is bound to on the Session whose window it was pressed in, answering whether one was, so
+  // the Pane's terminal gets the key only when none was.
+  keyPressed(sessionId: SessionId, keyPress: KeyPress): boolean;
   // Focuses a Pane within its Tab, e.g. because it was clicked.
   focusPane(paneId: PaneId): void;
   // The title the Tab was renamed to, or else the focused Pane's running program, or its working directory's folder name
@@ -159,8 +177,8 @@ export interface Core {
   choosePaletteResult(result: PaletteResult): void;
   // Where each of the Tab's Panes sits, in layout order.
   paneRects(tabId: TabId): PaneRect[];
-  // A Pane's terminal reported its serialized scrollback, which is kept up to its last `scrollbackLineLimit` lines and
-  // stamped with the clock's time.
+  // A Pane's terminal reported its serialized scrollback, which is kept up to its last lines, as many as the scrollback
+  // lines setting says, and stamped with the clock's time.
   scrollbackChanged(paneId: PaneId, scrollback: string): void;
   // The Pane's saved scrollback, for its terminal to replay when it opens.
   scrollback(paneId: PaneId): SavedScrollback | undefined;
@@ -174,7 +192,7 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
   let scrollback: Record<PaneId, SavedScrollback> = {};
   // Whether the app is on screen. Not part of the snapshot: it says nothing about Sessions.
   let appShown = true;
-  let settings: Settings = { cycleOrder: "alphabetical" };
+  let settings: Settings = defaultSettings;
   // The Session order taken at the first of a run of consecutive cycle presses; absent outside one.
   let cycleStreak: SessionId[] | undefined;
   const effectListeners: ((effect: Effect) => void)[] = [];
@@ -290,10 +308,15 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     return directory.split("/").filter(Boolean).at(-1) ?? "/";
   }
 
+  // Runs the shell setting's program, so a change to it reaches only the Shells started after it.
+  function startShell({ id, workingDirectory }: Pane) {
+    shellHost.start(id, { workingDirectory, shell: settings.shell });
+  }
+
   // A new Pane whose Shell starts in `workingDirectory`.
   function openPane(workingDirectory: string): Pane {
     const pane = { id: nextId("pane"), workingDirectory };
-    shellHost.start(pane.id, { workingDirectory });
+    startShell(pane);
     return pane;
   }
 
@@ -304,7 +327,7 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
       tabs: session.tabs.map((tab) => ({
         ...tab,
         panes: tab.panes.map(({ runningProgram: _stopped, ...pane }) => {
-          shellHost.start(pane.id, { workingDirectory: pane.workingDirectory });
+          startShell(pane);
           return pane;
         }),
       })),
@@ -378,6 +401,13 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     if (next) return makeCurrent(next.id);
     setState({ ...state, currentSessionId: undefined });
     if (!appShown) return;
+    appShown = false;
+    emit({ type: "hideApp" });
+  }
+
+  // With the Command Palette on its own, the only thing on screen, the app hides.
+  function hideWithNoCurrentSession() {
+    if (!appShown || state.currentSessionId !== undefined) return;
     appShown = false;
     emit({ type: "hideApp" });
   }
@@ -610,7 +640,10 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
   });
 
   // The app actions on the Current Session, by the core's own commands.
-  const sessionActions: Record<Exclude<PaletteAction, "newSession" | "quit">, (sessionId: SessionId) => void> = {
+  const sessionActions: Record<
+    Exclude<PaletteAction, "newSession" | "openSettings" | "quit">,
+    (sessionId: SessionId) => void
+  > = {
     renameSession: (sessionId) => {
       const tab = focusedTabOf(sessionId);
       if (!tab) return;
@@ -645,11 +678,15 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     focusPaneDown: (sessionId) => core.focusPaneInDirection(sessionId, "down"),
   };
 
-  // Without a Current Session, only the actions that don't act on one run.
-  function runAction(action: PaletteAction) {
+  // Without a Session, only the actions that don't act on one run.
+  function runAction(action: BoundAction, sessionId: SessionId | undefined) {
     if (action === "newSession") return core.newSession();
+    if (action === "openSettings") return emit({ type: "openSettings" });
     if (action === "quit") return core.quitRequested();
-    if (state.currentSessionId !== undefined) sessionActions[action](state.currentSessionId);
+    if (sessionId === undefined) return;
+    if (action === "openCommandPalette") return emit({ type: "openPalette", sessionId });
+    if (action.startsWith("focusTab")) return core.focusTab(sessionId, Number(action.slice("focusTab".length)) - 1);
+    sessionActions[action as keyof typeof sessionActions](sessionId);
   }
 
   const core: Core = {
@@ -663,22 +700,32 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     hotkeyPressed: command(() => {
       appShown = !appShown;
       if (!appShown) return emit({ type: "hideApp" });
-      if (state.currentSessionId === undefined) addSession();
+      if (state.currentSessionId === undefined) {
+        if (settings.hotkeyWithNoOpenSessions === "palette") return emit({ type: "showPalette" });
+        addSession();
+      }
       emit({ type: "showApp", sessionId: state.currentSessionId! });
     }),
+    paletteDismissed: command(hideWithNoCurrentSession),
     focusLost: command(() => {
       if (!appShown) return;
       appShown = false;
       emit({ type: "hideApp" });
     }),
     quitRequested: command(() => emit({ type: "confirmQuit" })),
+    quitCancelled: command(hideWithNoCurrentSession),
     quitConfirmed: command(() => {
       stateStore.flush();
       emit({ type: "quit" });
     }),
-    settingsChanged: command((next) => {
-      settings = next;
+    configChanged: command((config) => {
+      const parsed = parseConfig(config);
+      if (!parsed) return emit({ type: "configUnreadable" });
+      settings = parsed.settings;
+      if (parsed.rejected.length > 0) emit({ type: "settingsRejected", settings: parsed.rejected });
     }),
+    configUnreadable: command(() => emit({ type: "configUnreadable" })),
+    settings: () => settings,
     newSession: command(() => {
       addSession();
       emit({ type: "showSession", sessionId: state.currentSessionId! });
@@ -773,6 +820,15 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
         return neighbour ? withFocusedPane(tab, neighbour) : tab;
       });
     }),
+    // Not a command itself, so that cycling Sessions by shortcut keeps its run of presses going.
+    keyPressed(sessionId, keyPress) {
+      const bound = Object.entries(settings.keyBindings).find(
+        ([, shortcut]) => shortcut && matchesShortcut(keyPress, shortcut),
+      );
+      if (!bound) return false;
+      runAction(bound[0] as BoundAction, sessionId);
+      return true;
+    },
     focusPane: command((paneId) => {
       const session = findSessionWithPane(paneId);
       if (!session) return;
@@ -814,11 +870,14 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
         .toSorted((a, b) => b.score! - a.score!)
         .map(({ result }) => result);
     },
+    // The Command Palette on its own leaves nothing on screen after a choice that shows no Session, except while the
+    // quit confirmation waits for an answer.
     choosePaletteResult: command((result) => {
       if (result.type === "session") jumpToSession(result.sessionId);
       if (result.type === "tab") jumpToTab(result.tabId);
       if (result.type === "pane") jumpToPane(result.paneId);
-      if (result.type === "action") runAction(result.action);
+      if (result.type === "action") runAction(result.action, state.currentSessionId);
+      if (!(result.type === "action" && result.action === "quit")) hideWithNoCurrentSession();
     }),
     paneRects(tabId) {
       const tab = findTab(tabId);
@@ -826,7 +885,8 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     },
     scrollbackChanged(paneId, reported) {
       if (!findSessionWithPane(paneId)) return;
-      scrollback = { ...scrollback, [paneId]: { text: capScrollback(reported), savedAt: clock.now() } };
+      const text = capScrollback(reported, settings.scrollbackLines);
+      scrollback = { ...scrollback, [paneId]: { text, savedAt: clock.now() } };
       save();
     },
     scrollback: (paneId) => scrollback[paneId],

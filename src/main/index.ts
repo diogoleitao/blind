@@ -1,10 +1,21 @@
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, powerMonitor, screen, type WebContents } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  Notification,
+  powerMonitor,
+  screen,
+  shell,
+  type WebContents,
+} from "electron";
 import { createCore, type PaletteResult } from "../core/core";
-import type { FocusDirection } from "../core/layout";
 import type { PaneId, SessionId } from "../core/state";
 import { channels, type PalettePrompt, type SessionView, type TerminalSize } from "../shared/ipc";
+import { type ConfigRead, createConfigFile } from "./config-file";
 import { fadeWindow } from "./fade";
 import { createFileStateStore } from "./file-state-store";
 import { createNodePtyShellHost } from "./node-pty-shell-host";
@@ -34,14 +45,21 @@ app.whenReady().then(() => {
   // Keeps the app out of the Dock and Cmd+Tab.
   app.setActivationPolicy("accessory");
 
-  const shellHost = createNodePtyShellHost({ shell: process.env.SHELL || userInfo().shell || "/bin/zsh" });
+  const shellHost = createNodePtyShellHost({ loginShell: process.env.SHELL || userInfo().shell || "/bin/zsh" });
   const core = createCore({
     shellHost,
     stateStore: createFileStateStore(join(app.getPath("appData"), "Blind")),
     clock: { now: () => Date.now() },
     homeDirectory: homedir(),
   });
+  const configFile = createConfigFile(join(homedir(), ".config", "blind"));
   const windows = new Map<SessionId, BrowserWindow>();
+  // The Command Palette on its own, made the first time the Hotkey shows it with no Open Sessions.
+  let paletteWindow: BrowserWindow | undefined;
+
+  function allWindows() {
+    return paletteWindow ? [...windows.values(), paletteWindow] : [...windows.values()];
+  }
 
   // Blind becomes the active app while shown, like iTerm2's hotkey window, so switching to any other app is a focus loss.
   function showWindow(window: BrowserWindow) {
@@ -63,20 +81,35 @@ app.whenReady().then(() => {
     });
   }
 
-  // Shows the Session's window at once and hides the one it replaces, with no fade.
+  // Shows the Session's window at once and hides the one it replaces, or the Command Palette on its own, with no fade.
   function swapToWindow(sessionId: SessionId) {
     const window = windowFor(sessionId);
     window.setOpacity(1);
     window.show();
     window.focus();
-    windows.forEach((other, otherId) => {
-      if (otherId !== sessionId && other.isVisible()) other.hide();
-    });
+    for (const other of allWindows()) {
+      if (other !== window && other.isVisible()) other.hide();
+    }
+  }
+
+  // Asks a loaded page for the palette again; a page still loading opens it by itself.
+  function showPaletteWindow() {
+    if (!paletteWindow) {
+      const window = createPanel();
+      window.on("closed", () => {
+        paletteWindow = undefined;
+      });
+      loadPage(window, "palette");
+      paletteWindow = window;
+    } else if (!paletteWindow.webContents.isLoading()) {
+      paletteWindow.webContents.send(channels.openPalette);
+    }
+    showWindow(paletteWindow);
   }
 
   // With no window left on screen, e.g. once the last Open Session's window closed, there's nothing to fade.
   function hideApp() {
-    const visible = [...windows.values()].filter((window) => window.isVisible());
+    const visible = allWindows().filter((window) => window.isVisible());
     if (visible.length === 0) app.hide();
     visible.forEach(hideWindow);
   }
@@ -93,6 +126,8 @@ app.whenReady().then(() => {
   core.onEffect((effect) => {
     if (effect.type === "closeWindow") closeWindow(effect.sessionId);
     if (effect.type === "showApp") showWindow(windowFor(effect.sessionId));
+    if (effect.type === "showPalette") showPaletteWindow();
+    if (effect.type === "openPalette") windows.get(effect.sessionId)?.webContents.send(channels.openPalette);
     if (effect.type === "hideApp") hideApp();
     if (effect.type === "showSession") swapToWindow(effect.sessionId);
     if (effect.type === "confirmQuit") void confirmQuit();
@@ -100,11 +135,30 @@ app.whenReady().then(() => {
     if (effect.type === "askSessionName" || effect.type === "askTabTitle") {
       windows.get(effect.sessionId)?.webContents.send(channels.promptPalette, effect);
     }
+    if (effect.type === "openSettings") void openSettings();
+    if (effect.type === "settingsRejected") {
+      notify("Some settings were rejected", `${effect.settings.join(", ")} in config.jsonc use their defaults.`);
+    }
+    if (effect.type === "configUnreadable") {
+      notify("Settings couldn't be read", "config.jsonc couldn't be read as JSON with comments; settings are unchanged.");
+    }
     if (effect.type === "quit") {
       savedForQuit = true;
       app.quit();
     }
   });
+
+  // A system notification, seen even while Blind is hidden behind the editor the config file was saved from.
+  function notify(title: string, body: string) {
+    new Notification({ title, body }).show();
+  }
+
+  // With no app set to open `.jsonc` files, the file is shown in Finder instead.
+  async function openSettings() {
+    configFile.createIfMissing();
+    const failure = await shell.openPath(configFile.path);
+    if (failure) shell.showItemInFolder(configFile.path);
+  }
 
   // Set once everything is saved, letting the next quit through.
   let savedForQuit = false;
@@ -137,7 +191,7 @@ app.whenReady().then(() => {
   // Attached to the visible window, if any, so the dialog shows above the floating panel. With none, e.g. when quit
   // from outside while hidden, the app comes forward to show it. Answers with the chosen button's index.
   async function ask(options: Electron.MessageBoxOptions) {
-    const parent = [...windows.values()].find((window) => window.isVisible());
+    const parent = allWindows().find((window) => window.isVisible());
     if (!parent) app.focus({ steal: true });
     const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
     return response;
@@ -156,6 +210,7 @@ app.whenReady().then(() => {
     });
     if (response !== 0) {
       quitInProgress = false;
+      core.quitCancelled();
       return;
     }
     await flushScrollback();
@@ -218,44 +273,16 @@ app.whenReady().then(() => {
 
   core.onStateChange(() => windows.forEach((window, sessionId) => sendSessionView(sessionId, window)));
 
-  const arrowDirections: Record<string, FocusDirection> = {
-    ArrowLeft: "left",
-    ArrowRight: "right",
-    ArrowUp: "up",
-    ArrowDown: "down",
-  };
-
-  // The Command Palette, Session, Tab and Pane shortcuts, taken before the Pane's terminal sees them. Brackets and the
-  // backtick match by key position too, since Shift turns them into other characters on some layouts.
-  function handleShortcut(sessionId: SessionId, input: Electron.Input) {
-    if (input.type !== "keyDown" || !input.meta || input.control) return false;
-    const key = input.key.toLowerCase();
-    const leftBracket = key === "{" || key === "[" || input.code === "BracketLeft";
-    const rightBracket = key === "}" || key === "]" || input.code === "BracketRight";
-    if (input.alt) {
-      const direction = arrowDirections[input.key];
-      if (input.shift || !direction) return false;
-      core.focusPaneInDirection(sessionId, direction);
-    } else if (input.code === "Backquote") {
-      if (input.shift) core.focusPreviousSession();
-      else core.focusNextSession();
-    } else if (!input.shift && key === "k") windows.get(sessionId)?.webContents.send(channels.openPalette);
-    else if (!input.shift && key === "n") core.newSession();
-    else if (!input.shift && key === "t") core.newTab(sessionId);
-    else if (key === "d") core.splitPane(sessionId, input.shift ? "horizontal" : "vertical");
-    else if (!input.shift && key === "w") core.closePane(sessionId);
-    else if (!input.shift && /^[1-9]$/.test(key)) core.focusTab(sessionId, Number(key) - 1);
-    else if (input.shift && leftBracket) core.focusPreviousTab(sessionId);
-    else if (input.shift && rightBracket) core.focusNextTab(sessionId);
-    else if (leftBracket) core.focusPreviousPane(sessionId);
-    else if (rightBracket) core.focusNextPane(sessionId);
-    else return false;
-    return true;
+  function sendTerminalSettings(window: BrowserWindow) {
+    if (!window.isDestroyed()) {
+      window.webContents.send(channels.terminalSettings, { scrollbackLines: core.settings().scrollbackLines });
+    }
   }
 
   ipcMain.on(channels.focusPane, (_event, paneId: PaneId) => core.focusPane(paneId));
   ipcMain.handle(channels.searchPalette, (_event, query: string) => core.paletteResults(query));
   ipcMain.on(channels.choosePaletteResult, (_event, result: PaletteResult) => core.choosePaletteResult(result));
+  ipcMain.on(channels.dismissPalette, () => core.paletteDismissed());
   ipcMain.on(channels.answerPalettePrompt, (_event, prompt: PalettePrompt, answer: string) => {
     if (prompt.type === "askSessionName") core.renameSession(prompt.sessionId, answer);
     else core.renameTab(prompt.tabId, answer);
@@ -281,11 +308,8 @@ app.whenReady().then(() => {
   );
   ipcMain.on(channels.scrollbackFlushed, (event) => scrollbackFlushes.get(event.sender)?.());
 
-  // One window per Open Session, made the first time the Session is shown.
-  function windowFor(sessionId: SessionId) {
-    const existing = windows.get(sessionId);
-    if (existing) return existing;
-    // A panel floats above other apps, fullscreen ones included.
+  // A transparent panel filling the visible area, floating above other apps, fullscreen ones included, on every Space.
+  function createPanel(options: Electron.BrowserWindowConstructorOptions = {}) {
     const window = new BrowserWindow({
       ...screen.getPrimaryDisplay().workArea,
       type: "panel",
@@ -298,27 +322,54 @@ app.whenReady().then(() => {
       maximizable: false,
       fullscreenable: false,
       alwaysOnTop: true,
-      vibrancy: "under-window",
-      visualEffectState: "active",
       backgroundColor: "#00000000",
       webPreferences: { preload: join(import.meta.dirname, "../preload/index.mjs"), sandbox: false },
+      ...options,
     });
     window.setAlwaysOnTop(true, "screen-saver");
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+    window.webContents.on("did-finish-load", () => sendTerminalSettings(window));
+    return window;
+  }
+
+  // The renderer's page; `hash` picks which page it is.
+  function loadPage(window: BrowserWindow, hash?: string) {
+    const url = process.env.ELECTRON_RENDERER_URL;
+    if (url) window.loadURL(hash ? `${url}#${hash}` : url);
+    else window.loadFile(join(import.meta.dirname, "../renderer/index.html"), { hash });
+  }
+
+  // One window per Open Session, made the first time the Session is shown, with the window's blur behind its Panes.
+  function windowFor(sessionId: SessionId) {
+    const existing = windows.get(sessionId);
+    if (existing) return existing;
+    const window = createPanel({ vibrancy: "under-window", visualEffectState: "active" });
     windows.set(sessionId, window);
     // A window closing late, after its scrollback flush, leaves alone the window a reopened Session has since made.
     window.on("closed", () => {
       if (windows.get(sessionId) === window) windows.delete(sessionId);
     });
     window.webContents.on("did-finish-load", () => sendSessionView(sessionId, window));
+    // Bound shortcuts are taken before the Pane's terminal sees them.
     window.webContents.on("before-input-event", (event, input) => {
-      if (handleShortcut(sessionId, input)) event.preventDefault();
+      if (input.type === "keyDown" && core.keyPressed(sessionId, input)) event.preventDefault();
     });
-    if (process.env.ELECTRON_RENDERER_URL) window.loadURL(process.env.ELECTRON_RENDERER_URL);
-    else window.loadFile(join(import.meta.dirname, "../renderer/index.html"));
+    loadPage(window);
     return window;
   }
 
+  // Read before starting, so restored Shells start with the configured shell.
+  function applyConfig(read: ConfigRead) {
+    if (read.readable) core.configChanged(read.text);
+    else core.configUnreadable();
+  }
+
+  configFile.writeSchema();
+  applyConfig(configFile.read());
+  configFile.watch((read) => {
+    applyConfig(read);
+    allWindows().forEach(sendTerminalSettings);
+  });
   core.start();
   // The app starts shown; showing now, not on ready-to-show, keeps the window in step with the core.
   showWindow(windowFor(core.state().currentSessionId!));

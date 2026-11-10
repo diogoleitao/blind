@@ -2,11 +2,11 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { defaultSettings } from "../core/config";
 import type { PaletteResult } from "../core/core";
 import type { PaneRect } from "../core/layout";
-import { scrollbackLineLimit } from "../core/scrollback";
 import type { PaneId } from "../core/state";
-import type { BlindApi, PalettePrompt, SessionView } from "../shared/ipc";
+import type { BlindApi, PalettePrompt, SessionView, TerminalSettings } from "../shared/ipc";
 
 declare global {
   interface Window {
@@ -27,10 +27,14 @@ interface PaneTerminal {
 }
 
 const { blind } = window;
+// The page of the Command Palette on its own, which the app shows with no Open Sessions, rather than a Session's.
+const standalone = location.hash === "#palette";
 const panesElement = document.getElementById("panes")!;
 const tabBar = document.getElementById("tab-bar")!;
 const terminals = new Map<PaneId, PaneTerminal>();
 let focusedPaneId: PaneId | undefined;
+// Replaced by the main process's before any terminal opens.
+let terminalSettings: TerminalSettings = { scrollbackLines: defaultSettings.scrollbackLines };
 
 // Puts a Pane's element at its rectangle, with a divider along each edge it shares with another Pane.
 function place(element: HTMLDivElement, rect: PaneRect) {
@@ -59,7 +63,7 @@ function openPane(rect: PaneRect): PaneTerminal {
   const terminal = new Terminal({
     allowTransparency: true,
     theme: { background: "#00000000" },
-    scrollback: scrollbackLineLimit,
+    scrollback: terminalSettings.scrollbackLines,
   });
   const fit = new FitAddon();
   const serialize = new SerializeAddon();
@@ -79,11 +83,17 @@ function reportScrollback(paneId: PaneId, pane: PaneTerminal) {
   clearTimeout(pane.reportTimer);
   pane.reportTimer = undefined;
   const scrollback = pane.serialize.serialize({
-    scrollback: scrollbackLineLimit,
+    scrollback: terminalSettings.scrollbackLines,
     excludeAltBuffer: true,
     excludeModes: true,
   });
   blind.reportScrollback(paneId, scrollback);
+}
+
+// Open terminals keep their scrollback up to the new number of lines from now on.
+function applyTerminalSettings(settings: TerminalSettings) {
+  terminalSettings = settings;
+  for (const pane of terminals.values()) pane.terminal.options.scrollback = settings.scrollbackLines;
 }
 
 function writeToTerminal(paneId: PaneId, data: string) {
@@ -228,6 +238,14 @@ function closePalette() {
   if (focusedPaneId) terminals.get(focusedPaneId)?.terminal.focus();
 }
 
+// Closing without a choice, by Escape or by clicking away. Choosing closes the palette first, so a blur that follows
+// isn't taken for one.
+function dismissPalette() {
+  if (palette.hidden) return;
+  closePalette();
+  blind.dismissPalette();
+}
+
 // The typed text answers the prompt that was showing; `closePalette` clears it.
 function answerPrompt(shown: PalettePrompt) {
   const answer = paletteInput.value;
@@ -254,7 +272,7 @@ paletteInput.addEventListener("input", () => {
   if (!prompt) searchPalette();
 });
 paletteInput.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closePalette();
+  if (event.key === "Escape") dismissPalette();
   else if (event.key === "Enter" && prompt) answerPrompt(prompt);
   else if (prompt) return;
   else if (event.key === "ArrowDown") moveSelection(1);
@@ -267,8 +285,9 @@ paletteInput.addEventListener("keydown", (event) => {
 palette.addEventListener("mousedown", (event) => {
   if (event.target !== paletteInput) event.preventDefault();
 });
-paletteInput.addEventListener("blur", closePalette);
+paletteInput.addEventListener("blur", dismissPalette);
 
+blind.onTerminalSettings(applyTerminalSettings);
 blind.onOpenPalette(openPalette);
 blind.onPalettePrompt(openPrompt);
 blind.onPaneData(writeToTerminal);
@@ -277,3 +296,8 @@ blind.onSessionView(render);
 window.addEventListener("resize", () => {
   for (const pane of terminals.values()) pane.fit.fit();
 });
+// Shown the first time once loaded; the main process asks for it on every later showing.
+if (standalone) {
+  document.body.classList.add("standalone");
+  openPalette();
+}

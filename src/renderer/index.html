@@ -16,6 +16,10 @@
         flex-direction: column;
         background: rgba(0, 0, 0, 0.75);
       }
+      /* The Command Palette on its own floats over the other apps with nothing behind it. */
+      body.standalone {
+        background: transparent;
+      }
       #panes {
         position: relative;
         flex: 1;

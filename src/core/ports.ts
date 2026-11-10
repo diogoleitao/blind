@@ -7,7 +7,8 @@ export type ShellEvent =
   | { type: "runningProgramChanged"; paneId: PaneId; runningProgram: string | undefined };
 
 export interface ShellHost {
-  start(paneId: PaneId, options: { workingDirectory: string }): void;
+  // Runs `shell`, or the user's login shell without one.
+  start(paneId: PaneId, options: { workingDirectory: string; shell?: string }): void;
   stop(paneId: PaneId): void;
   subscribe(listener: (event: ShellEvent) => void): void;
 }

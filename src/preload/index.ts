@@ -5,6 +5,9 @@ const api: BlindApi = {
   onSessionView: (listener) => {
     ipcRenderer.on(channels.sessionView, (_event, view) => listener(view));
   },
+  onTerminalSettings: (listener) => {
+    ipcRenderer.on(channels.terminalSettings, (_event, settings) => listener(settings));
+  },
   focusPane: (paneId) => ipcRenderer.send(channels.focusPane, paneId),
   attachPane: (paneId, size) => ipcRenderer.invoke(channels.attachPane, paneId, size),
   writeToPane: (paneId, data) => ipcRenderer.send(channels.writeToPane, paneId, data),
@@ -23,6 +26,7 @@ const api: BlindApi = {
   onOpenPalette: (listener) => {
     ipcRenderer.on(channels.openPalette, () => listener());
   },
+  dismissPalette: () => ipcRenderer.send(channels.dismissPalette),
   searchPalette: (query) => ipcRenderer.invoke(channels.searchPalette, query),
   choosePaletteResult: (result) => ipcRenderer.send(channels.choosePaletteResult, result),
   onPalettePrompt: (listener) => {

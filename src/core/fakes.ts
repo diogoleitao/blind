@@ -2,12 +2,12 @@ import type { Clock, ShellEvent, ShellHost } from "./ports";
 import type { PaneId } from "./state";
 
 export function createFakeShellHost() {
-  const started: { paneId: PaneId; workingDirectory: string }[] = [];
+  const started: { paneId: PaneId; workingDirectory: string; shell?: string }[] = [];
   const stopped: PaneId[] = [];
   const listeners: ((event: ShellEvent) => void)[] = [];
   const host: ShellHost = {
-    start: (paneId, { workingDirectory }) => {
-      started.push({ paneId, workingDirectory });
+    start: (paneId, { workingDirectory, shell }) => {
+      started.push({ paneId, workingDirectory, shell });
     },
     stop: (paneId) => {
       stopped.push(paneId);

@@ -1,17 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { createCore, type PaletteResult } from "./core";
+import type { KeyPress } from "./key-bindings";
 import { createControllableClock, createFakeShellHost } from "./fakes";
 import { createInMemoryStateStore } from "./in-memory-state-store";
 import type { StateStore } from "./ports";
 import { idsIn, panesIn, type Session } from "./state";
 
-// Passing the state store of an earlier core relaunches the app from what that core saved.
-function startCore(stateStore: StateStore = createInMemoryStateStore()) {
+// Passing the state store of an earlier core relaunches the app from what that core saved. A config file's text is read
+// before starting, as the app does.
+function startCore(stateStore: StateStore = createInMemoryStateStore(), config?: string) {
   const shellHost = createFakeShellHost();
   const clock = createControllableClock(1_000);
   const core = createCore({ shellHost, stateStore, clock, homeDirectory: "/Users/me" });
   const effects: unknown[] = [];
   core.onEffect((effect) => effects.push(effect));
+  if (config !== undefined) core.configChanged(config);
   core.start();
   return { core, shellHost, clock, effects, stateStore };
 }
@@ -193,9 +196,18 @@ describe("cycling the Current Session", () => {
   it("sorts by creation, oldest first, with Unnamed Sessions last, in the created order", () => {
     const { core } = startWithFiveSessions();
 
-    core.settingsChanged({ cycleOrder: "created" });
+    core.configChanged('{ "cycleOrder": "created" }');
 
     expect(labelsInCycleOrder(core)).toEqual(["zed", "api", "web", "Session 2 (~)", "Session 1 (~)"]);
+  });
+
+  it("goes back to alphabetical once the config file is gone", () => {
+    const { core } = startWithFiveSessions();
+    core.configChanged('{ "cycleOrder": "created" }');
+
+    core.configChanged(undefined);
+
+    expect(labelsInCycleOrder(core)).toEqual(["api", "web", "zed", "Session 1 (~)", "Session 2 (~)"]);
   });
 
   // Sessions `a`, `b` and `c`, created a second apart in that order, then an Unnamed Session; `c` is the Current
@@ -212,7 +224,7 @@ describe("cycling the Current Session", () => {
     core.focusPreviousSession();
     core.newTab(core.state().currentSessionId!);
     clock.advance(1_000);
-    core.settingsChanged({ cycleOrder: "recent" });
+    core.configChanged('{ "cycleOrder": "recent" }');
     return started;
   }
 
@@ -387,6 +399,287 @@ describe("the Hotkey", () => {
     expect(core.state().currentSessionId).toBe(session.id);
     expect(shellHost.started.at(-1)).toEqual({ paneId: session.tabs[0].panes[0].id, workingDirectory: "/Users/me" });
     expect(effects).toEqual([{ type: "showApp", sessionId: session.id }]);
+  });
+
+  describe("set to open the Command Palette with no Open Sessions", () => {
+    // `api`, closed through its last Tab, so the app is hidden with no Open Sessions.
+    function startWithNoOpenSessions() {
+      const started = startCore(undefined, '{ "hotkeyWithNoOpenSessions": "palette" }');
+      const api = started.core.state().sessions[0];
+      started.core.renameSession(api.id, "api");
+      started.shellHost.exit(api.tabs[0].panes[0].id);
+      started.effects.length = 0;
+      return { ...started, api: api.id };
+    }
+
+    it("shows the Command Palette on its own, opening no Session", () => {
+      const { core, effects } = startWithNoOpenSessions();
+
+      core.hotkeyPressed();
+
+      expect(core.state().sessions).toHaveLength(1);
+      expect(core.state().currentSessionId).toBeUndefined();
+      expect(effects).toEqual([{ type: "showPalette" }]);
+    });
+
+    it("shows a Closed Session chosen from it as the Current Session", () => {
+      const { core, effects, api } = startWithNoOpenSessions();
+      core.hotkeyPressed();
+
+      core.choosePaletteResult(core.paletteResults("ss api")[0]);
+
+      expect(core.state().currentSessionId).toBe(api);
+      expect(effects.at(-1)).toEqual({ type: "showSession", sessionId: api });
+    });
+
+    it("hides the app when dismissed, showing the Command Palette again on the next press", () => {
+      const { core, effects } = startWithNoOpenSessions();
+      core.hotkeyPressed();
+
+      core.paletteDismissed();
+      core.hotkeyPressed();
+
+      expect(effects).toEqual([{ type: "showPalette" }, { type: "hideApp" }, { type: "showPalette" }]);
+    });
+
+    it("hides the app after a choice that shows no Session", () => {
+      const { core, effects } = startWithNoOpenSessions();
+      core.hotkeyPressed();
+
+      chooseAction(core, "New Tab");
+      core.hotkeyPressed();
+      chooseAction(core, "Open Settings");
+
+      expect(effects).toEqual([
+        { type: "showPalette" },
+        { type: "hideApp" },
+        { type: "showPalette" },
+        { type: "openSettings" },
+        { type: "hideApp" },
+      ]);
+    });
+
+    it("stays shown while asking to quit, hiding the app once the quit is cancelled", () => {
+      const { core, effects } = startWithNoOpenSessions();
+      core.hotkeyPressed();
+
+      chooseAction(core, "Quit Blind");
+      expect(effects).toEqual([{ type: "showPalette" }, { type: "confirmQuit" }]);
+
+      core.quitCancelled();
+      expect(effects.at(-1)).toEqual({ type: "hideApp" });
+    });
+
+    it("opens a new Session chosen from it", () => {
+      const { core, effects } = startWithNoOpenSessions();
+      core.hotkeyPressed();
+
+      chooseAction(core, "New Session");
+
+      expect(effects).toEqual([{ type: "showPalette" }, { type: "showSession", sessionId: core.state().currentSessionId }]);
+    });
+
+    it("shows the Command Palette even with no Sessions at all", () => {
+      const { core, effects, api } = startWithNoOpenSessions();
+      core.deleteConfirmed(api);
+      effects.length = 0;
+
+      core.hotkeyPressed();
+
+      expect(core.state().sessions).toEqual([]);
+      expect(effects).toEqual([{ type: "showPalette" }]);
+    });
+  });
+
+  it("rejects anything but `new` or `palette` for what it does with no Open Sessions, opening a new Session", () => {
+    const { core, shellHost, effects } = startCore(undefined, '{ "hotkeyWithNoOpenSessions": "nothing" }');
+    shellHost.exit(core.state().sessions[0].tabs[0].panes[0].id);
+
+    core.hotkeyPressed();
+
+    expect(core.state().sessions[1].status).toBe("open");
+    expect(effects[0]).toEqual({ type: "settingsRejected", settings: ["hotkeyWithNoOpenSessions"] });
+  });
+});
+
+// A key pressed as the keyboard reports it: the key it produces, the physical key, and the modifiers held, e.g.
+// `press("}", "BracketRight", "meta", "shift")`.
+function press(key: string, code: string, ...modifiers: ("meta" | "shift" | "alt" | "control")[]): KeyPress {
+  return {
+    key,
+    code,
+    meta: modifiers.includes("meta"),
+    shift: modifiers.includes("shift"),
+    alt: modifiers.includes("alt"),
+    control: modifiers.includes("control"),
+  };
+}
+
+describe("key bindings", () => {
+  it("open the Command Palette over the Session's window with Cmd+K by default", () => {
+    const { core, effects } = startCore();
+    const sessionId = core.state().sessions[0].id;
+
+    expect(core.keyPressed(sessionId, press("k", "KeyK", "meta"))).toBe(true);
+
+    expect(effects).toEqual([{ type: "openPalette", sessionId }]);
+  });
+
+  it("run iTerm2's default shortcuts on the Session", () => {
+    const { core, effects } = startCore();
+    const sessionId = core.state().sessions[0].id;
+    const session = () => core.state().sessions[0];
+    const tab = () => session().tabs.find((candidate) => candidate.id === session().focusedTabId)!;
+
+    core.keyPressed(sessionId, press("t", "KeyT", "meta"));
+    expect(session().tabs).toHaveLength(2);
+    core.keyPressed(sessionId, press("1", "Digit1", "meta"));
+    expect(session().focusedTabId).toBe(session().tabs[0].id);
+    core.keyPressed(sessionId, press("}", "BracketRight", "meta", "shift"));
+    expect(session().focusedTabId).toBe(session().tabs[1].id);
+    core.keyPressed(sessionId, press("{", "BracketLeft", "meta", "shift"));
+    expect(session().focusedTabId).toBe(session().tabs[0].id);
+    core.keyPressed(sessionId, press("d", "KeyD", "meta"));
+    expect(tab().layout).toMatchObject({ type: "split", direction: "vertical" });
+    core.keyPressed(sessionId, press("D", "KeyD", "meta", "shift"));
+    expect(tab().layout).toMatchObject({ second: { type: "split", direction: "horizontal" } });
+    core.keyPressed(sessionId, press("[", "BracketLeft", "meta"));
+    expect(tab().focusedPaneId).toBe(tab().panes[1].id);
+    core.keyPressed(sessionId, press("]", "BracketRight", "meta"));
+    expect(tab().focusedPaneId).toBe(tab().panes[2].id);
+    core.keyPressed(sessionId, press("ArrowLeft", "ArrowLeft", "meta", "alt"));
+    expect(tab().focusedPaneId).toBe(tab().panes[0].id);
+    core.keyPressed(sessionId, press("w", "KeyW", "meta"));
+    expect(tab().panes).toHaveLength(2);
+    core.keyPressed(sessionId, press("n", "KeyN", "meta"));
+    expect(core.state().sessions).toHaveLength(2);
+    core.keyPressed(sessionId, press("`", "Backquote", "meta"));
+    expect(core.state().currentSessionId).toBe(sessionId);
+    core.keyPressed(sessionId, press("~", "Backquote", "meta", "shift"));
+    expect(core.state().currentSessionId).not.toBe(sessionId);
+    expect(effects).toHaveLength(3);
+  });
+
+  it("leave every other key to the Pane's terminal", () => {
+    const { core, effects } = startCore();
+    const sessionId = core.state().sessions[0].id;
+
+    for (const keyPress of [
+      press("k", "KeyK"),
+      press("K", "KeyK", "meta", "shift"),
+      press("k", "KeyK", "meta", "control"),
+      press("j", "KeyJ", "meta"),
+      press("0", "Digit0", "meta"),
+    ]) {
+      expect(core.keyPressed(sessionId, keyPress)).toBe(false);
+    }
+    expect(effects).toEqual([]);
+  });
+
+  it("follow the config file, which can rebind or unbind any action and bind app actions with no default", () => {
+    const { core, effects } = startCore();
+    const sessionId = core.state().sessions[0].id;
+
+    core.configChanged(`{
+      "keyBindings": {
+        "openCommandPalette": "Cmd+P",
+        "closePane": null,
+        "openSettings": "cmd + option + ,",
+        "focusPaneLeft": "Ctrl+Shift+Left",
+      },
+    }`);
+
+    expect(core.keyPressed(sessionId, press("k", "KeyK", "meta"))).toBe(false);
+    expect(core.keyPressed(sessionId, press("w", "KeyW", "meta"))).toBe(false);
+    expect(core.keyPressed(sessionId, press("p", "KeyP", "meta"))).toBe(true);
+    expect(core.keyPressed(sessionId, press("≤", "Comma", "meta", "alt"))).toBe(true);
+    expect(core.keyPressed(sessionId, press("ArrowLeft", "ArrowLeft", "control", "shift"))).toBe(true);
+    expect(core.keyPressed(sessionId, press("t", "KeyT", "meta"))).toBe(true);
+    expect(effects).toEqual([{ type: "openPalette", sessionId }, { type: "openSettings" }]);
+  });
+
+  it("match a letter by its key's position while Option turns it into another character", () => {
+    const { core, effects } = startCore(undefined, '{ "keyBindings": { "openSettings": "Cmd+Alt+D" } }');
+    const sessionId = core.state().sessions[0].id;
+
+    expect(core.keyPressed(sessionId, press("∂", "KeyD", "meta", "alt"))).toBe(true);
+    expect(core.keyPressed(sessionId, press("∂", "KeyD", "meta"))).toBe(false);
+    expect(effects).toEqual([{ type: "openSettings" }]);
+  });
+
+  it("take a configured shortcut away from the action it's bound to by default", () => {
+    const { core } = startCore(undefined, '{ "keyBindings": { "closeSession": "Cmd+W" } }');
+    const sessionId = core.state().sessions[0].id;
+    core.splitPane(sessionId, "vertical");
+
+    core.keyPressed(sessionId, press("w", "KeyW", "meta"));
+
+    expect(core.state().sessions[0].status).toBe("closed");
+    expect(core.state().sessions[0].tabs[0].panes).toHaveLength(2);
+  });
+
+  it("reject unknown actions, shortcuts without a modifier or that can't be read, and repeated shortcuts", () => {
+    const { core, effects } = startCore(
+      undefined,
+      `{
+        "keyBindings": {
+          "closeSession": "Cmd+W",
+          "launchRockets": "Cmd+R",
+          "newTab": "T",
+          "nextTab": "Cmd+Hyper+]",
+          "previousTab": 42,
+          "renameTab": "Cmd+W",
+        },
+      }`,
+    );
+    const sessionId = core.state().sessions[0].id;
+
+    core.keyPressed(sessionId, press("{", "BracketLeft", "meta", "shift"));
+    core.keyPressed(sessionId, press("t", "KeyT", "meta"));
+
+    expect(effects).toEqual([
+      {
+        type: "settingsRejected",
+        settings: [
+          "keyBindings.launchRockets",
+          "keyBindings.newTab",
+          "keyBindings.nextTab",
+          "keyBindings.previousTab",
+          "keyBindings.renameTab",
+        ],
+      },
+    ]);
+    expect(core.state().sessions[0].tabs).toHaveLength(2);
+    expect(core.state().sessions[0].focusedTabId).toBe(core.state().sessions[0].tabs[1].id);
+  });
+
+  it("reject shortcuts without Cmd or Ctrl, which would take typed characters from the Pane's terminal", () => {
+    const { core, effects } = startCore(
+      undefined,
+      '{ "keyBindings": { "newTab": "Shift+A", "nextTab": "Alt+X", "previousTab": "Ctrl+Shift+Left" } }',
+    );
+    const sessionId = core.state().sessions[0].id;
+
+    expect(core.keyPressed(sessionId, press("A", "KeyA", "shift"))).toBe(false);
+    expect(core.keyPressed(sessionId, press("≈", "KeyX", "alt"))).toBe(false);
+    expect(effects).toEqual([{ type: "settingsRejected", settings: ["keyBindings.newTab", "keyBindings.nextTab"] }]);
+  });
+
+  it("reject key bindings that aren't an object, keeping every default", () => {
+    const { core, effects } = startCore(undefined, '{ "keyBindings": ["Cmd+K"] }');
+
+    expect(core.keyPressed(core.state().sessions[0].id, press("k", "KeyK", "meta"))).toBe(true);
+    expect(effects[0]).toEqual({ type: "settingsRejected", settings: ["keyBindings"] });
+  });
+});
+
+describe("dismissing the Command Palette", () => {
+  it("leaves the app shown over the Current Session", () => {
+    const { core, effects } = startCore();
+
+    core.paletteDismissed();
+
+    expect(effects).toEqual([]);
   });
 });
 
@@ -947,6 +1240,15 @@ describe("quitting", () => {
     expect(effects).toEqual([{ type: "confirmQuit" }]);
   });
 
+  it("leaves the app shown over the Current Session when cancelled", () => {
+    const { core, effects } = startCore();
+    core.quitRequested();
+
+    core.quitCancelled();
+
+    expect(effects).toEqual([{ type: "confirmQuit" }]);
+  });
+
   it("once confirmed, writes everything pending to the state store before quitting", () => {
     const calls: string[] = [];
     const inMemory = createInMemoryStateStore();
@@ -961,6 +1263,149 @@ describe("quitting", () => {
     core.quitConfirmed();
 
     expect(calls).toEqual(["flush", "quit"]);
+  });
+});
+
+describe("the config file", () => {
+  // Sessions `b`, then `a`, so the cycle order shows whether `created` took effect.
+  function startWithTwoSessions() {
+    const started = startCore();
+    const { core } = started;
+    core.renameSession(core.state().sessions[0].id, "b");
+    core.newSession();
+    core.renameSession(core.state().sessions[1].id, "a");
+    started.effects.length = 0;
+    return started;
+  }
+
+  function names(core: ReturnType<typeof startCore>["core"]) {
+    return core.sessionsInCycleOrder().map((session) => session.name);
+  }
+
+  it("accepts comments and trailing commas, leaving comment markers inside strings alone", () => {
+    const { core, effects } = startWithTwoSessions();
+
+    core.configChanged(`{
+      // How Sessions are cycled.
+      "cycleOrder": /* by creation */ "created",
+      "shell": "/opt/homebrew/bin/fish // not a comment",
+    }`);
+
+    expect(names(core)).toEqual(["b", "a"]);
+    expect(effects).toEqual([]);
+  });
+
+  it("falls back to the default for an invalid value, telling the user which settings were rejected", () => {
+    const { core, effects } = startWithTwoSessions();
+
+    core.configChanged('{ "cycleOrder": "random", "colour": "blue" }');
+
+    expect(names(core)).toEqual(["a", "b"]);
+    expect(effects).toEqual([{ type: "settingsRejected", settings: ["cycleOrder", "colour"] }]);
+  });
+
+  // A save caught halfway through an edit mustn't reset every setting, e.g. shrinking unlimited scrollback.
+  it("keeps the settings from before for a file that isn't a JSON object, telling the user", () => {
+    for (const config of ['{ "cycleOrder": "created" ', '["created"]', "null"]) {
+      const { core, effects } = startWithTwoSessions();
+      core.configChanged('{ "cycleOrder": "created", "scrollbackLines": "unlimited" }');
+
+      core.configChanged(config);
+
+      expect(names(core)).toEqual(["b", "a"]);
+      expect(core.settings().scrollbackLines).toBe(1_000_000);
+      expect(effects).toEqual([{ type: "configUnreadable" }]);
+    }
+  });
+
+  it("starts with every default when the file can't be read at launch, telling the user", () => {
+    const { core, effects } = startCore(undefined, "{ broken");
+
+    expect(core.settings().cycleOrder).toBe("alphabetical");
+    expect(effects).toEqual([{ type: "configUnreadable" }]);
+  });
+
+  it("keeps the settings from before when the file exists but can't be opened, telling the user", () => {
+    const { core, effects } = startWithTwoSessions();
+    core.configChanged('{ "cycleOrder": "created" }');
+
+    core.configUnreadable();
+
+    expect(names(core)).toEqual(["b", "a"]);
+    expect(effects).toEqual([{ type: "configUnreadable" }]);
+  });
+});
+
+describe("the shell setting", () => {
+  it("starts restored Shells with the configured shell", () => {
+    const before = startCore();
+    before.core.newSession();
+
+    const { shellHost } = startCore(before.stateStore, '{ "shell": "/opt/homebrew/bin/fish" }');
+
+    expect(shellHost.started.map((started) => started.shell)).toEqual([
+      "/opt/homebrew/bin/fish",
+      "/opt/homebrew/bin/fish",
+    ]);
+  });
+
+  it("starts new Shells with the shell configured at the time, leaving running ones alone", () => {
+    const { core, shellHost } = startCore();
+    const sessionId = core.state().sessions[0].id;
+
+    core.configChanged('{ "shell": "/bin/bash" }');
+    core.newTab(sessionId);
+    core.configChanged(undefined);
+    core.splitPane(sessionId, "vertical");
+
+    expect(shellHost.started.map((started) => started.shell)).toEqual([undefined, "/bin/bash", undefined]);
+    expect(shellHost.stopped).toEqual([]);
+  });
+
+  it("rejects a shell that isn't a non-empty string, starting the login shell instead", () => {
+    const { core, shellHost, effects } = startCore(undefined, '{ "shell": " " }');
+
+    core.configChanged('{ "shell": 42 }');
+
+    expect(shellHost.started[0].shell).toBeUndefined();
+    expect(effects).toEqual([
+      { type: "settingsRejected", settings: ["shell"] },
+      { type: "settingsRejected", settings: ["shell"] },
+    ]);
+  });
+});
+
+describe("the scrollback lines setting", () => {
+  // Reports `count` numbered lines as the first Pane's scrollback and answers the lines kept.
+  function reportLines(core: ReturnType<typeof startCore>["core"], count: number) {
+    const paneId = core.state().sessions[0].tabs[0].panes[0].id;
+    core.scrollbackChanged(paneId, Array.from({ length: count }, (_, index) => `line ${index + 1}`).join("\r\n"));
+    return core.scrollback(paneId)!.text.split("\r\n");
+  }
+
+  it("caps each Pane's scrollback at the configured number of lines from the next report on", () => {
+    const { core } = startCore();
+
+    core.configChanged('{ "scrollbackLines": 3 }');
+
+    expect(reportLines(core, 5)).toEqual(["line 3", "line 4", "line 5"]);
+    expect(core.settings().scrollbackLines).toBe(3);
+  });
+
+  it("keeps up to 1,000,000 lines when unlimited", () => {
+    const { core } = startCore(undefined, '{ "scrollbackLines": "unlimited" }');
+
+    expect(reportLines(core, 10_005)).toHaveLength(10_005);
+    expect(core.settings().scrollbackLines).toBe(1_000_000);
+  });
+
+  it("rejects anything but a whole number from 0 to 1,000,000 or unlimited, keeping 10,000 lines", () => {
+    for (const lines of ["-1", "2.5", '"lots"', "1000001"]) {
+      const { core, effects } = startCore(undefined, `{ "scrollbackLines": ${lines} }`);
+
+      expect(reportLines(core, 10_005)).toHaveLength(10_000);
+      expect(effects).toEqual([{ type: "settingsRejected", settings: ["scrollbackLines"] }]);
+    }
   });
 });
 
@@ -1367,7 +1812,7 @@ describe("the Command Palette", () => {
       { type: "session", sessionId: unnamed, label: "Session 1 (~)", closed: false },
     ]);
 
-    core.settingsChanged({ cycleOrder: "created" });
+    core.configChanged('{ "cycleOrder": "created" }');
     expect(summarize(core.paletteResults("ss "))).toEqual([
       "session web",
       "session api",
@@ -1447,7 +1892,26 @@ describe("the Command Palette", () => {
       "action Focus Pane Right",
       "action Focus Pane Above",
       "action Focus Pane Below",
+      "action Open Settings",
       "action Quit Blind",
+    ]);
+  });
+
+  it("choosing Open Settings opens the config file, with or without a Current Session", () => {
+    const { core, effects, shellHost } = startCore(undefined, '{ "hotkeyWithNoOpenSessions": "palette" }');
+
+    chooseAction(core, "Open Settings");
+    shellHost.exit(core.state().sessions[0].tabs[0].panes[0].id);
+    core.hotkeyPressed();
+    chooseAction(core, "Open Settings");
+
+    expect(effects).toEqual([
+      { type: "openSettings" },
+      { type: "closeWindow", sessionId: core.state().sessions[0].id },
+      { type: "hideApp" },
+      { type: "showPalette" },
+      { type: "openSettings" },
+      { type: "hideApp" },
     ]);
   });
 
@@ -1483,6 +1947,7 @@ describe("the Command Palette", () => {
       "action Split Pane Vertically",
       "action Focus Pane Left",
       "action Focus Pane Right",
+      "action Open Settings",
     ]);
     expect(summarize(core.paletteResults("ab"))).toEqual([
       "action Focus Pane Above",
