@@ -1,3 +1,4 @@
+import type { PaletteResult } from "../core/core";
 import type { PaneRect } from "../core/layout";
 import type { PaneId, TabId } from "../core/state";
 
@@ -22,6 +23,9 @@ export const channels = {
   reportScrollback: "pane:scrollback",
   flushScrollback: "scrollback:flush",
   scrollbackFlushed: "scrollback:flushed",
+  openPalette: "palette:open",
+  searchPalette: "palette:search",
+  choosePaletteResult: "palette:choose",
 } as const;
 
 // What the preload script exposes to the renderer as `window.blind`.
@@ -37,4 +41,8 @@ export interface BlindApi {
   reportScrollback(paneId: PaneId, scrollback: string): void;
   // Called before the app quits. The listener reports every Pane's scrollback before it returns.
   onFlushScrollback(listener: () => void): void;
+  // Called when Cmd+K asks for the Command Palette.
+  onOpenPalette(listener: () => void): void;
+  searchPalette(query: string): Promise<PaletteResult[]>;
+  choosePaletteResult(result: PaletteResult): void;
 }

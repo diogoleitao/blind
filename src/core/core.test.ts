@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createCore } from "./core";
+import { createCore, type PaletteResult } from "./core";
 import { createControllableClock, createFakeShellHost } from "./fakes";
 import { createInMemoryStateStore } from "./in-memory-state-store";
 import type { StateStore } from "./ports";
@@ -907,15 +907,15 @@ describe("quitting", () => {
   });
 });
 
-describe("reopening a Closed Session", () => {
-  // Relaunches from the saved snapshot with each Session changed by `update`, standing in for what later commands do,
-  // such as closing a Session with its Tabs or setting its Root directory.
-  function relaunchWith(stateStore: StateStore, update: (session: Session) => Session) {
-    const { state, scrollback } = stateStore.load()!;
-    stateStore.save({ state: { ...state, sessions: state.sessions.map(update) }, scrollback });
-    return startCore(stateStore);
-  }
+// Relaunches from the saved snapshot with each Session changed by `update`, standing in for what later commands do,
+// such as closing a Session with its Tabs or setting its Root directory.
+function relaunchWith(stateStore: StateStore, update: (session: Session) => Session) {
+  const { state, scrollback } = stateStore.load()!;
+  stateStore.save({ state: { ...state, sessions: state.sessions.map(update) }, scrollback });
+  return startCore(stateStore);
+}
 
+describe("reopening a Closed Session", () => {
   // A closed `api` Session with two Tabs, the first split in two, and an Open Unnamed Session that is current.
   function startWithClosedApi() {
     const before = startCore();
@@ -1009,3 +1009,263 @@ describe("reopening a Closed Session", () => {
     expect(effects).toEqual([]);
   });
 });
+
+describe("the Command Palette", () => {
+  // `web` with a Tab at ~/code/web and a second Tab split in two at ~/code/web/src, the right Pane running vim; `api`
+  // at ~/code/api; `old`, closed through its last Tab; and an Unnamed Session at the home directory, which is current.
+  function startWithPaletteSessions() {
+    const started = startCore();
+    const { core, shellHost, clock } = started;
+    const web = core.state().sessions[0].id;
+    core.renameSession(web, "web");
+    shellHost.changeWorkingDirectory(core.state().sessions[0].tabs[0].panes[0].id, "/Users/me/code/web");
+    core.newTab(web);
+    shellHost.changeWorkingDirectory(core.state().sessions[0].tabs[1].panes[0].id, "/Users/me/code/web/src");
+    core.splitPane(web, "vertical");
+    shellHost.changeRunningProgram(core.state().sessions[0].tabs[1].panes[1].id, "vim");
+    for (const name of ["api", "old", undefined]) {
+      clock.advance(1_000);
+      core.newSession();
+      if (name) core.renameSession(core.state().sessions.at(-1)!.id, name);
+    }
+    const [, api, old, unnamed] = core.state().sessions.map((session) => session.id);
+    shellHost.changeWorkingDirectory(core.state().sessions[1].tabs[0].panes[0].id, "/Users/me/code/api");
+    shellHost.exit(core.state().sessions[2].tabs[0].panes[0].id);
+    started.effects.length = 0;
+    return { ...started, web, api, old, unnamed };
+  }
+
+  it("narrows to every Session with `ss `, Open and Closed, in cycle order, marking the Closed ones", () => {
+    const { core, web, api, old, unnamed } = startWithPaletteSessions();
+
+    expect(core.paletteResults("ss ")).toEqual([
+      { type: "session", sessionId: api, label: "api", closed: false },
+      { type: "session", sessionId: old, label: "old", closed: true },
+      { type: "session", sessionId: web, label: "web", closed: false },
+      { type: "session", sessionId: unnamed, label: "Session 1 (~)", closed: false },
+    ]);
+
+    core.settingsChanged({ cycleOrder: "created" });
+    expect(summarize(core.paletteResults("ss "))).toEqual([
+      "session web",
+      "session api",
+      "session old",
+      "session Session 1 (~)",
+    ]);
+  });
+
+  it("narrows to the Tabs of Open Sessions with `tt `, by their titles, Session by Session in cycle order", () => {
+    const { core } = startWithPaletteSessions();
+    const [web, api, , unnamed] = core.state().sessions;
+
+    expect(core.paletteResults("tt ")).toEqual([
+      { type: "tab", tabId: api.tabs[0].id, label: "api", sessionLabel: "api" },
+      { type: "tab", tabId: web.tabs[0].id, label: "web", sessionLabel: "web" },
+      { type: "tab", tabId: web.tabs[1].id, label: "vim", sessionLabel: "web" },
+      { type: "tab", tabId: unnamed.tabs[0].id, label: "me", sessionLabel: "Session 1 (~)" },
+    ]);
+  });
+
+  it("narrows to the Panes of Open Sessions with `pp `, by running program or folder name, with their directories", () => {
+    const { core } = startWithPaletteSessions();
+    const [web, api, , unnamed] = core.state().sessions;
+    const pane = (id: string, label: string, workingDirectory: string, sessionLabel: string) => ({
+      type: "pane",
+      paneId: id,
+      label,
+      workingDirectory,
+      sessionLabel,
+    });
+
+    expect(core.paletteResults("pp ")).toEqual([
+      pane(api.tabs[0].panes[0].id, "api", "~/code/api", "api"),
+      pane(web.tabs[0].panes[0].id, "web", "~/code/web", "web"),
+      pane(web.tabs[1].panes[0].id, "src", "~/code/web/src", "web"),
+      pane(web.tabs[1].panes[1].id, "vim", "~/code/web/src", "web"),
+      pane(unnamed.tabs[0].panes[0].id, "me", "~", "Session 1 (~)"),
+    ]);
+  });
+
+  it("without a prefix, offers every Session, then every Tab and Pane of Open Sessions, then every app action", () => {
+    const { core } = startWithPaletteSessions();
+
+    expect(summarize(core.paletteResults(""))).toEqual([
+      "session api",
+      "session old",
+      "session web",
+      "session Session 1 (~)",
+      "tab api",
+      "tab web",
+      "tab vim",
+      "tab me",
+      "pane api",
+      "pane web",
+      "pane src",
+      "pane vim",
+      "pane me",
+      "action New Session",
+      "action New Tab",
+      "action Split Pane Vertically",
+      "action Split Pane Horizontally",
+      "action Close Pane",
+      "action Next Session",
+      "action Previous Session",
+      "action Next Tab",
+      "action Previous Tab",
+      "action Next Pane",
+      "action Previous Pane",
+      "action Focus Pane Left",
+      "action Focus Pane Right",
+      "action Focus Pane Above",
+      "action Focus Pane Below",
+      "action Quit Blind",
+    ]);
+  });
+
+  it("keeps the results whose labels hold the query's letters in order, ignoring case", () => {
+    const { core } = startWithPaletteSessions();
+
+    expect(summarize(core.paletteResults("SPLI"))).toEqual([
+      "action Split Pane Vertically",
+      "action Split Pane Horizontally",
+    ]);
+  });
+
+  it("matches Tabs by their Session's label too, and Panes by their working directory and Session's label", () => {
+    const { core } = startWithPaletteSessions();
+
+    expect(summarize(core.paletteResults("tt web"))).toEqual(["tab web", "tab vim"]);
+    expect(summarize(core.paletteResults("pp src"))).toEqual(["pane src", "pane vim"]);
+    expect(summarize(core.paletteResults("pp session"))).toEqual(["pane me"]);
+  });
+
+  it("ranks letters at word starts and letters in a run above scattered ones, keeping the offered order on ties", () => {
+    const { core } = startWithPaletteSessions();
+
+    expect(summarize(core.paletteResults("nt"))).toEqual([
+      "action New Tab",
+      "action Next Tab",
+      "action Split Pane Horizontally",
+      "action Next Session",
+      "action Next Pane",
+      "action Split Pane Vertically",
+      "action Focus Pane Left",
+      "action Focus Pane Right",
+    ]);
+    expect(summarize(core.paletteResults("ab"))).toEqual([
+      "action Focus Pane Above",
+      "action New Tab",
+      "action Next Tab",
+      "action Previous Tab",
+      "action Focus Pane Below",
+    ]);
+  });
+
+  it("choosing a Tab in another Session makes that Session the Current Session with the Tab focused", () => {
+    const { core, effects, web } = startWithPaletteSessions();
+    const tab = core.paletteResults("tt ").find((result) => result.type === "tab" && result.label === "web")!;
+
+    core.choosePaletteResult(tab);
+
+    expect(core.state().currentSessionId).toBe(web);
+    expect(core.state().sessions[0].focusedTabId).toBe(core.state().sessions[0].tabs[0].id);
+    expect(effects).toEqual([{ type: "showSession", sessionId: web }]);
+  });
+
+  it("choosing a Pane in another Session makes that Session the Current Session with the Pane and its Tab focused", () => {
+    const { core, effects, web } = startWithPaletteSessions();
+    core.focusTab(web, 0);
+    effects.length = 0;
+    const pane = core.paletteResults("pp ").find((result) => result.type === "pane" && result.label === "src")!;
+
+    core.choosePaletteResult(pane);
+
+    const session = core.state().sessions[0];
+    expect(core.state().currentSessionId).toBe(web);
+    expect(session.focusedTabId).toBe(session.tabs[1].id);
+    expect(session.tabs[1].focusedPaneId).toBe(session.tabs[1].panes[0].id);
+    expect(effects).toEqual([{ type: "showSession", sessionId: web }]);
+  });
+
+  it("choosing a Closed Session reopens it as the Current Session", () => {
+    const { core, shellHost, effects, old } = startWithPaletteSessions();
+    const closed = core.paletteResults("ss old")[0];
+
+    core.choosePaletteResult(closed);
+
+    const session = core.state().sessions[2];
+    expect(session.status).toBe("open");
+    expect(core.state().currentSessionId).toBe(old);
+    expect(shellHost.started.at(-1)).toEqual({ paneId: session.tabs[0].panes[0].id, workingDirectory: "/Users/me" });
+    expect(effects).toEqual([{ type: "showSession", sessionId: old }]);
+  });
+
+  it("choosing a Closed Session that kept its Tabs brings them back with a Restore", () => {
+    const before = startCore();
+    const api = before.core.state().sessions[0].id;
+    before.core.renameSession(api, "api");
+    before.core.splitPane(api, "vertical");
+    before.core.newSession();
+    const saved = before.core.state().sessions[0];
+    const { core, shellHost } = relaunchWith(before.stateStore, (session) =>
+      session.id === api ? { ...session, status: "closed" } : session,
+    );
+
+    core.choosePaletteResult(core.paletteResults("ss api")[0]);
+
+    expect(core.state().sessions[0]).toEqual({ ...saved, lastUsedAt: 1_000 });
+    expect(core.state().currentSessionId).toBe(api);
+    expect(shellHost.started.slice(1).map((started) => started.paneId)).toEqual(
+      saved.tabs[0].panes.map((pane) => pane.id),
+    );
+  });
+
+  it("choosing an Open Session makes it the Current Session", () => {
+    const { core, effects, api } = startWithPaletteSessions();
+
+    core.choosePaletteResult(core.paletteResults("ss api")[0]);
+
+    expect(core.state().currentSessionId).toBe(api);
+    expect(effects).toEqual([{ type: "showSession", sessionId: api }]);
+  });
+
+  it("choosing an app action runs it on the Current Session", () => {
+    const { core, effects, unnamed } = startWithPaletteSessions();
+    const choose = (label: string) =>
+      core.choosePaletteResult(core.paletteResults("").find((result) => result.label === label)!);
+    const current = () => core.state().sessions.find((session) => session.id === unnamed)!;
+
+    choose("New Tab");
+    expect(current().tabs).toHaveLength(2);
+    expect(current().focusedTabId).toBe(current().tabs[1].id);
+
+    choose("Split Pane Horizontally");
+    expect(current().tabs[1].layout).toMatchObject({ type: "split", direction: "horizontal" });
+
+    choose("Previous Pane");
+    expect(current().tabs[1].focusedPaneId).toBe(current().tabs[1].panes[0].id);
+
+    choose("Focus Pane Below");
+    expect(current().tabs[1].focusedPaneId).toBe(current().tabs[1].panes[1].id);
+
+    choose("Close Pane");
+    expect(current().tabs[1].panes).toHaveLength(1);
+
+    choose("Previous Tab");
+    expect(current().focusedTabId).toBe(current().tabs[0].id);
+
+    choose("Next Session");
+    expect(core.state().currentSessionId).not.toBe(unnamed);
+
+    choose("New Session");
+    expect(core.state().sessions).toHaveLength(5);
+
+    choose("Quit Blind");
+    expect(effects.at(-1)).toEqual({ type: "confirmQuit" });
+  });
+});
+
+// Each result as its type and label, e.g. `tab vim`.
+function summarize(results: PaletteResult[]) {
+  return results.map((result) => `${result.type} ${result.label}`);
+}

@@ -2,6 +2,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import type { PaletteResult } from "../core/core";
 import type { PaneRect } from "../core/layout";
 import { scrollbackLineLimit } from "../core/scrollback";
 import type { PaneId } from "../core/state";
@@ -132,6 +133,109 @@ function render(view: SessionView) {
   }
 }
 
+const palette = document.getElementById("palette")!;
+const paletteInput = document.getElementById("palette-input") as HTMLInputElement;
+const paletteList = document.getElementById("palette-results")!;
+let paletteResults: PaletteResult[] = [];
+let selectedResult = 0;
+// Counts searches, so that results arriving after a newer search's are dropped.
+let searchCount = 0;
+// Settles once the latest search's results are shown, so Enter never chooses from a list typing has outdated.
+let latestSearch = Promise.resolve();
+
+const resultKinds: Record<PaletteResult["type"], string> = {
+  session: "Session",
+  tab: "Tab",
+  pane: "Pane",
+  action: "Action",
+};
+
+// What places a result: a Closed Session's mark, a Tab's Session, or a Pane's working directory and Session.
+function resultDetail(result: PaletteResult) {
+  if (result.type === "session") return result.closed ? "Closed" : "";
+  if (result.type === "tab") return result.sessionLabel;
+  if (result.type === "pane") return `${result.workingDirectory} · ${result.sessionLabel}`;
+  return "";
+}
+
+function renderPalette() {
+  paletteList.replaceChildren(
+    ...paletteResults.map((result, index) => {
+      const element = document.createElement("li");
+      element.className = "result";
+      element.classList.toggle("selected", index === selectedResult);
+      const label = document.createElement("span");
+      label.textContent = result.label;
+      const detail = document.createElement("span");
+      detail.className = "detail";
+      detail.textContent = resultDetail(result);
+      const kind = document.createElement("span");
+      kind.className = "kind";
+      kind.textContent = resultKinds[result.type];
+      element.append(label, detail, kind);
+      element.addEventListener("mousedown", () => chooseResult(index));
+      return element;
+    }),
+  );
+  paletteList.children[selectedResult]?.scrollIntoView({ block: "nearest" });
+}
+
+function searchPalette() {
+  searchCount += 1;
+  const search = searchCount;
+  latestSearch = blind.searchPalette(paletteInput.value).then((results) => {
+    if (search !== searchCount) return;
+    paletteResults = results;
+    selectedResult = 0;
+    renderPalette();
+  });
+}
+
+function openPalette() {
+  palette.hidden = false;
+  paletteInput.value = "";
+  paletteInput.focus();
+  searchPalette();
+}
+
+// The focused Pane's terminal takes the keyboard back.
+function closePalette() {
+  if (palette.hidden) return;
+  palette.hidden = true;
+  if (focusedPaneId) terminals.get(focusedPaneId)?.terminal.focus();
+}
+
+// Does nothing once the palette has closed, e.g. by Escape while Enter waited for a search.
+function chooseResult(index: number) {
+  const result = paletteResults[index];
+  if (palette.hidden || !result) return;
+  closePalette();
+  blind.choosePaletteResult(result);
+}
+
+function moveSelection(offset: number) {
+  const count = paletteResults.length;
+  if (count === 0) return;
+  selectedResult = (selectedResult + offset + count) % count;
+  renderPalette();
+}
+
+paletteInput.addEventListener("input", searchPalette);
+paletteInput.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closePalette();
+  else if (event.key === "ArrowDown") moveSelection(1);
+  else if (event.key === "ArrowUp") moveSelection(-1);
+  else if (event.key === "Enter") void latestSearch.then(() => chooseResult(selectedResult));
+  else return;
+  event.preventDefault();
+});
+// Clicks inside the palette keep the input focused; clicking a Pane, or the app hiding, closes the palette.
+palette.addEventListener("mousedown", (event) => {
+  if (event.target !== paletteInput) event.preventDefault();
+});
+paletteInput.addEventListener("blur", closePalette);
+
+blind.onOpenPalette(openPalette);
 blind.onPaneData(writeToTerminal);
 blind.onFlushScrollback(() => terminals.forEach((pane, paneId) => reportScrollback(paneId, pane)));
 blind.onSessionView(render);

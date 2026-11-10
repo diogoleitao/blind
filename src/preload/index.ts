@@ -20,6 +20,11 @@ const api: BlindApi = {
       ipcRenderer.send(channels.scrollbackFlushed);
     });
   },
+  onOpenPalette: (listener) => {
+    ipcRenderer.on(channels.openPalette, () => listener());
+  },
+  searchPalette: (query) => ipcRenderer.invoke(channels.searchPalette, query),
+  choosePaletteResult: (result) => ipcRenderer.send(channels.choosePaletteResult, result),
 };
 
 contextBridge.exposeInMainWorld("blind", api);

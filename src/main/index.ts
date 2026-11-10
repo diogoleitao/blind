@@ -1,7 +1,7 @@
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, powerMonitor, screen, type WebContents } from "electron";
-import { createCore } from "../core/core";
+import { createCore, type PaletteResult } from "../core/core";
 import type { FocusDirection } from "../core/layout";
 import type { PaneId, SessionId } from "../core/state";
 import { channels, type SessionView, type TerminalSize } from "../shared/ipc";
@@ -196,8 +196,8 @@ app.whenReady().then(() => {
     ArrowDown: "down",
   };
 
-  // The Session, Tab and Pane shortcuts, taken before the Pane's terminal sees them. Brackets and the backtick match by
-  // key position too, since Shift turns them into other characters on some layouts.
+  // The Command Palette, Session, Tab and Pane shortcuts, taken before the Pane's terminal sees them. Brackets and the
+  // backtick match by key position too, since Shift turns them into other characters on some layouts.
   function handleShortcut(sessionId: SessionId, input: Electron.Input) {
     if (input.type !== "keyDown" || !input.meta || input.control) return false;
     const key = input.key.toLowerCase();
@@ -210,7 +210,8 @@ app.whenReady().then(() => {
     } else if (input.code === "Backquote") {
       if (input.shift) core.focusPreviousSession();
       else core.focusNextSession();
-    } else if (!input.shift && key === "n") core.newSession();
+    } else if (!input.shift && key === "k") windows.get(sessionId)?.webContents.send(channels.openPalette);
+    else if (!input.shift && key === "n") core.newSession();
     else if (!input.shift && key === "t") core.newTab(sessionId);
     else if (key === "d") core.splitPane(sessionId, input.shift ? "horizontal" : "vertical");
     else if (!input.shift && key === "w") core.closePane(sessionId);
@@ -224,6 +225,8 @@ app.whenReady().then(() => {
   }
 
   ipcMain.on(channels.focusPane, (_event, paneId: PaneId) => core.focusPane(paneId));
+  ipcMain.handle(channels.searchPalette, (_event, query: string) => core.paletteResults(query));
+  ipcMain.on(channels.choosePaletteResult, (_event, result: PaletteResult) => core.choosePaletteResult(result));
 
   // A restored Pane's terminal gets its saved scrollback first, with no colour or style left over from it. The line the
   // cursor was on, usually the old Shell's idle prompt, gives way to a dim marker, and the fresh Shell's output follows.

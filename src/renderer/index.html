@@ -62,11 +62,78 @@
         color: #fff;
         background: rgba(255, 255, 255, 0.08);
       }
+      #palette {
+        position: fixed;
+        top: 15%;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(640px, 90vw);
+        z-index: 1;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 8px;
+        background: rgba(30, 30, 30, 0.97);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+        font: 13px system-ui, sans-serif;
+        color: rgba(255, 255, 255, 0.85);
+        overflow: hidden;
+      }
+      #palette[hidden] {
+        display: none;
+      }
+      #palette-input {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 12px 14px;
+        border: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        outline: none;
+        background: transparent;
+        font: inherit;
+        font-size: 15px;
+        color: #fff;
+      }
+      #palette-results {
+        max-height: 50vh;
+        margin: 0;
+        padding: 4px 0;
+        list-style: none;
+        overflow-y: auto;
+      }
+      #palette-results:empty {
+        display: none;
+      }
+      .result {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        padding: 6px 14px;
+        white-space: nowrap;
+        cursor: default;
+      }
+      .result.selected {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .result .detail {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: rgba(255, 255, 255, 0.45);
+      }
+      .result .kind {
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.4);
+      }
     </style>
   </head>
   <body>
     <div id="panes"></div>
     <div id="tab-bar" hidden></div>
+    <div id="palette" hidden>
+      <input id="palette-input" type="text" spellcheck="false" autocomplete="off" />
+      <ul id="palette-results"></ul>
+    </div>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

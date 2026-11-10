@@ -7,6 +7,7 @@ import {
   replacePane,
   successorOf,
 } from "./layout";
+import { fuzzyScore } from "./fuzzy";
 import type { Clock, SavedScrollback, ShellHost, Snapshot, StateStore } from "./ports";
 import { capScrollback } from "./scrollback";
 import {
@@ -32,6 +33,35 @@ export type Effect =
   | { type: "confirmQuit" }
   // Everything is saved; the app can exit.
   | { type: "quit" };
+
+// Every app action, in the order the Command Palette offers them, by its label.
+const paletteActionLabels = {
+  newSession: "New Session",
+  newTab: "New Tab",
+  splitPaneVertically: "Split Pane Vertically",
+  splitPaneHorizontally: "Split Pane Horizontally",
+  closePane: "Close Pane",
+  nextSession: "Next Session",
+  previousSession: "Previous Session",
+  nextTab: "Next Tab",
+  previousTab: "Previous Tab",
+  nextPane: "Next Pane",
+  previousPane: "Previous Pane",
+  focusPaneLeft: "Focus Pane Left",
+  focusPaneRight: "Focus Pane Right",
+  focusPaneUp: "Focus Pane Above",
+  focusPaneDown: "Focus Pane Below",
+  quit: "Quit Blind",
+} as const;
+
+export type PaletteAction = keyof typeof paletteActionLabels;
+
+// One entry the Command Palette offers.
+export type PaletteResult =
+  | { type: "session"; sessionId: SessionId; label: string; closed: boolean }
+  | { type: "tab"; tabId: TabId; label: string; sessionLabel: string }
+  | { type: "pane"; paneId: PaneId; label: string; workingDirectory: string; sessionLabel: string }
+  | { type: "action"; action: PaletteAction; label: string };
 
 // The order Open Sessions are cycled through: by name, by most recent use, or by creation.
 export type CycleOrder = "alphabetical" | "recent" | "created";
@@ -92,6 +122,12 @@ export interface Core {
   sessionLabel(sessionId: SessionId): string | undefined;
   // Every Session, Open or Closed, in the order cycling follows: Unnamed Sessions after the named ones.
   sessionsInCycleOrder(): Session[];
+  // What the Command Palette offers for a query: every Session, Open and Closed, the Tabs and Panes of Open Sessions,
+  // and every app action. `ss `, `tt ` and `pp ` narrow it to Sessions, Tabs or Panes.
+  paletteResults(query: string): PaletteResult[];
+  // Jumps to a Session, Tab or Pane, making its Session the Current Session with the Tab or Pane focused and reopening a
+  // Closed Session first; or runs an app action on the Current Session.
+  choosePaletteResult(result: PaletteResult): void;
   // Where each of the Tab's Panes sits, in layout order.
   paneRects(tabId: TabId): PaneRect[];
   // A Pane's terminal reported its serialized scrollback, which is kept up to its last `scrollbackLineLimit` lines and
@@ -374,6 +410,128 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     return directory.startsWith(`${homeDirectory}/`) ? `~${directory.slice(homeDirectory.length)}` : directory;
   }
 
+  function labelOf(session: Session) {
+    if (session.name !== undefined) return session.name;
+    const tab = focusedTab(session);
+    const directory = tab ? focusedPane(tab).workingDirectory : homeDirectory;
+    return `Session ${session.labelNumber} (${displayDirectory(directory)})`;
+  }
+
+  // The Pane's running program, or its working directory's folder name while the Shell is idle.
+  function paneTitle(pane: Pane) {
+    return pane.runningProgram ?? folderName(pane.workingDirectory);
+  }
+
+  function titleOf(tab: Tab) {
+    return paneTitle(focusedPane(tab));
+  }
+
+  function sessionResults(): PaletteResult[] {
+    return sessionsInCycleOrder().map((session) => ({
+      type: "session",
+      sessionId: session.id,
+      label: labelOf(session),
+      closed: session.status === "closed",
+    }));
+  }
+
+  function openSessionsInCycleOrder() {
+    return sessionsInCycleOrder().filter((session) => session.status === "open");
+  }
+
+  function tabResults(): PaletteResult[] {
+    return openSessionsInCycleOrder().flatMap((session) =>
+      session.tabs.map((tab) => ({
+        type: "tab" as const,
+        tabId: tab.id,
+        label: titleOf(tab),
+        sessionLabel: labelOf(session),
+      })),
+    );
+  }
+
+  function paneResults(): PaletteResult[] {
+    return openSessionsInCycleOrder().flatMap((session) =>
+      session.tabs.flatMap((tab) =>
+        tab.panes.map((pane) => ({
+          type: "pane" as const,
+          paneId: pane.id,
+          label: paneTitle(pane),
+          workingDirectory: displayDirectory(pane.workingDirectory),
+          sessionLabel: labelOf(session),
+        })),
+      ),
+    );
+  }
+
+  // The results each prefix narrows the Command Palette to.
+  const paletteScopes: Record<string, () => PaletteResult[]> = {
+    "ss ": sessionResults,
+    "tt ": tabResults,
+    "pp ": paneResults,
+  };
+
+  // The results a query's prefix narrows to, in the order they're offered, and the rest of the query to search them by.
+  function parsePaletteQuery(query: string) {
+    const prefix = Object.keys(paletteScopes).find((candidate) => query.startsWith(candidate));
+    if (prefix) return { results: paletteScopes[prefix](), search: query.slice(prefix.length) };
+    return { results: [...sessionResults(), ...tabResults(), ...paneResults(), ...actionResults()], search: query };
+  }
+
+  function reopenSession(sessionId: SessionId) {
+    if (findSession(sessionId)?.status !== "closed") return;
+    updateSession(sessionId, (session) => {
+      if (session.tabs.length > 0) return { ...restartShells(session), status: "open" };
+      const tab = openTab(session.rootDirectory ?? homeDirectory);
+      return { ...session, status: "open", tabs: [tab], focusedTabId: tab.id };
+    });
+    makeCurrent(sessionId);
+  }
+
+  // Makes the Session the Current Session, reopening it first when it's closed.
+  function jumpToSession(sessionId: SessionId) {
+    const session = findSession(sessionId);
+    if (session?.status === "closed") reopenSession(sessionId);
+    else if (session) makeCurrent(sessionId);
+  }
+
+  // Makes the Tab's Session, when open, the Current Session with the Tab focused.
+  function jumpToTab(tabId: TabId) {
+    const session = state.sessions.find((candidate) => candidate.tabs.some((tab) => tab.id === tabId));
+    if (session?.status !== "open") return;
+    updateSession(session.id, (session) =>
+      session.focusedTabId === tabId ? session : { ...session, focusedTabId: tabId },
+    );
+    makeCurrent(session.id);
+  }
+
+  // Makes the Pane's Session, when open, the Current Session with the Pane and its Tab focused.
+  function jumpToPane(paneId: PaneId) {
+    const session = findSessionWithPane(paneId);
+    if (session?.status !== "open") return;
+    const tab = session.tabs.find((candidate) => hasPane(candidate, paneId))!;
+    updateSession(session.id, (session) => ({
+      ...session,
+      tabs: session.tabs.map((candidate) => (candidate === tab ? withFocusedPane(tab, paneId) : candidate)),
+    }));
+    jumpToTab(tab.id);
+  }
+
+  // A result's label and, for a Tab or Pane, what places it: the Pane's working directory and the Session's label.
+  function searchedText(result: PaletteResult) {
+    if (result.type === "tab") return `${result.label} ${result.sessionLabel}`;
+    if (result.type === "pane") return `${result.label} ${result.workingDirectory} ${result.sessionLabel}`;
+    return result.label;
+  }
+
+  function actionResults(): PaletteResult[] {
+    return Object.entries(paletteActionLabels).map(([action, label]) => ({
+      type: "action",
+      action: action as PaletteAction,
+      label,
+    }));
+  }
+
   shellHost.subscribe((event) => {
     if (event.type === "shellExited") removePaneFromSession(event.paneId);
     if (event.type === "workingDirectoryChanged") {
@@ -384,7 +542,32 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     }
   });
 
-  return {
+  // The app actions on the Current Session, by the core's own commands.
+  const sessionActions: Record<Exclude<PaletteAction, "newSession" | "quit">, (sessionId: SessionId) => void> = {
+    newTab: (sessionId) => core.newTab(sessionId),
+    splitPaneVertically: (sessionId) => core.splitPane(sessionId, "vertical"),
+    splitPaneHorizontally: (sessionId) => core.splitPane(sessionId, "horizontal"),
+    closePane: (sessionId) => core.closePane(sessionId),
+    nextSession: () => core.focusNextSession(),
+    previousSession: () => core.focusPreviousSession(),
+    nextTab: (sessionId) => core.focusNextTab(sessionId),
+    previousTab: (sessionId) => core.focusPreviousTab(sessionId),
+    nextPane: (sessionId) => core.focusNextPane(sessionId),
+    previousPane: (sessionId) => core.focusPreviousPane(sessionId),
+    focusPaneLeft: (sessionId) => core.focusPaneInDirection(sessionId, "left"),
+    focusPaneRight: (sessionId) => core.focusPaneInDirection(sessionId, "right"),
+    focusPaneUp: (sessionId) => core.focusPaneInDirection(sessionId, "up"),
+    focusPaneDown: (sessionId) => core.focusPaneInDirection(sessionId, "down"),
+  };
+
+  // Without a Current Session, only the actions that don't act on one run.
+  function runAction(action: PaletteAction) {
+    if (action === "newSession") return core.newSession();
+    if (action === "quit") return core.quitRequested();
+    if (state.currentSessionId !== undefined) sessionActions[action](state.currentSessionId);
+  }
+
+  const core: Core = {
     start: command(() => {
       const saved = stateStore.load();
       if (saved) restore(saved);
@@ -415,15 +598,7 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
       addSession();
       emit({ type: "showSession", sessionId: state.currentSessionId! });
     }),
-    reopenSession: command((sessionId) => {
-      if (findSession(sessionId)?.status !== "closed") return;
-      updateSession(sessionId, (session) => {
-        if (session.tabs.length > 0) return { ...restartShells(session), status: "open" };
-        const tab = openTab(session.rootDirectory ?? homeDirectory);
-        return { ...session, status: "open", tabs: [tab], focusedTabId: tab.id };
-      });
-      makeCurrent(sessionId);
-    }),
+    reopenSession: command(reopenSession),
     renameSession: command((sessionId, name) => {
       updateSession(sessionId, ({ labelNumber: _freed, ...session }) => ({ ...session, name }));
     }),
@@ -486,19 +661,27 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     focusNextTab: command((sessionId) => focusTabBy(sessionId, 1)),
     tabTitle(tabId) {
       const tab = findTab(tabId);
-      if (!tab) return undefined;
-      const pane = focusedPane(tab);
-      return pane.runningProgram ?? folderName(pane.workingDirectory);
+      return tab && titleOf(tab);
     },
     sessionLabel(sessionId) {
       const session = findSession(sessionId);
-      if (!session) return undefined;
-      if (session.name !== undefined) return session.name;
-      const tab = focusedTab(session);
-      const directory = tab ? focusedPane(tab).workingDirectory : homeDirectory;
-      return `Session ${session.labelNumber} (${displayDirectory(directory)})`;
+      return session && labelOf(session);
     },
     sessionsInCycleOrder,
+    paletteResults(query) {
+      const { results, search } = parsePaletteQuery(query);
+      return results
+        .map((result) => ({ result, score: fuzzyScore(search, searchedText(result)) }))
+        .filter((scored) => scored.score !== undefined)
+        .toSorted((a, b) => b.score! - a.score!)
+        .map(({ result }) => result);
+    },
+    choosePaletteResult: command((result) => {
+      if (result.type === "session") jumpToSession(result.sessionId);
+      if (result.type === "tab") jumpToTab(result.tabId);
+      if (result.type === "pane") jumpToPane(result.paneId);
+      if (result.type === "action") runAction(result.action);
+    }),
     paneRects(tabId) {
       const tab = findTab(tabId);
       return tab ? paneRects(tab.layout) : [];
@@ -516,4 +699,5 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
       stateListeners.push(listener);
     },
   };
+  return core;
 }
