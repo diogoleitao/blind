@@ -14,6 +14,10 @@ Why:
 - [ADR 0001](docs/adr/0001-electron-and-xterm-js.md) (not Swift or Tauri)
 - [ADR 0002](docs/adr/0002-no-background-daemon.md) (no background daemon)
 
+## Credits
+
+The menu bar icons were drawn in [Pixilart](https://www.pixilart.com/).
+
 ## License
 
 [MIT](LICENSE)
