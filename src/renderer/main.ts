@@ -1,11 +1,12 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
-import { Terminal } from "@xterm/xterm";
+import { type ITerminalOptions, Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { defaultSettings } from "../core/config";
 import type { PaletteResult } from "../core/core";
 import type { PaneRect } from "../core/layout";
 import type { PaneId } from "../core/state";
+import { type Colour, defaultTheme, type Theme } from "../core/themes";
 import type { BlindApi, PalettePrompt, SessionView, TerminalSettings } from "../shared/ipc";
 
 declare global {
@@ -33,8 +34,56 @@ const panesElement = document.getElementById("panes")!;
 const tabBar = document.getElementById("tab-bar")!;
 const terminals = new Map<PaneId, PaneTerminal>();
 let focusedPaneId: PaneId | undefined;
-// Replaced by the main process's before any terminal opens.
+// Both replaced by the main process's before any terminal opens.
 let terminalSettings: TerminalSettings = { scrollbackLines: defaultSettings.scrollbackLines };
+let theme: Theme = defaultTheme;
+
+// The opacity of the window's background over its blur, as iTerm2's 25% transparency.
+const windowOpacity = 0.75;
+
+// The colour with its alpha scaled by `factor`.
+function withOpacity(colour: Colour, factor: number) {
+  const alpha = colour.length === 9 ? Number.parseInt(colour.slice(7), 16) : 255;
+  return `${colour.slice(0, 7)}${Math.round(alpha * factor).toString(16).padStart(2, "0")}`;
+}
+
+// The terminal's options for the Theme. The terminal's background stays clear, since the page's background shows
+// through, keeping the window's transparency and blur.
+function terminalOptions({ font, cursor, terminal }: Theme): ITerminalOptions {
+  const { cursorText, selection, selectionText, ...colours } = terminal;
+  return {
+    fontFamily: `${JSON.stringify(font.family)}, monospace`,
+    fontSize: font.size,
+    cursorStyle: cursor.style,
+    cursorBlink: cursor.blink,
+    theme: {
+      ...colours,
+      background: "#00000000",
+      cursorAccent: cursorText,
+      selectionBackground: selection,
+      selectionForeground: selectionText,
+    },
+  };
+}
+
+// The page's colours, as the CSS variables the stylesheet uses, e.g. `--palette-muted-text`.
+function applyChromeColours({ terminal, chrome }: Theme) {
+  const root = document.documentElement.style;
+  root.setProperty("--window-background", withOpacity(terminal.background, windowOpacity));
+  for (const [name, colour] of Object.entries(chrome)) {
+    root.setProperty(`--${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`, colour);
+  }
+}
+
+// Open terminals take the Theme at once; a new font changes how many rows and columns fit.
+function applyTheme(next: Theme) {
+  theme = next;
+  applyChromeColours(theme);
+  for (const pane of terminals.values()) {
+    Object.assign(pane.terminal.options, terminalOptions(theme));
+    pane.fit.fit();
+  }
+}
 
 // Puts a Pane's element at its rectangle, with a divider along each edge it shares with another Pane.
 function place(element: HTMLDivElement, rect: PaneRect) {
@@ -59,10 +108,9 @@ function openPane(rect: PaneRect): PaneTerminal {
   terminalElement.className = "terminal";
   element.append(terminalElement);
   panesElement.append(element);
-  // The page's background shows through, keeping the window's transparency and blur.
   const terminal = new Terminal({
     allowTransparency: true,
-    theme: { background: "#00000000" },
+    ...terminalOptions(theme),
     scrollback: terminalSettings.scrollbackLines,
   });
   const fit = new FitAddon();
@@ -154,6 +202,10 @@ let searchCount = 0;
 let latestSearch = Promise.resolve();
 // Set while the palette asks for a name or title instead of searching.
 let prompt: PalettePrompt | undefined;
+// Set while the palette lists the Themes instead of searching, each selected one previewed.
+let pickingTheme = false;
+// The Theme the next results select, once: the one in effect when the palette started listing them.
+let themeToSelect: string | undefined;
 
 const promptPlaceholders: Record<PalettePrompt["type"], string> = {
   askSessionName: "Session name",
@@ -165,6 +217,7 @@ const resultKinds: Record<PaletteResult["type"], string> = {
   tab: "Tab",
   pane: "Pane",
   action: "Action",
+  theme: "Theme",
 };
 
 // What places a result: a Closed Session's mark, a Tab's Session, or a Pane's working directory and Session.
@@ -197,19 +250,32 @@ function renderPalette() {
   paletteList.children[selectedResult]?.scrollIntoView({ block: "nearest" });
 }
 
+// Puts the selected Theme in effect while the palette lists the Themes.
+function previewSelectedTheme() {
+  const result = paletteResults[selectedResult];
+  if (pickingTheme && result?.type === "theme") blind.previewTheme(result.name);
+}
+
 function searchPalette() {
   searchCount += 1;
   const search = searchCount;
-  latestSearch = blind.searchPalette(paletteInput.value).then((results) => {
+  const searching = pickingTheme ? blind.searchThemes : blind.searchPalette;
+  latestSearch = searching(paletteInput.value).then((results) => {
     if (search !== searchCount) return;
     paletteResults = results;
-    selectedResult = 0;
+    selectedResult = Math.max(
+      0,
+      results.findIndex((result) => result.type === "theme" && result.name === themeToSelect),
+    );
+    themeToSelect = undefined;
     renderPalette();
+    previewSelectedTheme();
   });
 }
 
 function openPalette() {
   prompt = undefined;
+  pickingTheme = false;
   palette.hidden = false;
   paletteInput.placeholder = "";
   paletteInput.value = "";
@@ -220,6 +286,7 @@ function openPalette() {
 // Offers the suggestion selected, so typing replaces it and Enter accepts it. A search still in flight is dropped.
 function openPrompt(asked: PalettePrompt) {
   prompt = asked;
+  pickingTheme = false;
   searchCount += 1;
   paletteResults = [];
   renderPalette();
@@ -230,11 +297,24 @@ function openPrompt(asked: PalettePrompt) {
   paletteInput.select();
 }
 
+// Lists the Themes with the one in effect selected. Choosing one keeps it; dismissing restores the one from before.
+function openThemePicker() {
+  prompt = undefined;
+  pickingTheme = true;
+  themeToSelect = theme.name;
+  palette.hidden = false;
+  paletteInput.placeholder = "Theme";
+  paletteInput.value = "";
+  paletteInput.focus();
+  searchPalette();
+}
+
 // The focused Pane's terminal takes the keyboard back.
 function closePalette() {
   if (palette.hidden) return;
   palette.hidden = true;
   prompt = undefined;
+  pickingTheme = false;
   if (focusedPaneId) terminals.get(focusedPaneId)?.terminal.focus();
 }
 
@@ -266,6 +346,7 @@ function moveSelection(offset: number) {
   if (count === 0) return;
   selectedResult = (selectedResult + offset + count) % count;
   renderPalette();
+  previewSelectedTheme();
 }
 
 paletteInput.addEventListener("input", () => {
@@ -287,8 +368,11 @@ palette.addEventListener("mousedown", (event) => {
 });
 paletteInput.addEventListener("blur", dismissPalette);
 
+applyChromeColours(theme);
 blind.onTerminalSettings(applyTerminalSettings);
+blind.onTheme(applyTheme);
 blind.onOpenPalette(openPalette);
+blind.onPickTheme(openThemePicker);
 blind.onPalettePrompt(openPrompt);
 blind.onPaneData(writeToTerminal);
 blind.onFlushScrollback(() => terminals.forEach((pane, paneId) => reportScrollback(paneId, pane)));

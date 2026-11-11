@@ -1,6 +1,7 @@
 import type { Effect, PaletteResult } from "../core/core";
 import type { PaneRect } from "../core/layout";
 import type { PaneId, TabId } from "../core/state";
+import type { Theme } from "../core/themes";
 
 export interface TerminalSize {
   cols: number;
@@ -38,6 +39,10 @@ export const channels = {
   choosePaletteResult: "palette:choose",
   promptPalette: "palette:prompt",
   answerPalettePrompt: "palette:answer",
+  applyTheme: "theme:apply",
+  pickTheme: "theme:pick",
+  searchThemes: "theme:search",
+  previewTheme: "theme:preview",
 } as const;
 
 // What the preload script exposes to the renderer as `window.blind`.
@@ -64,4 +69,11 @@ export interface BlindApi {
   // Called when an app action needs a name or title typed into the Command Palette.
   onPalettePrompt(listener: (prompt: PalettePrompt) => void): void;
   answerPalettePrompt(prompt: PalettePrompt, answer: string): void;
+  // Called once the page has loaded, before its Session view, and again whenever the Theme in effect changes.
+  onTheme(listener: (theme: Theme) => void): void;
+  // Called when the Command Palette should list the Themes instead of searching.
+  onPickTheme(listener: () => void): void;
+  searchThemes(query: string): Promise<PaletteResult[]>;
+  // The Theme the Command Palette's selection moved to.
+  previewTheme(name: string): void;
 }

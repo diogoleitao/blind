@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createCore, type PaletteResult } from "./core";
+import { createCore, type Effect, type PaletteResult } from "./core";
 import type { KeyPress } from "./key-bindings";
 import { createControllableClock, createFakeShellHost } from "./fakes";
 import { createInMemoryStateStore } from "./in-memory-state-store";
 import type { StateStore } from "./ports";
 import { idsIn, panesIn, type Session } from "./state";
+import { defaultTheme } from "./themes";
 
 // Passing the state store of an earlier core relaunches the app from what that core saved. A config file's text is read
 // before starting, as the app does.
@@ -1409,6 +1410,339 @@ describe("the scrollback lines setting", () => {
   });
 });
 
+describe("Themes", () => {
+  it("starts with the Default Theme, the iTerm2 profile's font, steady block cursor and colours", () => {
+    const { core } = startCore();
+
+    expect(core.theme()).toMatchObject({
+      name: "Default",
+      font: { family: "Andale Mono", size: 14 },
+      cursor: { style: "block", blink: false },
+      terminal: {
+        foreground: "#bbbbbb",
+        background: "#000000",
+        cursor: "#bbbbbb",
+        cursorText: "#ffffff",
+        selection: "#b5d5ff",
+        selectionText: "#000000",
+        black: "#000000",
+        red: "#bb0000",
+        green: "#00bb00",
+        yellow: "#bbbb00",
+        blue: "#0000bb",
+        magenta: "#bb00bb",
+        cyan: "#00bbbb",
+        white: "#bbbbbb",
+        brightBlack: "#555555",
+        brightRed: "#ff5555",
+        brightGreen: "#55ff55",
+        brightYellow: "#ffff55",
+        brightBlue: "#5555ff",
+        brightMagenta: "#ff55ff",
+        brightCyan: "#55ffff",
+        brightWhite: "#ffffff",
+      },
+    });
+  });
+
+  it("applies the Theme the config file's theme setting names, edited by hand", () => {
+    const { core, effects } = startCore();
+
+    core.configChanged('{ "theme": "Tokyo Night" }');
+
+    expect(core.theme()).toMatchObject({ name: "Tokyo Night", terminal: { background: "#1a1b26" } });
+    expect(effects).toEqual([{ type: "applyTheme", theme: expect.objectContaining({ name: "Tokyo Night" }) }]);
+  });
+
+  it("matches the theme setting to a Theme's name ignoring case, as Theme names are unique", () => {
+    const { core, effects } = startCore(undefined, '{ "theme": "rosé PINE" }');
+
+    expect(core.theme().name).toBe("Rosé Pine");
+    expect(core.settings().theme).toBe("Rosé Pine");
+    expect(effects).toEqual([{ type: "applyTheme", theme: expect.objectContaining({ name: "Rosé Pine" }) }]);
+  });
+
+  it("falls back to the Default Theme for a theme setting that names no Theme, telling the user", () => {
+    const { core, effects } = startCore(undefined, '{ "theme": "Gruvbox" }');
+    effects.length = 0;
+
+    core.configChanged('{ "theme": "Dracula", "cycleOrder": "random" }');
+
+    expect(core.theme().name).toBe("Default");
+    expect(effects).toEqual([
+      { type: "settingsRejected", settings: ["theme", "cycleOrder"] },
+      { type: "applyTheme", theme: expect.objectContaining({ name: "Default" }) },
+    ]);
+  });
+
+  it("lists the built-in Themes, the Default Theme first, then the Theme files' Themes by name", () => {
+    const { core } = startCore();
+
+    core.themeFilesChanged([
+      { fileName: "nord.jsonc", text: '{ "name": "Nord" }' },
+      { fileName: "dracula.jsonc", text: '{ "name": "Dracula" }' },
+    ]);
+
+    expect(summarize(core.themeResults(""))).toEqual([
+      "theme Default",
+      "theme Catppuccin",
+      "theme Tokyo Night",
+      "theme Rosé Pine",
+      "theme Gruvbox",
+      "theme Dracula",
+      "theme Nord",
+    ]);
+    expect(summarize(core.themeResults("no"))).toEqual(["theme Nord"]);
+  });
+
+  it("takes the Default Theme's value for anything a Theme file leaves out", () => {
+    const { core, effects } = startCore();
+
+    core.themeFilesChanged([
+      {
+        fileName: "dracula.jsonc",
+        text: `{
+          // Only what differs from the Default Theme.
+          "$schema": "./theme.schema.json",
+          "name": "Dracula",
+          "font": { "size": 13 },
+          "terminal": { "background": "#282a36", "foreground": "#f8f8f2" },
+          "chrome": { "divider": "#44475a80" },
+        }`,
+      },
+    ]);
+    core.configChanged('{ "theme": "Dracula" }');
+
+    expect(core.theme()).toEqual({
+      name: "Dracula",
+      font: { family: "Andale Mono", size: 13 },
+      cursor: { style: "block", blink: false },
+      terminal: { ...defaultTheme.terminal, background: "#282a36", foreground: "#f8f8f2" },
+      chrome: { ...defaultTheme.chrome, divider: "#44475a80" },
+    });
+    expect(effects).toEqual([{ type: "applyTheme", theme: core.theme() }]);
+  });
+
+  it("takes the Default Theme's value for anything a Theme file gives an invalid value or doesn't define, telling the user", () => {
+    const { core, effects } = startCore();
+    const dracula = {
+      name: "Dracula",
+      font: { family: " ", size: 100 },
+      cursor: { style: "beam", blink: true },
+      terminal: { background: "#282a36", foreground: "white", selection: "#44475a80", purple: "#bd93f9" },
+      chrome: "dark",
+      opacity: 0.9,
+    };
+
+    core.themeFilesChanged([{ fileName: "dracula.jsonc", text: JSON.stringify(dracula) }]);
+    core.configChanged('{ "theme": "Dracula" }');
+
+    expect(core.theme()).toEqual({
+      name: "Dracula",
+      font: { family: "Andale Mono", size: 14 },
+      cursor: { style: "block", blink: true },
+      terminal: { ...defaultTheme.terminal, background: "#282a36", selection: "#44475a80" },
+      chrome: defaultTheme.chrome,
+    });
+    expect(effects[0]).toEqual({
+      type: "themesRejected",
+      rejected: [
+        "dracula.jsonc: font.family",
+        "dracula.jsonc: font.size",
+        "dracula.jsonc: cursor.style",
+        "dracula.jsonc: terminal.foreground",
+        "dracula.jsonc: terminal.purple",
+        "dracula.jsonc: chrome",
+        "dracula.jsonc: opacity",
+      ],
+    });
+  });
+
+  it("skips a Theme file that isn't a JSON object or whose name is missing or taken, ignoring case, telling the user", () => {
+    const { core, effects } = startCore();
+
+    core.themeFilesChanged([
+      { fileName: "nord-copy.jsonc", text: '{ "name": "NORD" }' },
+      { fileName: "nord.jsonc", text: '{ "name": "Nord" }' },
+      { fileName: "half-saved.jsonc", text: '{ "name": "Dracula", ' },
+      { fileName: "list.jsonc", text: '["Dracula"]' },
+      { fileName: "nameless.jsonc", text: '{ "terminal": {} }' },
+      { fileName: "blank.jsonc", text: '{ "name": " " }' },
+      { fileName: "gruvbox.jsonc", text: '{ "name": "gruvbox" }' },
+    ]);
+
+    expect(summarize(core.themeResults("")).slice(5)).toEqual(["theme NORD"]);
+    expect(effects).toEqual([
+      {
+        type: "themesRejected",
+        rejected: ["blank.jsonc", "gruvbox.jsonc", "half-saved.jsonc", "list.jsonc", "nameless.jsonc", "nord.jsonc"],
+      },
+    ]);
+  });
+
+  it("applies the Theme the setting names once its file appears, and falls back once it goes, telling the user", () => {
+    const { core, effects } = startCore(undefined, '{ "theme": "Dracula", "scrollbackLines": 5 }');
+    const dracula = { fileName: "dracula.jsonc", text: '{ "name": "Dracula" }' };
+    effects.length = 0;
+
+    core.themeFilesChanged([dracula]);
+    expect(core.theme().name).toBe("Dracula");
+    core.themeFilesChanged([dracula]);
+    core.themeFilesChanged([]);
+
+    expect(core.theme().name).toBe("Default");
+    expect(core.settings().scrollbackLines).toBe(5);
+    expect(effects).toEqual([
+      { type: "applyTheme", theme: expect.objectContaining({ name: "Dracula" }) },
+      { type: "settingsRejected", settings: ["theme"] },
+      { type: "applyTheme", theme: expect.objectContaining({ name: "Default" }) },
+    ]);
+  });
+
+  it("choosing Change Theme asks for a Theme, with or without a Current Session, keeping the app shown", () => {
+    const { core, effects, shellHost } = startCore(undefined, '{ "hotkeyWithNoOpenSessions": "palette" }');
+    const sessionId = core.state().sessions[0].id;
+
+    chooseAction(core, "Change Theme");
+    shellHost.exit(core.state().sessions[0].tabs[0].panes[0].id);
+    core.hotkeyPressed();
+    chooseAction(core, "Change Theme");
+
+    expect(effects).toEqual([
+      { type: "pickTheme", sessionId },
+      { type: "closeWindow", sessionId },
+      { type: "hideApp" },
+      { type: "showPalette" },
+      { type: "pickTheme" },
+    ]);
+  });
+
+  it("previews each Theme browsed, restoring the Theme from before when the Command Palette is dismissed", () => {
+    const { core, effects } = startCore(undefined, '{ "theme": "Catppuccin" }');
+    effects.length = 0;
+
+    core.previewTheme("Gruvbox");
+    core.previewTheme("Tokyo Night");
+    core.previewTheme("Dracula");
+    expect(core.theme().name).toBe("Tokyo Night");
+    core.paletteDismissed();
+
+    expect(core.theme().name).toBe("Catppuccin");
+    expect(core.settings().theme).toBe("Catppuccin");
+    expect(effects).toEqual([
+      { type: "applyTheme", theme: expect.objectContaining({ name: "Gruvbox" }) },
+      { type: "applyTheme", theme: expect.objectContaining({ name: "Tokyo Night" }) },
+      { type: "applyTheme", theme: expect.objectContaining({ name: "Catppuccin" }) },
+    ]);
+  });
+
+  it("shows the setting's Theme once the previewed Theme's file goes, and choosing that Theme then ends the preview", () => {
+    const { core, effects } = startCore(undefined, '{ "theme": "Catppuccin" }');
+    const nord = { fileName: "nord.jsonc", text: '{ "name": "Nord" }' };
+    core.themeFilesChanged([nord]);
+
+    core.previewTheme("Nord");
+    core.themeFilesChanged([]);
+    expect(core.theme().name).toBe("Catppuccin");
+    chooseTheme(core, "Nord");
+    core.themeFilesChanged([nord]);
+
+    expect(core.theme().name).toBe("Catppuccin");
+    expect((effects as Effect[]).some((effect) => effect.type === "writeConfig")).toBe(false);
+  });
+
+  it("choosing a Theme keeps it, setting it in the config file with the file's comments and other settings kept", () => {
+    const { core, effects } = startCore(
+      undefined,
+      `{
+  // Mine.
+  "theme": /* was */ "Catppuccin",
+  "cycleOrder": "created",
+}
+`,
+    );
+    effects.length = 0;
+
+    core.previewTheme("Gruvbox");
+    core.choosePaletteResult(core.themeResults("gruv")[0]);
+    const written = `{
+  // Mine.
+  "theme": /* was */ "Gruvbox",
+  "cycleOrder": "created",
+}
+`;
+    core.configChanged(written);
+
+    expect(core.theme().name).toBe("Gruvbox");
+    expect(core.settings().theme).toBe("Gruvbox");
+    expect(effects).toEqual([
+      { type: "applyTheme", theme: expect.objectContaining({ name: "Gruvbox" }) },
+      { type: "writeConfig", text: written },
+    ]);
+  });
+
+  it("choosing a Theme adds the theme setting to a config file without it, or writes a file with it when there's none", () => {
+    const { core, effects } = startCore(undefined, '{\n  // Mine.\n    "cycleOrder": "created" // by creation\n}\n');
+    const writes = () => (effects as Effect[]).flatMap((effect) => (effect.type === "writeConfig" ? [effect.text] : []));
+
+    chooseTheme(core, "Gruvbox");
+    core.configChanged(undefined);
+    chooseTheme(core, "Rosé Pine");
+    core.configChanged("{}");
+    chooseTheme(core, "Catppuccin");
+
+    expect(writes()).toEqual([
+      '{\n  // Mine.\n    "cycleOrder": "created", // by creation\n    "theme": "Gruvbox"\n}\n',
+      `{
+  // Your editor suggests every setting and its default from the schema.
+  "$schema": "./config.schema.json",
+  "theme": "Rosé Pine"
+}
+`,
+      '{\n  "theme": "Catppuccin"\n}',
+    ]);
+  });
+
+  it("keeps the Theme chosen when the Theme files change before the config file is read again", () => {
+    const { core } = startCore(undefined, '{ "theme": "Catppuccin" }');
+
+    chooseTheme(core, "Gruvbox");
+    core.themeFilesChanged([{ fileName: "nord.jsonc", text: '{ "name": "Nord" }' }]);
+
+    expect(core.theme().name).toBe("Gruvbox");
+  });
+
+  // A save caught halfway through an edit mustn't be written over with the settings from before it.
+  it("choosing a Theme while the config file can't be read applies it without writing the file, telling the user", () => {
+    const { core, effects } = startCore(undefined, '{ "cycleOrder": "created" }');
+
+    core.configChanged('{ "cycleOrder": ');
+    effects.length = 0;
+    chooseTheme(core, "Gruvbox");
+    core.configUnreadable();
+    chooseTheme(core, "Catppuccin");
+
+    expect(core.theme().name).toBe("Catppuccin");
+    expect(effects).toEqual([
+      { type: "applyTheme", theme: expect.objectContaining({ name: "Gruvbox" }) },
+      { type: "configUnreadable" },
+      { type: "configUnreadable" },
+      { type: "applyTheme", theme: expect.objectContaining({ name: "Catppuccin" }) },
+      { type: "configUnreadable" },
+    ]);
+  });
+
+  it("keeps the Theme chosen while the config file can't be read when the Theme files change", () => {
+    const { core } = startCore(undefined, '{ "theme": "Tokyo Night" }');
+    core.configUnreadable();
+
+    chooseTheme(core, "Gruvbox");
+    core.themeFilesChanged([{ fileName: "nord.jsonc", text: '{ "name": "Nord" }' }]);
+
+    expect(core.theme().name).toBe("Gruvbox");
+  });
+});
+
 // Relaunches from the saved snapshot with each Session changed by `update`, standing in for what later commands do,
 // such as closing a Session with its Tabs or setting its Root directory.
 function relaunchWith(stateStore: StateStore, update: (session: Session) => Session) {
@@ -1892,6 +2226,7 @@ describe("the Command Palette", () => {
       "action Focus Pane Right",
       "action Focus Pane Above",
       "action Focus Pane Below",
+      "action Change Theme",
       "action Open Settings",
       "action Quit Blind",
     ]);
@@ -1942,6 +2277,7 @@ describe("the Command Palette", () => {
       "action Rename Tab",
       "action Next Session",
       "action Next Pane",
+      "action Change Theme",
       "action Set Session Root",
       "action Clear Session Root",
       "action Split Pane Vertically",
@@ -2069,6 +2405,11 @@ function chooseAction(core: ReturnType<typeof startCore>["core"], label: string)
   const action = core.paletteResults("").find((result) => result.type === "action" && result.label === label);
   if (!action) throw new Error(`No app action is labelled ${label}`);
   core.choosePaletteResult(action);
+}
+
+// Chooses the Theme by its name, as the Command Palette does once it lists the Themes.
+function chooseTheme(core: ReturnType<typeof startCore>["core"], name: string) {
+  core.choosePaletteResult({ type: "theme", name, label: name });
 }
 
 // Each result as its type and label, e.g. `tab vim`.

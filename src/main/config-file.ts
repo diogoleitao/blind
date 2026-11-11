@@ -1,19 +1,11 @@
 import { mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { configSchema } from "../core/config";
+import { configSchema, configSchemaFileName, starterConfig } from "../core/config";
 
 // How long after a change the file is read, so an editor's burst of writes for one save is read once.
 const settleDelayMilliseconds = 100;
 
-const schemaFileName = "config.schema.json";
 const configFileName = "config.jsonc";
-
-// What "Open settings" creates when there's no file yet: nothing but the schema, which editors complete from.
-const starterConfig = `{
-  // Your editor suggests every setting and its default from the schema.
-  "$schema": "./${schemaFileName}"
-}
-`;
 
 function errorCode(error: unknown) {
   return (error as NodeJS.ErrnoException).code;
@@ -54,9 +46,19 @@ export function createConfigFile(directory: string) {
     writeSchema() {
       try {
         mkdirSync(directory, { recursive: true });
-        writeFileSync(join(directory, schemaFileName), `${JSON.stringify(configSchema, null, 2)}\n`);
+        writeFileSync(join(directory, configSchemaFileName), `${JSON.stringify(configSchema, null, 2)}\n`);
       } catch (error) {
         console.error(`Couldn't write the config schema to ${directory}:`, error);
+      }
+    },
+    // Taken as read, since the core already holds the settings it wrote.
+    write(text: string) {
+      try {
+        mkdirSync(directory, { recursive: true });
+        writeFileSync(path, text);
+        lastRead = { readable: true, text };
+      } catch (error) {
+        console.error(`Couldn't write the config file ${path}:`, error);
       }
     },
     // Leaves an existing file alone.

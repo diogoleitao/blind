@@ -1,4 +1,6 @@
+import { isObject, readJsonc } from "./jsonc";
 import { type BoundAction, defaultKeyBindings, parseShortcut, sameShortcut, type Shortcut } from "./key-bindings";
+import { builtInThemes, defaultTheme } from "./themes";
 
 const cycleOrders = ["alphabetical", "recent", "created"] as const;
 
@@ -23,6 +25,8 @@ export interface Settings {
   hotkeyWithNoOpenSessions: HotkeyWithNoOpenSessions;
   // Each action's shortcut; null for an unbound action.
   keyBindings: Record<BoundAction, Shortcut | null>;
+  // The name of the Theme in effect, built in or from a Theme file.
+  theme: string;
 }
 
 export const defaultSettings: Settings = {
@@ -32,6 +36,7 @@ export const defaultSettings: Settings = {
   keyBindings: Object.fromEntries(
     Object.entries(defaultKeyBindings).map(([action, shortcut]) => [action, shortcut && parseShortcut(shortcut)!]),
   ) as Settings["keyBindings"],
+  theme: defaultTheme.name,
 };
 
 const invalid = Symbol("invalid");
@@ -44,7 +49,10 @@ function oneOf<const Values extends readonly string[]>(values: Values): SettingP
   return (value) => (values.includes(value as string) ? (value as Values[number]) : invalid);
 }
 
-const settingParsers: { [Name in keyof Settings]-?: SettingParser<Settings[Name]> } = {
+type SettingParsers = { [Name in keyof Settings]-?: SettingParser<Settings[Name]> };
+
+// The theme setting takes the name of one of the Themes loaded.
+const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
   shell: (value) => (typeof value === "string" && value.trim() !== "" ? value : invalid),
   scrollbackLines: (value) => {
     if (value === "unlimited") return unlimitedScrollbackLines;
@@ -55,7 +63,10 @@ const settingParsers: { [Name in keyof Settings]-?: SettingParser<Settings[Name]
   cycleOrder: oneOf(cycleOrders),
   hotkeyWithNoOpenSessions: oneOf(hotkeyBehaviours),
   keyBindings: parseKeyBindings,
-};
+  // Theme names are unique ignoring case, so the setting matches one ignoring case and takes its spelling.
+  theme: (value) =>
+    themeNames.find((name) => typeof value === "string" && name.toLowerCase() === value.toLowerCase()) ?? invalid,
+});
 
 // The defaults with each configured action's shortcut, or null, in place. A configured shortcut is taken away from the
 // action bound to it by default; one already configured for another action is rejected.
@@ -109,6 +120,14 @@ export const configSchema = {
       enum: hotkeyBehaviours,
       default: defaultSettings.hotkeyWithNoOpenSessions,
     },
+    theme: {
+      description:
+        "The Theme's name: one built in, or one from a Theme file in the themes folder next to this file. The Command Palette's Change Theme sets it too.",
+      type: "string",
+      minLength: 1,
+      default: defaultSettings.theme,
+      examples: builtInThemes.map((theme) => theme.name),
+    },
     keyBindings: {
       description:
         'Each action\'s shortcut, such as "Cmd+Shift+D": modifiers (Cmd, Shift, Alt or Option, Ctrl) and one key or key name (Left, Right, Up, Down, Enter, Tab, Space, Backspace, Delete, Escape, Home, End, PageUp, PageDown, Plus, F1 to F20), joined by "+". Cmd or Ctrl is required. null unbinds an action; a shortcut given here is taken away from the action it is bound to by default.',
@@ -125,6 +144,16 @@ export const configSchema = {
   additionalProperties: false,
 } as const;
 
+// The file the schema is written to, next to the config file.
+export const configSchemaFileName = "config.schema.json";
+
+// What the config file starts as: nothing but the schema, which editors complete from.
+export const starterConfig = `{
+  // Your editor suggests every setting and its default from the schema.
+  "$schema": "./${configSchemaFileName}"
+}
+`;
+
 export interface ParsedConfig {
   settings: Settings;
   // The settings the file gave invalid values, or that don't exist.
@@ -132,86 +161,20 @@ export interface ParsedConfig {
 }
 
 // The settings in the config file's text, or the defaults without a file; undefined when the text isn't a JSON object,
-// comments allowed. Editors read `$schema`, so it's no setting.
-export function parseConfig(text: string | undefined): ParsedConfig | undefined {
+// comments allowed. Editors read `$schema`, so it's no setting. The theme setting names one of `themeNames`.
+export function parseConfig(text: string | undefined, themeNames: readonly string[]): ParsedConfig | undefined {
   const settings = { ...defaultSettings };
   const rejected: string[] = [];
   const config = text === undefined ? {} : readJsonc(text);
   if (config === undefined) return undefined;
+  const parsers = settingParsers(themeNames);
   for (const [name, value] of Object.entries(config)) {
     if (name === "$schema") continue;
-    const parsed = Object.hasOwn(settingParsers, name)
-      ? settingParsers[name as keyof Settings](value, (entry) => rejected.push(entry))
+    const parsed = Object.hasOwn(parsers, name)
+      ? parsers[name as keyof Settings](value, (entry) => rejected.push(entry))
       : invalid;
     if (parsed === invalid) rejected.push(name);
     else Object.assign(settings, { [name]: parsed });
   }
   return { settings, rejected };
-}
-
-// The JSON object the text holds, comments allowed, or undefined if it holds something else or isn't JSON.
-function readJsonc(text: string): Record<string, unknown> | undefined {
-  try {
-    const value: unknown = JSON.parse(stripJsonc(text));
-    return isObject(value) ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// The text as plain JSON: comments become spaces and commas before a closing bracket or brace are dropped, outside
-// strings.
-function stripJsonc(text: string) {
-  let json = "";
-  let position = 0;
-  while (position < text.length) {
-    const character = text[position];
-    if (character === '"') {
-      const end = stringEnd(text, position);
-      json += text.slice(position, end);
-      position = end;
-    } else if (text.startsWith("//", position) || text.startsWith("/*", position)) {
-      const end = commentEnd(text, position);
-      json += " ";
-      position = end;
-    } else if (character === "," && "]}".includes(text[nextToken(text, position + 1)] ?? "?")) {
-      position += 1;
-    } else {
-      json += character;
-      position += 1;
-    }
-  }
-  return json;
-}
-
-// Just past the string starting at `start`, skipping escaped quotes; the end of the text if it never closes.
-function stringEnd(text: string, start: number) {
-  let position = start + 1;
-  while (position < text.length && text[position] !== '"') position += text[position] === "\\" ? 2 : 1;
-  return Math.min(position + 1, text.length);
-}
-
-// Just past the comment starting at `start`: a line comment runs to the end of its line.
-function commentEnd(text: string, start: number) {
-  if (text.startsWith("//", start)) {
-    const end = text.indexOf("\n", start);
-    return end === -1 ? text.length : end;
-  }
-  const end = text.indexOf("*/", start + 2);
-  return end === -1 ? text.length : end + 2;
-}
-
-// The position of the next character that isn't whitespace or part of a comment.
-function nextToken(text: string, start: number) {
-  let position = start;
-  while (position < text.length) {
-    if (/\s/.test(text[position])) position += 1;
-    else if (text.startsWith("//", position) || text.startsWith("/*", position)) position = commentEnd(text, position);
-    else break;
-  }
-  return position;
 }

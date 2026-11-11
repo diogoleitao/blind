@@ -19,6 +19,7 @@ import { type ConfigRead, createConfigFile } from "./config-file";
 import { fadeWindow } from "./fade";
 import { createFileStateStore } from "./file-state-store";
 import { createNodePtyShellHost } from "./node-pty-shell-host";
+import { createThemeFiles } from "./theme-files";
 
 // The development Hotkey; the installed app's F12 comes with packaging.
 const hotkey = "F7";
@@ -52,7 +53,9 @@ app.whenReady().then(() => {
     clock: { now: () => Date.now() },
     homeDirectory: homedir(),
   });
-  const configFile = createConfigFile(join(homedir(), ".config", "blind"));
+  const configDirectory = join(homedir(), ".config", "blind");
+  const configFile = createConfigFile(configDirectory);
+  const themeFiles = createThemeFiles(join(configDirectory, "themes"));
   const windows = new Map<SessionId, BrowserWindow>();
   // The Command Palette on its own, made the first time the Hotkey shows it with no Open Sessions.
   let paletteWindow: BrowserWindow | undefined;
@@ -141,6 +144,17 @@ app.whenReady().then(() => {
     }
     if (effect.type === "configUnreadable") {
       notify("Settings couldn't be read", "config.jsonc couldn't be read as JSON with comments; settings are unchanged.");
+    }
+    if (effect.type === "applyTheme") allWindows().forEach(sendTheme);
+    if (effect.type === "writeConfig") configFile.write(effect.text);
+    if (effect.type === "pickTheme") {
+      const window = effect.sessionId === undefined ? paletteWindow : windows.get(effect.sessionId);
+      window?.webContents.send(channels.pickTheme);
+    }
+    if (effect.type === "themesRejected") {
+      // A file named alone was skipped; a field rejected in a file takes the Default Theme's value.
+      const rejected = effect.rejected.join(", ");
+      notify("Some Themes were rejected", `Files skipped or fields given the Default Theme's values: ${rejected}.`);
     }
     if (effect.type === "quit") {
       savedForQuit = true;
@@ -279,7 +293,13 @@ app.whenReady().then(() => {
     }
   }
 
+  function sendTheme(window: BrowserWindow) {
+    if (!window.isDestroyed()) window.webContents.send(channels.applyTheme, core.theme());
+  }
+
   ipcMain.on(channels.focusPane, (_event, paneId: PaneId) => core.focusPane(paneId));
+  ipcMain.handle(channels.searchThemes, (_event, query: string) => core.themeResults(query));
+  ipcMain.on(channels.previewTheme, (_event, name: string) => core.previewTheme(name));
   ipcMain.handle(channels.searchPalette, (_event, query: string) => core.paletteResults(query));
   ipcMain.on(channels.choosePaletteResult, (_event, result: PaletteResult) => core.choosePaletteResult(result));
   ipcMain.on(channels.dismissPalette, () => core.paletteDismissed());
@@ -328,7 +348,10 @@ app.whenReady().then(() => {
     });
     window.setAlwaysOnTop(true, "screen-saver");
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
-    window.webContents.on("did-finish-load", () => sendTerminalSettings(window));
+    window.webContents.on("did-finish-load", () => {
+      sendTerminalSettings(window);
+      sendTheme(window);
+    });
     return window;
   }
 
@@ -364,6 +387,10 @@ app.whenReady().then(() => {
     else core.configUnreadable();
   }
 
+  // The Themes load first, so the theme setting can name a Theme file's Theme.
+  themeFiles.writeSchema();
+  core.themeFilesChanged(themeFiles.read());
+  themeFiles.watch((files) => core.themeFilesChanged(files));
   configFile.writeSchema();
   applyConfig(configFile.read());
   configFile.watch((read) => {

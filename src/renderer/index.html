@@ -10,11 +10,12 @@
         margin: 0;
         height: 100%;
       }
-      /* About 25% transparent, over the window's native blur. */
+      /* The Theme's terminal background, about 25% transparent, over the window's native blur. The colours are the
+         Theme's, set by the script. */
       body {
         display: flex;
         flex-direction: column;
-        background: rgba(0, 0, 0, 0.75);
+        background: var(--window-background);
       }
       /* The Command Palette on its own floats over the other apps with nothing behind it. */
       body.standalone {
@@ -29,10 +30,10 @@
         box-sizing: border-box;
       }
       .pane.divided-left {
-        border-left: 1px solid rgba(255, 255, 255, 0.2);
+        border-left: 1px solid var(--divider);
       }
       .pane.divided-top {
-        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        border-top: 1px solid var(--divider);
       }
       .pane.hidden {
         visibility: hidden;
@@ -46,9 +47,9 @@
       }
       #tab-bar {
         display: flex;
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        border-top: 1px solid var(--divider);
         font: 12px system-ui, sans-serif;
-        color: rgba(255, 255, 255, 0.55);
+        color: var(--tab-text);
       }
       #tab-bar[hidden] {
         display: none;
@@ -63,8 +64,8 @@
         text-overflow: ellipsis;
       }
       .tab.focused {
-        color: #fff;
-        background: rgba(255, 255, 255, 0.08);
+        color: var(--focused-tab-text);
+        background: var(--focused-tab-background);
       }
       #palette {
         position: fixed;
@@ -73,12 +74,12 @@
         transform: translateX(-50%);
         width: min(640px, 90vw);
         z-index: 1;
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        border: 1px solid var(--palette-border);
         border-radius: 8px;
-        background: rgba(30, 30, 30, 0.97);
+        background: var(--palette-background);
         box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
         font: 13px system-ui, sans-serif;
-        color: rgba(255, 255, 255, 0.85);
+        color: var(--palette-text);
         overflow: hidden;
       }
       #palette[hidden] {
@@ -89,12 +90,12 @@
         width: 100%;
         padding: 12px 14px;
         border: none;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        border-bottom: 1px solid var(--palette-border);
         outline: none;
         background: transparent;
         font: inherit;
         font-size: 15px;
-        color: #fff;
+        color: inherit;
       }
       #palette-results {
         max-height: 50vh;
@@ -115,19 +116,18 @@
         cursor: default;
       }
       .result.selected {
-        color: #fff;
-        background: rgba(255, 255, 255, 0.1);
+        background: var(--palette-selection);
       }
       .result .detail {
         flex: 1;
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
-        color: rgba(255, 255, 255, 0.45);
+        color: var(--palette-muted-text);
       }
       .result .kind {
         font-size: 11px;
-        color: rgba(255, 255, 255, 0.4);
+        color: var(--palette-muted-text);
       }
     </style>
   </head>

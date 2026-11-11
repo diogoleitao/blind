@@ -33,6 +33,14 @@ const api: BlindApi = {
     ipcRenderer.on(channels.promptPalette, (_event, prompt) => listener(prompt));
   },
   answerPalettePrompt: (prompt, answer) => ipcRenderer.send(channels.answerPalettePrompt, prompt, answer),
+  onTheme: (listener) => {
+    ipcRenderer.on(channels.applyTheme, (_event, theme) => listener(theme));
+  },
+  onPickTheme: (listener) => {
+    ipcRenderer.on(channels.pickTheme, () => listener());
+  },
+  searchThemes: (query) => ipcRenderer.invoke(channels.searchThemes, query),
+  previewTheme: (name) => ipcRenderer.send(channels.previewTheme, name),
 };
 
 contextBridge.exposeInMainWorld("blind", api);

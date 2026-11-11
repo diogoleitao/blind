@@ -7,11 +7,13 @@ import {
   replacePane,
   successorOf,
 } from "./layout";
-import { defaultSettings, parseConfig, type Settings } from "./config";
+import { defaultSettings, type ParsedConfig, parseConfig, type Settings, starterConfig } from "./config";
 import { fuzzyScore } from "./fuzzy";
+import { setJsoncProperty } from "./jsonc";
 import { type BoundAction, type KeyPress, matchesShortcut } from "./key-bindings";
 import type { Clock, SavedScrollback, ShellHost, Snapshot, StateStore } from "./ports";
 import { capScrollback } from "./scrollback";
+import { builtInThemes, defaultTheme, loadThemes, type Theme, type ThemeFile } from "./themes";
 import {
   type CoreState,
   idsIn,
@@ -50,7 +52,15 @@ export type Effect =
   // Tells the user the config file's settings that were rejected and fell back to their defaults.
   | { type: "settingsRejected"; settings: string[] }
   // Tells the user the config file couldn't be read as a JSON object, comments allowed, so the settings stay as they were.
-  | { type: "configUnreadable" };
+  | { type: "configUnreadable" }
+  // The Theme in effect changed; every window follows it.
+  | { type: "applyTheme"; theme: Theme }
+  // Replaces the config file's text, e.g. to set the theme setting to the Theme chosen in the Command Palette.
+  | { type: "writeConfig"; text: string }
+  // Has the Command Palette list the Themes, over the Session's window or, without one, on its own.
+  | { type: "pickTheme"; sessionId?: SessionId }
+  // Tells the user the Theme files, or their fields, that were rejected, as `loadThemes` names them.
+  | { type: "themesRejected"; rejected: string[] };
 
 // Every app action, in the order the Command Palette offers them, by its label.
 const paletteActionLabels = {
@@ -76,6 +86,7 @@ const paletteActionLabels = {
   focusPaneRight: "Focus Pane Right",
   focusPaneUp: "Focus Pane Above",
   focusPaneDown: "Focus Pane Below",
+  changeTheme: "Change Theme",
   openSettings: "Open Settings",
   quit: "Quit Blind",
 } as const;
@@ -87,7 +98,9 @@ export type PaletteResult =
   | { type: "session"; sessionId: SessionId; label: string; closed: boolean }
   | { type: "tab"; tabId: TabId; label: string; sessionLabel: string }
   | { type: "pane"; paneId: PaneId; label: string; workingDirectory: string; sessionLabel: string }
-  | { type: "action"; action: PaletteAction; label: string };
+  | { type: "action"; action: PaletteAction; label: string }
+  // A Theme, labelled with its name.
+  | { type: "theme"; name: string; label: string };
 
 export interface CoreDependencies {
   shellHost: ShellHost;
@@ -101,7 +114,8 @@ export interface Core {
   state(): CoreState;
   // With no Open Sessions, shows a new Session or the Command Palette on its own, as the setting says.
   hotkeyPressed(): void;
-  // The Command Palette closed without a choice. Shown on its own, with no Current Session, the app hides with it.
+  // The Command Palette closed without a choice, ending any Theme preview. Shown on its own, with no Current Session,
+  // the app hides with it.
   paletteDismissed(): void;
   // Blind stopped being the active app, e.g. because another app was clicked.
   focusLost(): void;
@@ -116,6 +130,16 @@ export interface Core {
   // The config file exists but couldn't be opened; the settings stay as they were.
   configUnreadable(): void;
   settings(): Settings;
+  // The Theme in effect.
+  theme(): Theme;
+  // Every Theme file in the themes folder, read again whenever one changes.
+  themeFilesChanged(files: ThemeFile[]): void;
+  // The Themes the Command Palette offers for a query: the built-in ones, the Default Theme first, then the Theme
+  // files' by name.
+  themeResults(query: string): PaletteResult[];
+  // Puts the Theme in effect while the Command Palette lists the Themes: choosing a Theme keeps one, and dismissing the
+  // palette restores the Theme from before.
+  previewTheme(name: string): void;
   // Opens an Unnamed Session with one Tab at the home directory and makes it the Current Session.
   newSession(): void;
   // Opens a Closed Session again as the Current Session, restoring it as Restore does. One closed through its last Tab
@@ -193,6 +217,17 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
   // Whether the app is on screen. Not part of the snapshot: it says nothing about Sessions.
   let appShown = true;
   let settings: Settings = defaultSettings;
+  // The config file's text the settings were last read from, read again when the Themes change.
+  let configText: string | undefined;
+  // Whether the config file read as it is now, so that it's written only over text the settings came from.
+  let configReadable = true;
+  // Whether the theme setting names no Theme loaded, so the user hears of it once.
+  let themeSettingRejected = false;
+  let themes: Theme[] = builtInThemes;
+  // The Theme the windows were last told to follow.
+  let appliedTheme = defaultTheme;
+  // The name of the Theme browsed to in the Command Palette, in effect until the palette closes; absent otherwise.
+  let previewedTheme: string | undefined;
   // The Session order taken at the first of a run of consecutive cycle presses; absent outside one.
   let cycleStreak: SessionId[] | undefined;
   const effectListeners: ((effect: Effect) => void)[] = [];
@@ -206,6 +241,48 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
 
   function emit(effect: Effect) {
     for (const listener of effectListeners) listener(effect);
+  }
+
+  // Absent for no name.
+  function findTheme(name: string | undefined) {
+    return themes.find((theme) => theme.name === name);
+  }
+
+  // The Theme being previewed, or else the one the theme setting names, or the Default Theme when none goes by that
+  // name. A previewed Theme whose file went is passed over.
+  function themeInEffect() {
+    return findTheme(previewedTheme) ?? findTheme(settings.theme) ?? defaultTheme;
+  }
+
+  // Ends any preview, keeping the Theme chosen and setting the theme setting to it, in the config file too, unless the
+  // file can't be read as it is now. A Theme whose file went since it was listed leaves the setting as it was.
+  function chooseTheme(name: string) {
+    previewedTheme = undefined;
+    if (!findTheme(name)) return applyThemeInEffect();
+    settings = { ...settings, theme: name };
+    themeSettingRejected = false;
+    applyThemeInEffect();
+    if (!configReadable) return emit({ type: "configUnreadable" });
+    configText = setJsoncProperty(configText ?? starterConfig, "theme", name);
+    emit({ type: "writeConfig", text: configText });
+  }
+
+  // Noting whether the theme setting names no Theme loaded.
+  function takeSettings(parsed: ParsedConfig) {
+    settings = parsed.settings;
+    themeSettingRejected = parsed.rejected.includes("theme");
+  }
+
+  function themeNames() {
+    return themes.map((theme) => theme.name);
+  }
+
+  // Compared by value: reading the Theme files again makes new Themes of unchanged ones.
+  function applyThemeInEffect() {
+    const theme = themeInEffect();
+    if (JSON.stringify(theme) === JSON.stringify(appliedTheme)) return;
+    appliedTheme = theme;
+    emit({ type: "applyTheme", theme });
   }
 
   function save() {
@@ -619,6 +696,15 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     return result.label;
   }
 
+  // The results that match the search, best first, keeping their order on ties.
+  function searchResults(results: PaletteResult[], search: string) {
+    return results
+      .map((result) => ({ result, score: fuzzyScore(search, searchedText(result)) }))
+      .filter((scored) => scored.score !== undefined)
+      .toSorted((a, b) => b.score! - a.score!)
+      .map(({ result }) => result);
+  }
+
   function actionResults(): PaletteResult[] {
     return Object.entries(paletteActionLabels).map(([action, label]) => ({
       type: "action",
@@ -641,7 +727,7 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
 
   // The app actions on the Current Session, by the core's own commands.
   const sessionActions: Record<
-    Exclude<PaletteAction, "newSession" | "openSettings" | "quit">,
+    Exclude<PaletteAction, "newSession" | "changeTheme" | "openSettings" | "quit">,
     (sessionId: SessionId) => void
   > = {
     renameSession: (sessionId) => {
@@ -681,6 +767,9 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
   // Without a Session, only the actions that don't act on one run.
   function runAction(action: BoundAction, sessionId: SessionId | undefined) {
     if (action === "newSession") return core.newSession();
+    if (action === "changeTheme") {
+      return emit(sessionId === undefined ? { type: "pickTheme" } : { type: "pickTheme", sessionId });
+    }
     if (action === "openSettings") return emit({ type: "openSettings" });
     if (action === "quit") return core.quitRequested();
     if (sessionId === undefined) return;
@@ -706,7 +795,11 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
       }
       emit({ type: "showApp", sessionId: state.currentSessionId! });
     }),
-    paletteDismissed: command(hideWithNoCurrentSession),
+    paletteDismissed: command(() => {
+      previewedTheme = undefined;
+      applyThemeInEffect();
+      hideWithNoCurrentSession();
+    }),
     focusLost: command(() => {
       if (!appShown) return;
       appShown = false;
@@ -719,13 +812,36 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
       emit({ type: "quit" });
     }),
     configChanged: command((config) => {
-      const parsed = parseConfig(config);
+      const parsed = parseConfig(config, themeNames());
+      configReadable = parsed !== undefined;
       if (!parsed) return emit({ type: "configUnreadable" });
-      settings = parsed.settings;
+      configText = config;
+      takeSettings(parsed);
       if (parsed.rejected.length > 0) emit({ type: "settingsRejected", settings: parsed.rejected });
+      applyThemeInEffect();
     }),
-    configUnreadable: command(() => emit({ type: "configUnreadable" })),
+    configUnreadable: command(() => {
+      configReadable = false;
+      emit({ type: "configUnreadable" });
+    }),
     settings: () => settings,
+    theme: () => appliedTheme,
+    // The theme setting is read again against the Themes now loaded, so a Theme file that appears after the setting
+    // named it takes effect, and one that goes takes the Default Theme's place. While the config file can't be read,
+    // the settings stay as they are, a Theme chosen meanwhile included.
+    themeFilesChanged: command((files) => {
+      const loaded = loadThemes(files);
+      themes = loaded.themes;
+      if (loaded.rejected.length > 0) emit({ type: "themesRejected", rejected: loaded.rejected });
+      if (configReadable) {
+        const parsed = parseConfig(configText, themeNames())!;
+        if (parsed.rejected.includes("theme") && !themeSettingRejected) {
+          emit({ type: "settingsRejected", settings: ["theme"] });
+        }
+        takeSettings(parsed);
+      }
+      applyThemeInEffect();
+    }),
     newSession: command(() => {
       addSession();
       emit({ type: "showSession", sessionId: state.currentSessionId! });
@@ -864,20 +980,28 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     sessionsInCycleOrder,
     paletteResults(query) {
       const { results, search } = parsePaletteQuery(query);
-      return results
-        .map((result) => ({ result, score: fuzzyScore(search, searchedText(result)) }))
-        .filter((scored) => scored.score !== undefined)
-        .toSorted((a, b) => b.score! - a.score!)
-        .map(({ result }) => result);
+      return searchResults(results, search);
+    },
+    previewTheme: command((name) => {
+      if (!findTheme(name)) return;
+      previewedTheme = name;
+      applyThemeInEffect();
+    }),
+    themeResults(query) {
+      const results = themes.map((theme): PaletteResult => ({ type: "theme", name: theme.name, label: theme.name }));
+      return searchResults(results, query);
     },
     // The Command Palette on its own leaves nothing on screen after a choice that shows no Session, except while the
-    // quit confirmation waits for an answer.
+    // quit confirmation waits for an answer or the palette lists the Themes.
     choosePaletteResult: command((result) => {
       if (result.type === "session") jumpToSession(result.sessionId);
       if (result.type === "tab") jumpToTab(result.tabId);
       if (result.type === "pane") jumpToPane(result.paneId);
       if (result.type === "action") runAction(result.action, state.currentSessionId);
-      if (!(result.type === "action" && result.action === "quit")) hideWithNoCurrentSession();
+      if (result.type === "theme") chooseTheme(result.name);
+      if (!(result.type === "action" && (result.action === "quit" || result.action === "changeTheme"))) {
+        hideWithNoCurrentSession();
+      }
     }),
     paneRects(tabId) {
       const tab = findTab(tabId);
