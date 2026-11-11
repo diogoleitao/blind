@@ -25,8 +25,8 @@ import { createMenuBarIcon } from "./menu-bar-icon";
 import { createNodePtyShellHost } from "./node-pty-shell-host";
 import { createThemeFiles } from "./theme-files";
 
-// The development Hotkey; the installed app's F12 comes with packaging.
-const hotkey = "F7";
+// The installed app's Hotkey is F12; running from the repo uses F7, so both can run side by side.
+const hotkey = app.isPackaged ? "F12" : "F7";
 
 // How long quitting waits for the windows' terminals to report their scrollback.
 const scrollbackFlushTimeoutMilliseconds = 1_000;
@@ -419,8 +419,10 @@ app.whenReady().then(() => {
     else core.configUnreadable();
   }
 
-  // Made before the config file is read, which can change the icon.
-  const menuBarIcon = createMenuBarIcon(core, join(app.getAppPath(), "resources"));
+  // Made before the config file is read, which can change the icon. The installed app carries `resources/` outside its
+  // archive.
+  const resourcesDirectory = app.isPackaged ? process.resourcesPath : app.getAppPath();
+  const menuBarIcon = createMenuBarIcon(core, join(resourcesDirectory, "resources"));
 
   // The Themes load first, so the theme setting can name a Theme file's Theme.
   themeFiles.writeSchema();
@@ -434,7 +436,10 @@ app.whenReady().then(() => {
     // The cycle order setting may have changed.
     menuBarIcon.update();
   });
-  core.start();
-  // The app starts shown; showing now, not on ready-to-show, keeps the window in step with the core.
-  showWindow(windowFor(core.state().currentSessionId!));
+  // The installed app opens at login, hidden until the Hotkey shows it.
+  if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: true });
+  const hidden = app.getLoginItemSettings().wasOpenedAtLogin;
+  core.start({ hidden });
+  // Otherwise the app starts shown; showing now, not on ready-to-show, keeps the window in step with the core.
+  if (!hidden) showWindow(windowFor(core.state().currentSessionId!));
 });

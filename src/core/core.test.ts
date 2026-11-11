@@ -8,15 +8,15 @@ import { idsIn, panesIn, type Session } from "./state";
 import { defaultTheme } from "./themes";
 
 // Passing the state store of an earlier core relaunches the app from what that core saved. A config file's text is read
-// before starting, as the app does.
-function startCore(stateStore: StateStore = createInMemoryStateStore(), config?: string) {
+// before starting, as the app does. `hidden` starts the app hidden, as the launch at login does.
+function startCore(stateStore: StateStore = createInMemoryStateStore(), config?: string, hidden = false) {
   const shellHost = createFakeShellHost();
   const clock = createControllableClock(1_000);
   const core = createCore({ shellHost, stateStore, clock, homeDirectory: "/Users/me" });
   const effects: unknown[] = [];
   core.onEffect((effect) => effects.push(effect));
   if (config !== undefined) core.configChanged(config);
-  core.start();
+  core.start({ hidden });
   return { core, shellHost, clock, effects, stateStore };
 }
 
@@ -57,6 +57,39 @@ describe("starting", () => {
     const session = core.state().sessions[0];
     expect(session.createdAt).toBe(1_000);
     expect(session.lastUsedAt).toBe(1_000);
+  });
+});
+
+describe("starting hidden", () => {
+  // Starts the app hidden, as the launch at login does.
+  function startHidden(stateStore?: StateStore, config?: string) {
+    return startCore(stateStore, config, true);
+  }
+
+  it("shows the Current Session on the first Hotkey press", () => {
+    const before = startCore();
+    const sessionId = before.core.state().currentSessionId;
+
+    const { core, effects } = startHidden(before.stateStore);
+    core.hotkeyPressed();
+
+    expect(effects).toEqual([{ type: "showApp", sessionId }]);
+  });
+
+  it("with no saved Sessions, opens none, so the first Hotkey press does what the setting says", () => {
+    const { core, effects } = startHidden(undefined, '{ "hotkeyWithNoOpenSessions": "palette" }');
+
+    expect(core.state().sessions).toEqual([]);
+    core.hotkeyPressed();
+    expect(effects).toEqual([{ type: "showPalette" }]);
+  });
+
+  it("requests nothing on focus loss, since the app is already hidden", () => {
+    const { core, effects } = startHidden();
+
+    core.focusLost();
+
+    expect(effects).toEqual([]);
   });
 });
 

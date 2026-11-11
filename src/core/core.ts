@@ -160,7 +160,8 @@ export interface CoreDependencies {
 }
 
 export interface Core {
-  start(): void;
+  // Started hidden, as the launch at login is, the app stays off screen until the Hotkey shows it.
+  start(options: { hidden: boolean }): void;
   state(): CoreState;
   // With no Open Sessions, shows a new Session or the Command Palette on its own, as the setting says.
   hotkeyPressed(): void;
@@ -895,11 +896,12 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
   }
 
   const core: Core = {
-    start: command(() => {
+    start: command(({ hidden }: { hidden: boolean }) => {
+      appShown = !hidden;
       const saved = stateStore.load();
       if (saved) restore(saved);
-      // The app starts shown, so it needs a Session to show.
-      if (state.currentSessionId === undefined) addSession();
+      // Started shown, the app needs a Session to show. Started hidden, it leaves that to the Hotkey.
+      if (appShown && state.currentSessionId === undefined) addSession();
     }),
     state: () => state,
     hotkeyPressed: command(() => {

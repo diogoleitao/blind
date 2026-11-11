@@ -4,6 +4,10 @@ node_modules/
 # electron-vite build output
 out/
 
+# electron-builder output, and the app icon it's given, made from build/icon.iconset
+dist/
+build/icon.icns
+
 # macOS
 .DS_Store
 .AppleDouble

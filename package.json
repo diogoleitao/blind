@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "install-app": "electron-vite build && iconutil -c icns build/icon.iconset -o build/icon.icns && electron-builder --mac && rm -rf /Applications/Blind.app && ditto dist/mac*/Blind.app /Applications/Blind.app",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper && node node_modules/electron/install.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.core.json",
     "test": "vitest run"
@@ -19,10 +20,37 @@
   "devDependencies": {
     "@types/node": "^26.6.6",
     "electron": "^45.2.2",
+    "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.1.0"
+  },
+  "build": {
+    "appId": "com.diogoleitao.blind",
+    "productName": "Blind",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources"
+      }
+    ],
+    "npmRebuild": false,
+    "mac": {
+      "target": "dir",
+      "icon": "build/icon.icns",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    }
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
