@@ -41,6 +41,11 @@ const api: BlindApi = {
   },
   searchThemes: (query) => ipcRenderer.invoke(channels.searchThemes, query),
   previewTheme: (name) => ipcRenderer.send(channels.previewTheme, name),
+  onPickMenuBarIcon: (listener) => {
+    ipcRenderer.on(channels.pickMenuBarIcon, (_event, icon) => listener(icon));
+  },
+  searchMenuBarIcons: (query) => ipcRenderer.invoke(channels.searchMenuBarIcons, query),
+  previewMenuBarIcon: (icon) => ipcRenderer.send(channels.previewMenuBarIcon, icon),
   onFindInPane: (listener) => {
     ipcRenderer.on(channels.findInPane, (_event, paneId) => listener(paneId));
   },

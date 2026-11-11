@@ -12,6 +12,11 @@ const hotkeyBehaviours = ["new", "palette"] as const;
 // What the Hotkey shows with no Open Sessions: a new Session, or the Command Palette on its own.
 export type HotkeyWithNoOpenSessions = (typeof hotkeyBehaviours)[number];
 
+export const menuBarIcons = ["monochrome", "colour"] as const;
+
+// The menu bar icon's look: one colour that follows the menu bar's, light or dark, or the icon's own colours.
+export type MenuBarIcon = (typeof menuBarIcons)[number];
+
 // What `unlimited` scrollback keeps: the terminal sets its buffer aside up front, so it can't be truly unbounded.
 export const unlimitedScrollbackLines = 1_000_000;
 
@@ -27,6 +32,7 @@ export interface Settings {
   keyBindings: Record<BoundAction, Shortcut | null>;
   // The name of the Theme in effect, built in or from a Theme file.
   theme: string;
+  menuBarIcon: MenuBarIcon;
 }
 
 export const defaultSettings: Settings = {
@@ -37,6 +43,7 @@ export const defaultSettings: Settings = {
     Object.entries(defaultKeyBindings).map(([action, shortcut]) => [action, shortcut && parseShortcut(shortcut)!]),
   ) as Settings["keyBindings"],
   theme: defaultTheme.name,
+  menuBarIcon: "monochrome",
 };
 
 const invalid = Symbol("invalid");
@@ -66,6 +73,7 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
   // Theme names are unique ignoring case, so the setting matches one ignoring case and takes its spelling.
   theme: (value) =>
     themeNames.find((name) => typeof value === "string" && name.toLowerCase() === value.toLowerCase()) ?? invalid,
+  menuBarIcon: oneOf(menuBarIcons),
 });
 
 // The defaults with each configured action's shortcut, or null, in place. A configured shortcut is taken away from the
@@ -127,6 +135,12 @@ export const configSchema = {
       minLength: 1,
       default: defaultSettings.theme,
       examples: builtInThemes.map((theme) => theme.name),
+    },
+    menuBarIcon: {
+      description:
+        "The menu bar icon: monochrome follows the menu bar's colour, light or dark; colour keeps the icon's own colours. The Command Palette's Change Menu Bar Icon sets it too.",
+      enum: menuBarIcons,
+      default: defaultSettings.menuBarIcon,
     },
     keyBindings: {
       description:

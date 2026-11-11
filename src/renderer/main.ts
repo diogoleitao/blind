@@ -426,10 +426,10 @@ let searchCount = 0;
 let latestSearch = Promise.resolve();
 // Set while the palette asks for a name or title instead of searching.
 let prompt: PalettePrompt | undefined;
-// Set while the palette lists the Themes instead of searching, each selected one previewed.
-let pickingTheme = false;
-// The Theme the next results select, once: the one in effect when the palette started listing them.
-let themeToSelect: string | undefined;
+// Set while the palette lists the Themes or the menu bar icons instead of searching, each selected one previewed.
+let picking: "theme" | "menuBarIcon" | undefined;
+// The choice the next results select, once: the one in effect when the palette started listing them.
+let choiceToSelect: string | undefined;
 
 const promptPlaceholders: Record<PalettePrompt["type"], string> = {
   askSessionName: "Session name",
@@ -442,6 +442,7 @@ const resultKinds: Record<PaletteResult["type"], string> = {
   pane: "Pane",
   action: "Action",
   theme: "Theme",
+  menuBarIcon: "Menu Bar Icon",
 };
 
 // What places a result: a Closed Session's mark, a Tab's Session, or a Pane's working directory and Session.
@@ -474,32 +475,45 @@ function renderPalette() {
   paletteList.children[selectedResult]?.scrollIntoView({ block: "nearest" });
 }
 
-// Puts the selected Theme in effect while the palette lists the Themes.
-function previewSelectedTheme() {
-  const result = paletteResults[selectedResult];
-  if (pickingTheme && result?.type === "theme") blind.previewTheme(result.name);
+// The Theme's name or the menu bar icon a result is; absent for any other result.
+function choiceOf(result: PaletteResult) {
+  if (result.type === "theme") return result.name;
+  if (result.type === "menuBarIcon") return result.icon;
+  return undefined;
 }
+
+// Puts the selected Theme or menu bar icon in effect while the palette lists them.
+function previewSelectedChoice() {
+  const result = paletteResults[selectedResult];
+  if (picking === "theme" && result?.type === "theme") blind.previewTheme(result.name);
+  if (picking === "menuBarIcon" && result?.type === "menuBarIcon") blind.previewMenuBarIcon(result.icon);
+}
+
+const pickerSearches = {
+  theme: blind.searchThemes,
+  menuBarIcon: blind.searchMenuBarIcons,
+};
 
 function searchPalette() {
   searchCount += 1;
   const search = searchCount;
-  const searching = pickingTheme ? blind.searchThemes : blind.searchPalette;
+  const searching = picking ? pickerSearches[picking] : blind.searchPalette;
   latestSearch = searching(paletteInput.value).then((results) => {
     if (search !== searchCount) return;
     paletteResults = results;
     selectedResult = Math.max(
       0,
-      results.findIndex((result) => result.type === "theme" && result.name === themeToSelect),
+      results.findIndex((result) => choiceToSelect !== undefined && choiceOf(result) === choiceToSelect),
     );
-    themeToSelect = undefined;
+    choiceToSelect = undefined;
     renderPalette();
-    previewSelectedTheme();
+    previewSelectedChoice();
   });
 }
 
 function openPalette() {
   prompt = undefined;
-  pickingTheme = false;
+  picking = undefined;
   palette.hidden = false;
   paletteInput.placeholder = "";
   paletteInput.value = "";
@@ -510,7 +524,7 @@ function openPalette() {
 // Offers the suggestion selected, so typing replaces it and Enter accepts it. A search still in flight is dropped.
 function openPrompt(asked: PalettePrompt) {
   prompt = asked;
-  pickingTheme = false;
+  picking = undefined;
   searchCount += 1;
   paletteResults = [];
   renderPalette();
@@ -521,13 +535,19 @@ function openPrompt(asked: PalettePrompt) {
   paletteInput.select();
 }
 
-// Lists the Themes with the one in effect selected. Choosing one keeps it; dismissing restores the one from before.
-function openThemePicker() {
+const pickerPlaceholders = {
+  theme: "Theme",
+  menuBarIcon: "Menu bar icon",
+};
+
+// Lists the Themes or the menu bar icons with the one in effect selected. Choosing one keeps it; dismissing restores
+// the one from before.
+function openPicker(kind: NonNullable<typeof picking>, inEffect: string) {
   prompt = undefined;
-  pickingTheme = true;
-  themeToSelect = theme.name;
+  picking = kind;
+  choiceToSelect = inEffect;
   palette.hidden = false;
-  paletteInput.placeholder = "Theme";
+  paletteInput.placeholder = pickerPlaceholders[kind];
   paletteInput.value = "";
   paletteInput.focus();
   searchPalette();
@@ -538,7 +558,7 @@ function closePalette() {
   if (palette.hidden) return;
   palette.hidden = true;
   prompt = undefined;
-  pickingTheme = false;
+  picking = undefined;
   if (focusedPaneId) terminals.get(focusedPaneId)?.terminal.focus();
 }
 
@@ -570,7 +590,7 @@ function moveSelection(offset: number) {
   if (count === 0) return;
   selectedResult = (selectedResult + offset + count) % count;
   renderPalette();
-  previewSelectedTheme();
+  previewSelectedChoice();
 }
 
 paletteInput.addEventListener("input", () => {
@@ -596,7 +616,8 @@ applyChromeColours(theme);
 blind.onTerminalSettings(applyTerminalSettings);
 blind.onTheme(applyTheme);
 blind.onOpenPalette(openPalette);
-blind.onPickTheme(openThemePicker);
+blind.onPickTheme(() => openPicker("theme", theme.name));
+blind.onPickMenuBarIcon((icon) => openPicker("menuBarIcon", icon));
 blind.onPalettePrompt(openPrompt);
 blind.onPaneData(writeToTerminal);
 blind.onFlushScrollback(() => terminals.forEach((pane, paneId) => reportScrollback(paneId, pane)));

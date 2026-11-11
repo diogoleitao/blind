@@ -66,6 +66,7 @@ export const defaultKeyBindings: Record<BoundAction, string | null> = {
   focusTab8: "Cmd+8",
   focusTab9: "Cmd+9",
   changeTheme: null,
+  changeMenuBarIcon: null,
   openSettings: null,
   quit: null,
 };

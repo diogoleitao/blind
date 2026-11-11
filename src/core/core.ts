@@ -7,7 +7,15 @@ import {
   replacePane,
   successorOf,
 } from "./layout";
-import { defaultSettings, type ParsedConfig, parseConfig, type Settings, starterConfig } from "./config";
+import {
+  defaultSettings,
+  type MenuBarIcon,
+  menuBarIcons,
+  type ParsedConfig,
+  parseConfig,
+  type Settings,
+  starterConfig,
+} from "./config";
 import { fuzzyScore } from "./fuzzy";
 import { setJsoncProperty } from "./jsonc";
 import { type BoundAction, type KeyPress, matchesShortcut } from "./key-bindings";
@@ -57,10 +65,14 @@ export type Effect =
   | { type: "configUnreadable" }
   // The Theme in effect changed; every window follows it.
   | { type: "applyTheme"; theme: Theme }
+  // The menu bar icon in effect changed.
+  | { type: "applyMenuBarIcon"; icon: MenuBarIcon }
   // Replaces the config file's text, e.g. to set the theme setting to the Theme chosen in the Command Palette.
   | { type: "writeConfig"; text: string }
   // Has the Command Palette list the Themes, over the Session's window or, without one, on its own.
   | { type: "pickTheme"; sessionId?: SessionId }
+  // Has the Command Palette list the menu bar icons, like `pickTheme`.
+  | { type: "pickMenuBarIcon"; sessionId?: SessionId }
   // Tells the user the Theme files, or their fields, that were rejected, as `loadThemes` names them.
   | { type: "themesRejected"; rejected: string[] }
   // Opens a search over the Pane's scrollback in the Session's window.
@@ -99,6 +111,7 @@ const paletteActionLabels = {
   findInPane: "Find in Pane",
   clearScrollback: "Clear Scrollback",
   changeTheme: "Change Theme",
+  changeMenuBarIcon: "Change Menu Bar Icon",
   openSettings: "Open Settings",
   quit: "Quit Blind",
 } as const;
@@ -112,7 +125,32 @@ export type PaletteResult =
   | { type: "pane"; paneId: PaneId; label: string; workingDirectory: string; sessionLabel: string }
   | { type: "action"; action: PaletteAction; label: string }
   // A Theme, labelled with its name.
-  | { type: "theme"; name: string; label: string };
+  | { type: "theme"; name: string; label: string }
+  | { type: "menuBarIcon"; icon: MenuBarIcon; label: string };
+
+const menuBarIconLabels: Record<MenuBarIcon, string> = {
+  monochrome: "Monochrome",
+  colour: "Colour",
+};
+
+// The app actions the menu bar icon's menu offers after the Sessions, in order.
+const menuBarActions = ["newSession", "openSettings", "quit"] as const satisfies PaletteAction[];
+
+export type MenuBarAction = (typeof menuBarActions)[number];
+
+// A Session the menu bar icon's menu lists, under its label.
+export interface MenuBarSession {
+  sessionId: SessionId;
+  label: string;
+}
+
+// What the menu bar icon's menu lists: the Open Sessions and the Closed Sessions apart, each in cycle order, then the
+// app actions under their Command Palette labels.
+export interface MenuBar {
+  open: MenuBarSession[];
+  closed: MenuBarSession[];
+  actions: { action: MenuBarAction; label: string }[];
+}
 
 export interface CoreDependencies {
   shellHost: ShellHost;
@@ -144,6 +182,8 @@ export interface Core {
   settings(): Settings;
   // The Theme in effect.
   theme(): Theme;
+  // The menu bar icon in effect.
+  menuBarIcon(): MenuBarIcon;
   // Every Theme file in the themes folder, read again whenever one changes.
   themeFilesChanged(files: ThemeFile[]): void;
   // The Themes the Command Palette offers for a query: the built-in ones, the Default Theme first, then the Theme
@@ -152,11 +192,20 @@ export interface Core {
   // Puts the Theme in effect while the Command Palette lists the Themes: choosing a Theme keeps one, and dismissing the
   // palette restores the Theme from before.
   previewTheme(name: string): void;
+  // The menu bar icons the Command Palette offers for a query, monochrome first.
+  menuBarIconResults(query: string): PaletteResult[];
+  // Like `previewTheme`, for the menu bar icon.
+  previewMenuBarIcon(icon: MenuBarIcon): void;
   // Opens an Unnamed Session with one Tab at the home directory and makes it the Current Session.
   newSession(): void;
   // Opens a Closed Session again as the Current Session, restoring it as Restore does. One closed through its last Tab
   // gets a fresh Tab at its Root directory, or the home directory without one.
   reopenSession(sessionId: SessionId): void;
+  // Shows the app with the Session chosen from the menu bar icon's menu as the Current Session, reopening a Closed
+  // Session first.
+  menuBarSessionChosen(sessionId: SessionId): void;
+  // Runs an app action chosen from the menu bar icon's menu; a new Session is shown even while the app is hidden.
+  menuBarActionChosen(action: MenuBarAction): void;
   // Gives the Session a name, freeing its label number. A name another Session holds gets the smallest free number from
   // 2, e.g. `api 2`, so names stay unique; a blank name changes nothing.
   renameSession(sessionId: SessionId, name: string): void;
@@ -205,6 +254,7 @@ export interface Core {
   sessionLabel(sessionId: SessionId): string | undefined;
   // Every Session, Open or Closed, in the order cycling follows: Unnamed Sessions after the named ones.
   sessionsInCycleOrder(): Session[];
+  menuBar(): MenuBar;
   // What the Command Palette offers for a query: every Session, Open and Closed, the Tabs and Panes of Open Sessions,
   // and every app action. `ss `, `tt ` and `pp ` narrow it to Sessions, Tabs or Panes.
   paletteResults(query: string): PaletteResult[];
@@ -243,6 +293,10 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
   let appliedTheme = defaultTheme;
   // The name of the Theme browsed to in the Command Palette, in effect until the palette closes; absent otherwise.
   let previewedTheme: string | undefined;
+  // The icon the menu bar was last told to show.
+  let appliedMenuBarIcon = defaultSettings.menuBarIcon;
+  // The menu bar icon browsed to in the Command Palette, in effect until the palette closes; absent otherwise.
+  let previewedMenuBarIcon: MenuBarIcon | undefined;
   // The Session order taken at the first of a run of consecutive cycle presses; absent outside one.
   let cycleStreak: SessionId[] | undefined;
   const effectListeners: ((effect: Effect) => void)[] = [];
@@ -269,17 +323,30 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     return findTheme(previewedTheme) ?? findTheme(settings.theme) ?? defaultTheme;
   }
 
-  // Ends any preview, keeping the Theme chosen and setting the theme setting to it, in the config file too, unless the
-  // file can't be read as it is now. A Theme whose file went since it was listed leaves the setting as it was.
+  // Sets the setting in the config file too, unless the file can't be read as it is now.
+  function writeSetting(name: keyof Settings, value: string) {
+    if (!configReadable) return emit({ type: "configUnreadable" });
+    configText = setJsoncProperty(configText ?? starterConfig, name, value);
+    emit({ type: "writeConfig", text: configText });
+  }
+
+  // Ends any preview, keeping the Theme chosen and setting the theme setting to it. A Theme whose file went since it
+  // was listed leaves the setting as it was.
   function chooseTheme(name: string) {
     previewedTheme = undefined;
     if (!findTheme(name)) return applyThemeInEffect();
     settings = { ...settings, theme: name };
     themeSettingRejected = false;
     applyThemeInEffect();
-    if (!configReadable) return emit({ type: "configUnreadable" });
-    configText = setJsoncProperty(configText ?? starterConfig, "theme", name);
-    emit({ type: "writeConfig", text: configText });
+    writeSetting("theme", name);
+  }
+
+  // Ends any preview, keeping the icon chosen and setting the menuBarIcon setting to it.
+  function chooseMenuBarIcon(icon: MenuBarIcon) {
+    previewedMenuBarIcon = undefined;
+    settings = { ...settings, menuBarIcon: icon };
+    applyMenuBarIconInEffect();
+    writeSetting("menuBarIcon", icon);
   }
 
   // Noting whether the theme setting names no Theme loaded.
@@ -298,6 +365,14 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     if (JSON.stringify(theme) === JSON.stringify(appliedTheme)) return;
     appliedTheme = theme;
     emit({ type: "applyTheme", theme });
+  }
+
+  // The icon being previewed, or else the one the menuBarIcon setting names.
+  function applyMenuBarIconInEffect() {
+    const icon = previewedMenuBarIcon ?? settings.menuBarIcon;
+    if (icon === appliedMenuBarIcon) return;
+    appliedMenuBarIcon = icon;
+    emit({ type: "applyMenuBarIcon", icon });
   }
 
   function save() {
@@ -686,6 +761,13 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     else if (session) makeCurrent(sessionId);
   }
 
+  // Fades the app in with the Current Session visible; while shown, making it current has already swapped it in.
+  function showAppIfHidden() {
+    if (appShown) return;
+    appShown = true;
+    emit({ type: "showApp", sessionId: state.currentSessionId! });
+  }
+
   // Makes the Tab's Session, when open, the Current Session with the Tab focused.
   function jumpToTab(tabId: TabId) {
     const session = state.sessions.find((candidate) => candidate.tabs.some((tab) => tab.id === tabId));
@@ -746,7 +828,7 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
 
   // The app actions on the Current Session, by the core's own commands.
   const sessionActions: Record<
-    Exclude<PaletteAction, "newSession" | "changeTheme" | "openSettings" | "quit">,
+    Exclude<PaletteAction, "newSession" | "changeTheme" | "changeMenuBarIcon" | "openSettings" | "quit">,
     (sessionId: SessionId) => void
   > = {
     renameSession: (sessionId) => {
@@ -799,8 +881,9 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
   // Without a Session, only the actions that don't act on one run.
   function runAction(action: BoundAction, sessionId: SessionId | undefined) {
     if (action === "newSession") return core.newSession();
-    if (action === "changeTheme") {
-      return emit(sessionId === undefined ? { type: "pickTheme" } : { type: "pickTheme", sessionId });
+    if (action === "changeTheme" || action === "changeMenuBarIcon") {
+      const type = action === "changeTheme" ? "pickTheme" : "pickMenuBarIcon";
+      return emit(sessionId === undefined ? { type } : { type, sessionId });
     }
     if (action === "openSettings") return emit({ type: "openSettings" });
     if (action === "quit") return core.quitRequested();
@@ -830,7 +913,9 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     }),
     paletteDismissed: command(() => {
       previewedTheme = undefined;
+      previewedMenuBarIcon = undefined;
       applyThemeInEffect();
+      applyMenuBarIconInEffect();
       hideWithNoCurrentSession();
     }),
     focusLost: command(() => {
@@ -852,6 +937,7 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
       takeSettings(parsed);
       if (parsed.rejected.length > 0) emit({ type: "settingsRejected", settings: parsed.rejected });
       applyThemeInEffect();
+      applyMenuBarIconInEffect();
     }),
     configUnreadable: command(() => {
       configReadable = false;
@@ -859,6 +945,7 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     }),
     settings: () => settings,
     theme: () => appliedTheme,
+    menuBarIcon: () => appliedMenuBarIcon,
     // The theme setting is read again against the Themes now loaded, so a Theme file that appears after the setting
     // named it takes effect, and one that goes takes the Default Theme's place. While the config file can't be read,
     // the settings stay as they are, a Theme chosen meanwhile included.
@@ -880,6 +967,18 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
       emit({ type: "showSession", sessionId: state.currentSessionId! });
     }),
     reopenSession: command(reopenSession),
+    menuBarSessionChosen: command((sessionId) => {
+      if (!findSession(sessionId)) return;
+      jumpToSession(sessionId);
+      showAppIfHidden();
+    }),
+    menuBarActionChosen: command((action) => {
+      if (action !== "newSession") return runAction(action, undefined);
+      addSession();
+      if (appShown) return emit({ type: "showSession", sessionId: state.currentSessionId! });
+      appShown = true;
+      emit({ type: "showApp", sessionId: state.currentSessionId! });
+    }),
     renameSession: command((sessionId, name) => {
       const trimmed = name.trim();
       if (trimmed === "") return;
@@ -1011,6 +1110,18 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
       return session && labelOf(session);
     },
     sessionsInCycleOrder,
+    menuBar() {
+      const sessions = sessionsInCycleOrder();
+      const withStatus = (status: Session["status"]) =>
+        sessions
+          .filter((session) => session.status === status)
+          .map((session) => ({ sessionId: session.id, label: labelOf(session) }));
+      return {
+        open: withStatus("open"),
+        closed: withStatus("closed"),
+        actions: menuBarActions.map((action) => ({ action, label: paletteActionLabels[action] })),
+      };
+    },
     paletteResults(query) {
       const { results, search } = parsePaletteQuery(query);
       return searchResults(results, search);
@@ -1024,15 +1135,28 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
       const results = themes.map((theme): PaletteResult => ({ type: "theme", name: theme.name, label: theme.name }));
       return searchResults(results, query);
     },
+    previewMenuBarIcon: command((icon) => {
+      if (!menuBarIcons.includes(icon)) return;
+      previewedMenuBarIcon = icon;
+      applyMenuBarIconInEffect();
+    }),
+    menuBarIconResults(query) {
+      const results = menuBarIcons.map(
+        (icon): PaletteResult => ({ type: "menuBarIcon", icon, label: menuBarIconLabels[icon] }),
+      );
+      return searchResults(results, query);
+    },
     // The Command Palette on its own leaves nothing on screen after a choice that shows no Session, except while the
-    // quit confirmation waits for an answer or the palette lists the Themes.
+    // quit confirmation waits for an answer or the palette lists the Themes or the menu bar icons.
     choosePaletteResult: command((result) => {
       if (result.type === "session") jumpToSession(result.sessionId);
       if (result.type === "tab") jumpToTab(result.tabId);
       if (result.type === "pane") jumpToPane(result.paneId);
       if (result.type === "action") runAction(result.action, state.currentSessionId);
       if (result.type === "theme") chooseTheme(result.name);
-      if (!(result.type === "action" && (result.action === "quit" || result.action === "changeTheme"))) {
+      if (result.type === "menuBarIcon") chooseMenuBarIcon(result.icon);
+      const keepsPaletteBusy = ["quit", "changeTheme", "changeMenuBarIcon"];
+      if (!(result.type === "action" && keepsPaletteBusy.includes(result.action))) {
         hideWithNoCurrentSession();
       }
     }),

@@ -14,12 +14,14 @@ import {
   shell,
   type WebContents,
 } from "electron";
+import type { MenuBarIcon } from "../core/config";
 import { createCore, type PaletteResult } from "../core/core";
 import type { PaneId, SessionId } from "../core/state";
 import { channels, type PalettePrompt, type SessionView, type TerminalSize } from "../shared/ipc";
 import { type ConfigRead, createConfigFile } from "./config-file";
 import { fadeWindow } from "./fade";
 import { createFileStateStore } from "./file-state-store";
+import { createMenuBarIcon } from "./menu-bar-icon";
 import { createNodePtyShellHost } from "./node-pty-shell-host";
 import { createThemeFiles } from "./theme-files";
 
@@ -152,6 +154,11 @@ app.whenReady().then(() => {
     if (effect.type === "pickTheme") {
       const window = effect.sessionId === undefined ? paletteWindow : windows.get(effect.sessionId);
       window?.webContents.send(channels.pickTheme);
+    }
+    if (effect.type === "applyMenuBarIcon") menuBarIcon.show(effect.icon);
+    if (effect.type === "pickMenuBarIcon") {
+      const window = effect.sessionId === undefined ? paletteWindow : windows.get(effect.sessionId);
+      window?.webContents.send(channels.pickMenuBarIcon, core.menuBarIcon());
     }
     if (effect.type === "themesRejected") {
       // A file named alone was skipped; a field rejected in a file takes the Default Theme's value.
@@ -311,6 +318,8 @@ app.whenReady().then(() => {
   ipcMain.on(channels.focusPane, (_event, paneId: PaneId) => core.focusPane(paneId));
   ipcMain.handle(channels.searchThemes, (_event, query: string) => core.themeResults(query));
   ipcMain.on(channels.previewTheme, (_event, name: string) => core.previewTheme(name));
+  ipcMain.handle(channels.searchMenuBarIcons, (_event, query: string) => core.menuBarIconResults(query));
+  ipcMain.on(channels.previewMenuBarIcon, (_event, icon: MenuBarIcon) => core.previewMenuBarIcon(icon));
   ipcMain.handle(channels.searchPalette, (_event, query: string) => core.paletteResults(query));
   ipcMain.on(channels.choosePaletteResult, (_event, result: PaletteResult) => core.choosePaletteResult(result));
   ipcMain.on(channels.dismissPalette, () => core.paletteDismissed());
@@ -410,6 +419,9 @@ app.whenReady().then(() => {
     else core.configUnreadable();
   }
 
+  // Made before the config file is read, which can change the icon.
+  const menuBarIcon = createMenuBarIcon(core, join(app.getAppPath(), "resources"));
+
   // The Themes load first, so the theme setting can name a Theme file's Theme.
   themeFiles.writeSchema();
   core.themeFilesChanged(themeFiles.read());
@@ -419,6 +431,8 @@ app.whenReady().then(() => {
   configFile.watch((read) => {
     applyConfig(read);
     allWindows().forEach(sendTerminalSettings);
+    // The cycle order setting may have changed.
+    menuBarIcon.update();
   });
   core.start();
   // The app starts shown; showing now, not on ready-to-show, keeps the window in step with the core.

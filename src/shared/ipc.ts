@@ -1,3 +1,4 @@
+import type { MenuBarIcon } from "../core/config";
 import type { Effect, PaletteResult } from "../core/core";
 import type { PaneRect } from "../core/layout";
 import type { PaneId, TabId } from "../core/state";
@@ -43,6 +44,9 @@ export const channels = {
   pickTheme: "theme:pick",
   searchThemes: "theme:search",
   previewTheme: "theme:preview",
+  pickMenuBarIcon: "menuBarIcon:pick",
+  searchMenuBarIcons: "menuBarIcon:search",
+  previewMenuBarIcon: "menuBarIcon:preview",
   findInPane: "pane:find",
   clearScrollback: "pane:clear",
   copy: "clipboard:copy",
@@ -83,6 +87,11 @@ export interface BlindApi {
   searchThemes(query: string): Promise<PaletteResult[]>;
   // The Theme the Command Palette's selection moved to.
   previewTheme(name: string): void;
+  // Called with the icon in effect when the Command Palette should list the menu bar icons instead of searching.
+  onPickMenuBarIcon(listener: (icon: MenuBarIcon) => void): void;
+  searchMenuBarIcons(query: string): Promise<PaletteResult[]>;
+  // The menu bar icon the Command Palette's selection moved to.
+  previewMenuBarIcon(icon: MenuBarIcon): void;
   // Called when the Pane's scrollback should be searched.
   onFindInPane(listener: (paneId: PaneId) => void): void;
   // Called when the Pane's scrollback should be cleared.

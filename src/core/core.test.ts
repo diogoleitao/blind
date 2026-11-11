@@ -2309,6 +2309,7 @@ describe("the Command Palette", () => {
       "action Find in Pane",
       "action Clear Scrollback",
       "action Change Theme",
+      "action Change Menu Bar Icon",
       "action Open Settings",
       "action Quit Blind",
     ]);
@@ -2375,6 +2376,7 @@ describe("the Command Palette", () => {
       "action Next Tab",
       "action Previous Tab",
       "action Focus Pane Below",
+      "action Change Menu Bar Icon",
       "action Clear Scrollback",
     ]);
   });
@@ -2480,6 +2482,191 @@ describe("the Command Palette", () => {
 
     choose("Quit Blind");
     expect(effects.at(-1)).toEqual({ type: "confirmQuit" });
+  });
+});
+
+describe("the menu bar icon's menu", () => {
+  // Each Session as its label, Open and Closed apart.
+  function menuLabels(core: ReturnType<typeof startCore>["core"]) {
+    const { open, closed } = core.menuBar();
+    return { open: open.map((session) => session.label), closed: closed.map((session) => session.label) };
+  }
+
+  it("lists the Open Sessions and the Closed Sessions apart, each in cycle order, Unnamed Sessions by their labels", () => {
+    const { core, shellHost } = startCore();
+    for (const name of ["web", undefined, "api", "zed"]) {
+      core.newSession();
+      if (name) core.renameSession(core.state().sessions.at(-1)!.id, name);
+    }
+    const [first, , unnamed, , zed] = core.state().sessions;
+    shellHost.changeWorkingDirectory(first.tabs[0].panes[0].id, "/Users/me/code/api");
+    core.closeSession(first.id);
+    core.closeSession(zed.id);
+    shellHost.changeWorkingDirectory(unnamed.tabs[0].panes[0].id, "/tmp");
+
+    expect(menuLabels(core)).toEqual({ open: ["api", "web", "Session 2 (/tmp)"], closed: ["zed", "Session 1 (~/code/api)"] });
+  });
+
+  it("shows the app with an Open Session chosen from it as the Current Session", () => {
+    const { core, clock, effects } = startCore();
+    const first = core.state().sessions[0].id;
+    core.newSession();
+    core.hotkeyPressed();
+    clock.advance(500);
+    effects.length = 0;
+
+    core.menuBarSessionChosen(first);
+
+    expect(core.state().currentSessionId).toBe(first);
+    expect(core.state().sessions[0].lastUsedAt).toBe(1_500);
+    expect(effects).toEqual([{ type: "showApp", sessionId: first }]);
+  });
+
+  it("reopens a Closed Session chosen from it with a Restore and shows it, with no Open Sessions left", () => {
+    const { core, shellHost, effects } = startCore();
+    const session = core.state().sessions[0];
+    const paneId = session.tabs[0].panes[0].id;
+    shellHost.changeWorkingDirectory(paneId, "/Users/me/code/api");
+    core.closeSession(session.id);
+    effects.length = 0;
+
+    core.menuBarSessionChosen(session.id);
+
+    expect(core.state().sessions[0].status).toBe("open");
+    expect(core.state().currentSessionId).toBe(session.id);
+    expect(shellHost.started.at(-1)).toEqual({ paneId, workingDirectory: "/Users/me/code/api" });
+    expect(effects).toEqual([{ type: "showApp", sessionId: session.id }]);
+  });
+
+  it("swaps in a Session chosen from it while the app is shown", () => {
+    const { core, effects } = startCore();
+    const first = core.state().sessions[0].id;
+    core.newSession();
+    effects.length = 0;
+
+    core.menuBarSessionChosen(first);
+
+    expect(core.state().currentSessionId).toBe(first);
+    expect(effects).toEqual([{ type: "showSession", sessionId: first }]);
+  });
+
+  it("opens a new Session from it and shows the app with it", () => {
+    const { core, effects } = startCore();
+    core.hotkeyPressed();
+    effects.length = 0;
+
+    core.menuBarActionChosen("newSession");
+
+    const session = core.state().sessions[1];
+    expect(session.status).toBe("open");
+    expect(core.state().currentSessionId).toBe(session.id);
+    expect(effects).toEqual([{ type: "showApp", sessionId: session.id }]);
+  });
+
+  it("offers New Session, Open Settings and Quit Blind after the Sessions, under their Command Palette labels", () => {
+    const { core } = startCore();
+
+    expect(core.menuBar().actions.map((action) => action.label)).toEqual(["New Session", "Open Settings", "Quit Blind"]);
+  });
+
+  it("opens the settings and asks before quitting", () => {
+    const { core, effects } = startCore();
+
+    core.menuBarActionChosen("openSettings");
+    core.menuBarActionChosen("quit");
+
+    expect(effects).toEqual([{ type: "openSettings" }, { type: "confirmQuit" }]);
+  });
+});
+
+describe("the menu bar icon", () => {
+  it("is monochrome by default, and the one the menuBarIcon setting names, edited by hand", () => {
+    const { core, effects } = startCore();
+    expect(core.menuBarIcon()).toBe("monochrome");
+
+    core.configChanged('{ "menuBarIcon": "colour" }');
+    core.configChanged('{ "menuBarIcon": "colour", "cycleOrder": "created" }');
+
+    expect(core.menuBarIcon()).toBe("colour");
+    expect(effects).toEqual([{ type: "applyMenuBarIcon", icon: "colour" }]);
+  });
+
+  it("falls back to monochrome for a menuBarIcon setting naming no icon, telling the user", () => {
+    const { core, effects } = startCore(undefined, '{ "menuBarIcon": "colour" }');
+    effects.length = 0;
+
+    core.configChanged('{ "menuBarIcon": "rainbow" }');
+
+    expect(core.menuBarIcon()).toBe("monochrome");
+    expect(effects).toEqual([
+      { type: "settingsRejected", settings: ["menuBarIcon"] },
+      { type: "applyMenuBarIcon", icon: "monochrome" },
+    ]);
+  });
+
+  it("choosing Change Menu Bar Icon asks for an icon, with or without a Current Session, keeping the app shown", () => {
+    const { core, effects, shellHost } = startCore(undefined, '{ "hotkeyWithNoOpenSessions": "palette" }');
+    const sessionId = core.state().sessions[0].id;
+
+    chooseAction(core, "Change Menu Bar Icon");
+    shellHost.exit(core.state().sessions[0].tabs[0].panes[0].id);
+    core.hotkeyPressed();
+    chooseAction(core, "Change Menu Bar Icon");
+
+    expect(effects).toEqual([
+      { type: "pickMenuBarIcon", sessionId },
+      { type: "closeWindow", sessionId },
+      { type: "hideApp" },
+      { type: "showPalette" },
+      { type: "pickMenuBarIcon" },
+    ]);
+  });
+
+  it("lists the icons, previewing each one browsed and restoring the one from before when the Command Palette is dismissed", () => {
+    const { core, effects } = startCore(undefined, '{ "menuBarIcon": "colour" }');
+    effects.length = 0;
+
+    expect(summarize(core.menuBarIconResults(""))).toEqual(["menuBarIcon Monochrome", "menuBarIcon Colour"]);
+    expect(summarize(core.menuBarIconResults("col"))).toEqual(["menuBarIcon Colour"]);
+    core.previewMenuBarIcon("monochrome");
+    expect(core.menuBarIcon()).toBe("monochrome");
+    core.paletteDismissed();
+
+    expect(core.menuBarIcon()).toBe("colour");
+    expect(core.settings().menuBarIcon).toBe("colour");
+    expect(effects).toEqual([
+      { type: "applyMenuBarIcon", icon: "monochrome" },
+      { type: "applyMenuBarIcon", icon: "colour" },
+    ]);
+  });
+
+  it("choosing an icon keeps it, setting it in the config file with the file's comments and other settings kept", () => {
+    const { core, effects } = startCore(undefined, '{\n  // Mine.\n  "cycleOrder": "created"\n}\n');
+    effects.length = 0;
+
+    core.previewMenuBarIcon("colour");
+    core.choosePaletteResult(core.menuBarIconResults("col")[0]);
+    const written = '{\n  // Mine.\n  "cycleOrder": "created",\n  "menuBarIcon": "colour"\n}\n';
+    core.configChanged(written);
+    core.paletteDismissed();
+
+    expect(core.menuBarIcon()).toBe("colour");
+    expect(core.settings().menuBarIcon).toBe("colour");
+    expect(effects).toEqual([
+      { type: "applyMenuBarIcon", icon: "colour" },
+      { type: "writeConfig", text: written },
+    ]);
+  });
+
+  it("choosing an icon while the config file can't be read applies it without writing the file, telling the user", () => {
+    const { core, effects } = startCore();
+    core.configUnreadable();
+    effects.length = 0;
+
+    core.choosePaletteResult(core.menuBarIconResults("col")[0]);
+
+    expect(core.menuBarIcon()).toBe("colour");
+    expect(effects).toEqual([{ type: "applyMenuBarIcon", icon: "colour" }, { type: "configUnreadable" }]);
   });
 });
 
