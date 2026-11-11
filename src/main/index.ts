@@ -1,8 +1,10 @@
+import { existsSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   globalShortcut,
   ipcMain,
@@ -159,6 +161,15 @@ app.whenReady().then(() => {
     if (effect.type === "quit") {
       savedForQuit = true;
       app.quit();
+    }
+    if (effect.type === "findInPane") windows.get(effect.sessionId)?.webContents.send(channels.findInPane, effect.paneId);
+    if (effect.type === "clearScrollback") {
+      windows.get(effect.sessionId)?.webContents.send(channels.clearScrollback, effect.paneId);
+    }
+    if (effect.type === "copy") windows.get(effect.sessionId)?.webContents.send(channels.copy);
+    // The clipboard is read asynchronously; a window that closed meanwhile gets nothing.
+    if (effect.type === "paste") {
+      void clipboard.readText().then((text) => windows.get(effect.sessionId)?.webContents.send(channels.paste, text));
     }
   });
 
@@ -327,6 +338,18 @@ app.whenReady().then(() => {
     core.scrollbackChanged(paneId, scrollback),
   );
   ipcMain.on(channels.scrollbackFlushed, (event) => scrollbackFlushes.get(event.sender)?.());
+  ipcMain.on(channels.copyText, (_event, text: string) => void clipboard.writeText(text));
+  ipcMain.handle(channels.openableLinks, (_event, paneId: PaneId, texts: string[]) =>
+    texts.map((text) => {
+      const target = core.linkTarget(paneId, text);
+      return target?.type === "url" || (target?.type === "path" && existsSync(target.path));
+    }),
+  );
+  ipcMain.on(channels.openLink, (_event, paneId: PaneId, text: string) => {
+    const target = core.linkTarget(paneId, text);
+    if (target?.type === "url") void shell.openExternal(target.url);
+    if (target?.type === "path") void shell.openPath(target.path);
+  });
 
   // A transparent panel filling the visible area, floating above other apps, fullscreen ones included, on every Space.
   function createPanel(options: Electron.BrowserWindowConstructorOptions = {}) {

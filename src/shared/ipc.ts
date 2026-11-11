@@ -43,6 +43,13 @@ export const channels = {
   pickTheme: "theme:pick",
   searchThemes: "theme:search",
   previewTheme: "theme:preview",
+  findInPane: "pane:find",
+  clearScrollback: "pane:clear",
+  copy: "clipboard:copy",
+  copyText: "clipboard:write",
+  paste: "clipboard:paste",
+  openableLinks: "link:openable",
+  openLink: "link:open",
 } as const;
 
 // What the preload script exposes to the renderer as `window.blind`.
@@ -76,4 +83,19 @@ export interface BlindApi {
   searchThemes(query: string): Promise<PaletteResult[]>;
   // The Theme the Command Palette's selection moved to.
   previewTheme(name: string): void;
+  // Called when the Pane's scrollback should be searched.
+  onFindInPane(listener: (paneId: PaneId) => void): void;
+  // Called when the Pane's scrollback should be cleared.
+  onClearScrollback(listener: (paneId: PaneId) => void): void;
+  // Called when what is selected should be copied, which the listener sends to `copyText`.
+  onCopy(listener: () => void): void;
+  // Puts the text on the clipboard.
+  copyText(text: string): void;
+  // Called with the clipboard's text when it should be pasted.
+  onPaste(listener: (text: string) => void): void;
+  // Answers, for each link found in the Pane's terminal, whether Cmd+clicking it opens something: a URL, or a path to a
+  // file or folder that exists.
+  openableLinks(paneId: PaneId, texts: string[]): Promise<boolean[]>;
+  // Opens a URL in the default browser, or a path with its default app.
+  openLink(paneId: PaneId, text: string): void;
 }

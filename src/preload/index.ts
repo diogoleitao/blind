@@ -41,6 +41,21 @@ const api: BlindApi = {
   },
   searchThemes: (query) => ipcRenderer.invoke(channels.searchThemes, query),
   previewTheme: (name) => ipcRenderer.send(channels.previewTheme, name),
+  onFindInPane: (listener) => {
+    ipcRenderer.on(channels.findInPane, (_event, paneId) => listener(paneId));
+  },
+  onClearScrollback: (listener) => {
+    ipcRenderer.on(channels.clearScrollback, (_event, paneId) => listener(paneId));
+  },
+  onCopy: (listener) => {
+    ipcRenderer.on(channels.copy, () => listener());
+  },
+  copyText: (text) => ipcRenderer.send(channels.copyText, text),
+  onPaste: (listener) => {
+    ipcRenderer.on(channels.paste, (_event, text) => listener(text));
+  },
+  openableLinks: (paneId, texts) => ipcRenderer.invoke(channels.openableLinks, paneId, texts),
+  openLink: (paneId, text) => ipcRenderer.send(channels.openLink, paneId, text),
 };
 
 contextBridge.exposeInMainWorld("blind", api);

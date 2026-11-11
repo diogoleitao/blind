@@ -567,7 +567,7 @@ describe("key bindings", () => {
 
     for (const keyPress of [
       press("k", "KeyK"),
-      press("K", "KeyK", "meta", "shift"),
+      press("J", "KeyJ", "meta", "shift"),
       press("k", "KeyK", "meta", "control"),
       press("j", "KeyJ", "meta"),
       press("0", "Digit0", "meta"),
@@ -671,6 +671,86 @@ describe("key bindings", () => {
 
     expect(core.keyPressed(core.state().sessions[0].id, press("k", "KeyK", "meta"))).toBe(true);
     expect(effects[0]).toEqual({ type: "settingsRejected", settings: ["keyBindings"] });
+  });
+});
+
+describe("terminal input", () => {
+  it("searches the focused Pane's scrollback with Cmd+F", () => {
+    const { core, effects, sessionId, topRight } = startWithThreePanes();
+    core.focusPane(topRight);
+
+    expect(core.keyPressed(sessionId, press("f", "KeyF", "meta"))).toBe(true);
+
+    expect(effects).toEqual([{ type: "findInPane", sessionId, paneId: topRight }]);
+  });
+
+  it("clears the focused Pane's scrollback with Cmd+Shift+K", () => {
+    const { core, effects, sessionId, left } = startWithThreePanes();
+    core.focusPane(left);
+
+    expect(core.keyPressed(sessionId, press("K", "KeyK", "meta", "shift"))).toBe(true);
+
+    expect(effects).toEqual([{ type: "clearScrollback", sessionId, paneId: left }]);
+  });
+
+  it("leaves a cleared Pane's scrollback out of Restore, keeping the other Panes'", () => {
+    const before = startWithThreePanes();
+    before.core.scrollbackChanged(before.left, "$ ls\r\nsrc");
+    before.core.scrollbackChanged(before.topRight, "$ pwd\r\n/Users/me");
+    before.core.focusPane(before.left);
+
+    before.core.keyPressed(before.sessionId, press("K", "KeyK", "meta", "shift"));
+    const after = startCore(before.stateStore);
+
+    expect(after.core.scrollback(before.left)).toBeUndefined();
+    expect(after.core.scrollback(before.topRight)).toEqual({ text: "$ pwd\r\n/Users/me", savedAt: 1_000 });
+  });
+
+  it("copies with Cmd+C and pastes with Cmd+V in the Session's window", () => {
+    const { core, effects } = startCore();
+    const sessionId = core.state().sessions[0].id;
+
+    expect(core.keyPressed(sessionId, press("c", "KeyC", "meta"))).toBe(true);
+    expect(core.keyPressed(sessionId, press("v", "KeyV", "meta"))).toBe(true);
+
+    expect(effects).toEqual([
+      { type: "copy", sessionId },
+      { type: "paste", sessionId },
+    ]);
+  });
+});
+
+describe("a link's target", () => {
+  it("finds a relative path from the Pane's working directory, without a line and column after it", () => {
+    const { core, shellHost, left, topRight } = startWithThreePanes();
+    shellHost.changeWorkingDirectory(left, "/Users/me/code/api");
+
+    expect(core.linkTarget(left, "../web/./src/app.ts:12:3")).toEqual({
+      type: "path",
+      path: "/Users/me/code/web/src/app.ts",
+    });
+    expect(core.linkTarget(topRight, "notes.md:7")).toEqual({ type: "path", path: "/Users/me/notes.md" });
+  });
+
+  it("takes an absolute path as it is, and a path from ~ from the home directory", () => {
+    const { core, shellHost, left } = startWithThreePanes();
+    shellHost.changeWorkingDirectory(left, "/Users/me/code/api");
+
+    expect(core.linkTarget(left, "/etc/hosts")).toEqual({ type: "path", path: "/etc/hosts" });
+    expect(core.linkTarget(left, "~/notes.md")).toEqual({ type: "path", path: "/Users/me/notes.md" });
+    expect(core.linkTarget(left, "~")).toEqual({ type: "path", path: "/Users/me" });
+  });
+
+  it("opens a URL as it is", () => {
+    const { core, left } = startWithThreePanes();
+
+    expect(core.linkTarget(left, "https://example.com/a:8080")).toEqual({ type: "url", url: "https://example.com/a:8080" });
+  });
+
+  it("is absent for a Pane that doesn't exist", () => {
+    const { core } = startCore();
+
+    expect(core.linkTarget("pane-404", "notes.md")).toBeUndefined();
   });
 });
 
@@ -2226,6 +2306,8 @@ describe("the Command Palette", () => {
       "action Focus Pane Right",
       "action Focus Pane Above",
       "action Focus Pane Below",
+      "action Find in Pane",
+      "action Clear Scrollback",
       "action Change Theme",
       "action Open Settings",
       "action Quit Blind",
@@ -2293,6 +2375,7 @@ describe("the Command Palette", () => {
       "action Next Tab",
       "action Previous Tab",
       "action Focus Pane Below",
+      "action Clear Scrollback",
     ]);
   });
 

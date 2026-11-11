@@ -11,6 +11,7 @@ import { defaultSettings, type ParsedConfig, parseConfig, type Settings, starter
 import { fuzzyScore } from "./fuzzy";
 import { setJsoncProperty } from "./jsonc";
 import { type BoundAction, type KeyPress, matchesShortcut } from "./key-bindings";
+import { type LinkTarget, linkTarget } from "./links";
 import type { Clock, SavedScrollback, ShellHost, Snapshot, StateStore } from "./ports";
 import { capScrollback } from "./scrollback";
 import { builtInThemes, defaultTheme, loadThemes, type Theme, type ThemeFile } from "./themes";
@@ -18,6 +19,7 @@ import {
   type CoreState,
   idsIn,
   type Pane,
+  panesIn,
   type PaneId,
   type Session,
   type SessionId,
@@ -60,7 +62,15 @@ export type Effect =
   // Has the Command Palette list the Themes, over the Session's window or, without one, on its own.
   | { type: "pickTheme"; sessionId?: SessionId }
   // Tells the user the Theme files, or their fields, that were rejected, as `loadThemes` names them.
-  | { type: "themesRejected"; rejected: string[] };
+  | { type: "themesRejected"; rejected: string[] }
+  // Opens a search over the Pane's scrollback in the Session's window.
+  | { type: "findInPane"; sessionId: SessionId; paneId: PaneId }
+  // Clears the scrollback of the Pane's terminal in the Session's window.
+  | { type: "clearScrollback"; sessionId: SessionId; paneId: PaneId }
+  // Copies what is selected in the Session's window: in its focused Pane's terminal, or in a text field it has open.
+  | { type: "copy"; sessionId: SessionId }
+  // Pastes the clipboard's text where the Session's window takes typing.
+  | { type: "paste"; sessionId: SessionId };
 
 // Every app action, in the order the Command Palette offers them, by its label.
 const paletteActionLabels = {
@@ -86,6 +96,8 @@ const paletteActionLabels = {
   focusPaneRight: "Focus Pane Right",
   focusPaneUp: "Focus Pane Above",
   focusPaneDown: "Focus Pane Below",
+  findInPane: "Find in Pane",
+  clearScrollback: "Clear Scrollback",
   changeTheme: "Change Theme",
   openSettings: "Open Settings",
   quit: "Quit Blind",
@@ -206,6 +218,9 @@ export interface Core {
   scrollbackChanged(paneId: PaneId, scrollback: string): void;
   // The Pane's saved scrollback, for its terminal to replay when it opens.
   scrollback(paneId: PaneId): SavedScrollback | undefined;
+  // What Cmd+clicking a link in the Pane's terminal opens: a relative path is taken from the Pane's working directory.
+  // Absent for an unknown Pane.
+  linkTarget(paneId: PaneId, text: string): LinkTarget | undefined;
   onEffect(listener: (effect: Effect) => void): void;
   onStateChange(listener: (state: CoreState) => void): void;
 }
@@ -366,6 +381,10 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
 
   function findSessionWithPane(paneId: PaneId) {
     return state.sessions.find((session) => session.tabs.some((tab) => hasPane(tab, paneId)));
+  }
+
+  function findPane(paneId: PaneId) {
+    return panesIn(state).find((pane) => pane.id === paneId);
   }
 
   function focusPaneBy(sessionId: SessionId, offset: number) {
@@ -762,6 +781,19 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     focusPaneRight: (sessionId) => core.focusPaneInDirection(sessionId, "right"),
     focusPaneUp: (sessionId) => core.focusPaneInDirection(sessionId, "up"),
     focusPaneDown: (sessionId) => core.focusPaneInDirection(sessionId, "down"),
+    findInPane: (sessionId) => {
+      const tab = focusedTabOf(sessionId);
+      if (tab) emit({ type: "findInPane", sessionId, paneId: tab.focusedPaneId });
+    },
+    // The saved scrollback goes too, so Restore doesn't bring back what was cleared before the terminal reports again.
+    clearScrollback: (sessionId) => {
+      const tab = focusedTabOf(sessionId);
+      if (!tab) return;
+      const { [tab.focusedPaneId]: _cleared, ...kept } = scrollback;
+      scrollback = kept;
+      save();
+      emit({ type: "clearScrollback", sessionId, paneId: tab.focusedPaneId });
+    },
   };
 
   // Without a Session, only the actions that don't act on one run.
@@ -774,6 +806,7 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     if (action === "quit") return core.quitRequested();
     if (sessionId === undefined) return;
     if (action === "openCommandPalette") return emit({ type: "openPalette", sessionId });
+    if (action === "copy" || action === "paste") return emit({ type: action, sessionId });
     if (action.startsWith("focusTab")) return core.focusTab(sessionId, Number(action.slice("focusTab".length)) - 1);
     sessionActions[action as keyof typeof sessionActions](sessionId);
   }
@@ -1014,6 +1047,10 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
       save();
     },
     scrollback: (paneId) => scrollback[paneId],
+    linkTarget(paneId, text) {
+      const pane = findPane(paneId);
+      return pane && linkTarget(text, pane.workingDirectory, homeDirectory);
+    },
     onEffect(listener) {
       effectListeners.push(listener);
     },

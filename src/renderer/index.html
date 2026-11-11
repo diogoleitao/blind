@@ -129,6 +129,41 @@
         font-size: 11px;
         color: var(--palette-muted-text);
       }
+      /* The find bar takes the Command Palette's colours. */
+      #find {
+        position: fixed;
+        top: 8px;
+        right: 16px;
+        z-index: 1;
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        width: min(320px, 60vw);
+        padding: 6px 10px;
+        border: 1px solid var(--palette-border);
+        border-radius: 6px;
+        background: var(--palette-background);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        font: 13px system-ui, sans-serif;
+        color: var(--palette-text);
+      }
+      #find[hidden] {
+        display: none;
+      }
+      #find-input {
+        flex: 1;
+        min-width: 0;
+        border: none;
+        outline: none;
+        background: transparent;
+        font: inherit;
+        color: inherit;
+      }
+      #find-count {
+        font-size: 11px;
+        white-space: nowrap;
+        color: var(--palette-muted-text);
+      }
     </style>
   </head>
   <body>
@@ -137,6 +172,16 @@
     <div id="palette" hidden>
       <input id="palette-input" type="text" spellcheck="false" autocomplete="off" />
       <ul id="palette-results"></ul>
+    </div>
+    <div id="find" hidden>
+      <input
+        id="find-input"
+        type="text"
+        spellcheck="false"
+        autocomplete="off"
+        placeholder="Find: Enter for next, Shift+Enter for previous"
+      />
+      <span id="find-count"></span>
     </div>
     <script type="module" src="./main.ts"></script>
   </body>

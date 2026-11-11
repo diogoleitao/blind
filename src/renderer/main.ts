@@ -1,10 +1,18 @@
 import { FitAddon } from "@xterm/addon-fit";
+import { type ISearchOptions, SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
-import { type ITerminalOptions, Terminal } from "@xterm/xterm";
+import {
+  type IBufferCellPosition,
+  type ILink,
+  type ILinkProvider,
+  type ITerminalOptions,
+  Terminal,
+} from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { defaultSettings } from "../core/config";
 import type { PaletteResult } from "../core/core";
 import type { PaneRect } from "../core/layout";
+import { findLinks } from "../core/links";
 import type { PaneId } from "../core/state";
 import { type Colour, defaultTheme, type Theme } from "../core/themes";
 import type { BlindApi, PalettePrompt, SessionView, TerminalSettings } from "../shared/ipc";
@@ -23,6 +31,7 @@ interface PaneTerminal {
   terminal: Terminal;
   fit: FitAddon;
   serialize: SerializeAddon;
+  search: SearchAddon;
   // Pending while output waits to be reported.
   reportTimer?: ReturnType<typeof setTimeout>;
 }
@@ -108,23 +117,236 @@ function openPane(rect: PaneRect): PaneTerminal {
   terminalElement.className = "terminal";
   element.append(terminalElement);
   panesElement.append(element);
+  // Option types macOS's special characters, e.g. `€` for Option+Shift+2, rather than sending Meta sequences.
   const terminal = new Terminal({
     allowTransparency: true,
     ...terminalOptions(theme),
     scrollback: terminalSettings.scrollbackLines,
+    macOptionIsMeta: false,
+    // The search addon highlights matches with decorations, which xterm.js still counts as proposed API.
+    allowProposedApi: true,
+    // Links a program prints with OSC 8, which the terminal only offers when they're http(s) URLs.
+    linkHandler: { activate: (event, uri) => openLinkOnCmdClick(paneId, event, uri) },
   });
   const fit = new FitAddon();
   const serialize = new SerializeAddon();
+  const search = new SearchAddon();
   terminal.loadAddon(fit);
   terminal.loadAddon(serialize);
+  terminal.loadAddon(search);
+  terminal.registerLinkProvider(linkProvider(paneId, terminal));
+  terminal.attachCustomKeyEventHandler((event) => {
+    const jump = wordJump(event);
+    if (jump === undefined) return true;
+    if (event.type === "keydown") terminal.input(jump);
+    return false;
+  });
+  search.onDidChangeResults(({ resultIndex, resultCount }) => {
+    if (findingPaneId === paneId) showFindResults(resultIndex, resultCount);
+  });
   terminal.open(terminalElement);
   fit.fit();
   terminal.onData((data) => blind.writeToPane(paneId, data));
   terminal.onResize((size) => blind.resizePane(paneId, size));
   element.addEventListener("mousedown", () => blind.focusPane(paneId));
   void blind.attachPane(paneId, { cols: terminal.cols, rows: terminal.rows });
-  return { element, terminal, fit, serialize };
+  return { element, terminal, fit, serialize, search };
 }
+
+// Option+Left and Option+Right move by word as iTerm2's Natural Text Editing has them, sending Esc b and Esc f, which
+// shells bind to moving back and forward a word. Absent for any other key.
+function wordJump({ key, altKey, metaKey, ctrlKey, shiftKey }: KeyboardEvent) {
+  if (!altKey || metaKey || ctrlKey || shiftKey) return undefined;
+  if (key === "ArrowLeft") return "\x1bb";
+  if (key === "ArrowRight") return "\x1bf";
+  return undefined;
+}
+
+// A plain click on a link is left to selecting text.
+function openLinkOnCmdClick(paneId: PaneId, event: MouseEvent, text: string) {
+  if (event.metaKey) blind.openLink(paneId, text);
+}
+
+// The text of the buffer line at `y`, one-based, joined with the lines it wraps onto and from, and each of its
+// characters' first and last cell. A wide character's two cells hold one character.
+function wrappedLine(terminal: Terminal, y: number) {
+  const buffer = terminal.buffer.active;
+  let first = y - 1;
+  while (first > 0 && buffer.getLine(first)?.isWrapped) first -= 1;
+  let text = "";
+  const cells: { start: IBufferCellPosition; end: IBufferCellPosition }[] = [];
+  for (let row = first; row === first || buffer.getLine(row)?.isWrapped; row += 1) {
+    const line = buffer.getLine(row);
+    if (!line) break;
+    for (let x = 0; x < terminal.cols; x += 1) {
+      const cell = line.getCell(x);
+      if (!cell || cell.getWidth() === 0) continue;
+      const characters = cell.getChars() || " ";
+      text += characters;
+      for (let unit = 0; unit < characters.length; unit += 1) {
+        cells.push({ start: { x: x + 1, y: row + 1 }, end: { x: x + cell.getWidth(), y: row + 1 } });
+      }
+    }
+  }
+  return { text, cells };
+}
+
+// URLs, and paths to files or folders that exist, on the line and the lines it wraps with, opened by Cmd+click.
+function linkProvider(paneId: PaneId, terminal: Terminal): ILinkProvider {
+  return {
+    provideLinks(y, callback) {
+      const { text, cells } = wrappedLine(terminal, y);
+      const links = findLinks(text)
+        .map((link) => ({ text: link.text, range: { start: cells[link.start].start, end: cells[link.end - 1].end } }))
+        .filter(({ range }) => range.start.y <= y && y <= range.end.y);
+      if (links.length === 0) return callback(undefined);
+      void blind.openableLinks(paneId, links.map((link) => link.text)).then((openable) => {
+        callback(
+          links
+            .filter((_, index) => openable[index])
+            .map((link) => {
+              const provided: ILink = {
+                ...link,
+                decorations: { underline: cmdHeld, pointerCursor: cmdHeld },
+                activate: (event, text) => openLinkOnCmdClick(paneId, event, text),
+                hover: () => {
+                  hoveredLink = provided;
+                },
+                leave: () => {
+                  if (hoveredLink === provided) hoveredLink = undefined;
+                },
+              };
+              return provided;
+            }),
+        );
+      });
+    },
+  };
+}
+
+// Whether Cmd is held, so a link shows its underline and hand cursor only while Cmd+click would open it.
+let cmdHeld = false;
+// The link under the mouse. Once hovered, the terminal watches its decorations for changes.
+let hoveredLink: ILink | undefined;
+
+function holdCmd(held: boolean) {
+  if (held === cmdHeld) return;
+  cmdHeld = held;
+  if (hoveredLink?.decorations) Object.assign(hoveredLink.decorations, { underline: held, pointerCursor: held });
+}
+
+// Pressing or letting go of Cmd alone is a key event; a mouse move catches up with a Cmd changed while the window
+// wasn't listening.
+window.addEventListener("keydown", (event) => holdCmd(event.metaKey), true);
+window.addEventListener("keyup", (event) => holdCmd(event.metaKey), true);
+window.addEventListener("mousemove", (event) => holdCmd(event.metaKey), true);
+window.addEventListener("blur", () => holdCmd(false));
+
+// The Pane's terminal clears its scrollback and screen, keeping the line the cursor is on, usually the Shell's prompt.
+// A full-screen program's screen is left alone, since clearing would only blank the program's screen while its
+// scrollback stays out of reach. Either way the terminal reports what it holds, so Restore brings back no more.
+function clearScrollback(paneId: PaneId) {
+  const pane = terminals.get(paneId);
+  if (!pane) return;
+  if (pane.terminal.buffer.active.type === "normal") pane.terminal.clear();
+  reportScrollback(paneId, pane);
+}
+
+// The text field taking typing, e.g. the Command Palette's or the find bar's; absent while a terminal takes it.
+function focusedField() {
+  return document.activeElement instanceof HTMLInputElement ? document.activeElement : undefined;
+}
+
+// Copies what is selected in the focused text field, or else in the focused Pane's terminal. Nothing selected leaves
+// the clipboard as it was.
+function copySelection() {
+  const field = focusedField();
+  const selected = field
+    ? field.value.slice(field.selectionStart ?? 0, field.selectionEnd ?? 0)
+    : focusedPaneId && terminals.get(focusedPaneId)?.terminal.getSelection();
+  if (selected) blind.copyText(selected);
+}
+
+// Into a text field the text goes on one line, replacing what is selected there, as typing it would; the terminal
+// takes it as a paste, which programs that ask can tell from typing.
+function paste(text: string) {
+  const field = focusedField();
+  if (!field) {
+    if (focusedPaneId) terminals.get(focusedPaneId)?.terminal.paste(text);
+    return;
+  }
+  field.setRangeText(text.replace(/\r?\n/g, " "), field.selectionStart ?? 0, field.selectionEnd ?? 0, "end");
+  field.dispatchEvent(new Event("input"));
+}
+
+const findBar = document.getElementById("find")!;
+const findInput = document.getElementById("find-input") as HTMLInputElement;
+const findCount = document.getElementById("find-count")!;
+// The Pane the find bar searches; absent while it's closed.
+let findingPaneId: PaneId | undefined;
+
+// Every match outlined, the current one selected as well.
+function searchOptions({ terminal }: Theme): ISearchOptions {
+  const opaque = (colour: Colour) => colour.slice(0, 7);
+  return {
+    decorations: {
+      matchBorder: opaque(terminal.yellow),
+      matchOverviewRuler: opaque(terminal.yellow),
+      activeMatchBorder: opaque(terminal.cursor),
+      activeMatchColorOverviewRuler: opaque(terminal.cursor),
+    },
+  };
+}
+
+// Without an index, there were more matches than are highlighted.
+function showFindResults(resultIndex: number, resultCount: number) {
+  if (findInput.value === "") findCount.textContent = "";
+  else if (resultCount === 0) findCount.textContent = "No matches";
+  else if (resultIndex === -1) findCount.textContent = `${resultCount}+ matches`;
+  else findCount.textContent = `${resultIndex + 1} of ${resultCount}`;
+}
+
+// Opening again, e.g. by Cmd+F while it's open, selects what was searched for, so typing replaces it.
+function openFind(paneId: PaneId) {
+  if (findingPaneId !== undefined && findingPaneId !== paneId) closeFind();
+  findingPaneId = paneId;
+  findBar.hidden = false;
+  findInput.focus();
+  findInput.select();
+}
+
+// The Pane's terminal takes the keyboard back unless the Pane went.
+function closeFind() {
+  if (findingPaneId === undefined) return;
+  const pane = terminals.get(findingPaneId);
+  findingPaneId = undefined;
+  findBar.hidden = true;
+  findCount.textContent = "";
+  pane?.search.clearDecorations();
+  pane?.terminal.focus();
+}
+
+// Typing searches on from the current match, keeping it while it still matches.
+function find(direction: "next" | "previous", incremental = false) {
+  const pane = findingPaneId && terminals.get(findingPaneId);
+  if (!pane) return;
+  if (findInput.value === "") {
+    pane.search.clearDecorations();
+    showFindResults(-1, 0);
+    return;
+  }
+  const options = { ...searchOptions(theme), incremental };
+  if (direction === "next") pane.search.findNext(findInput.value, options);
+  else pane.search.findPrevious(findInput.value, options);
+}
+
+findInput.addEventListener("input", () => find("next", true));
+findInput.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeFind();
+  else if (event.key === "Enter") find(event.shiftKey ? "previous" : "next");
+  else return;
+  event.preventDefault();
+});
 
 // A full-screen program's screen and the modes it set belong to a process that won't be there after Restore.
 function reportScrollback(paneId: PaneId, pane: PaneTerminal) {
@@ -186,6 +408,8 @@ function render(view: SessionView) {
   // Splits, closed Panes, and the Tab bar appearing or disappearing all change the space the Panes have.
   for (const pane of terminals.values()) pane.fit.fit();
   if (focusedTab && focusedTab.focusedPaneId !== focusedPaneId) {
+    // The find bar searches the focused Pane only.
+    closeFind();
     focusedPaneId = focusedTab.focusedPaneId;
     terminals.get(focusedPaneId)?.terminal.focus();
   }
@@ -377,6 +601,10 @@ blind.onPalettePrompt(openPrompt);
 blind.onPaneData(writeToTerminal);
 blind.onFlushScrollback(() => terminals.forEach((pane, paneId) => reportScrollback(paneId, pane)));
 blind.onSessionView(render);
+blind.onFindInPane(openFind);
+blind.onClearScrollback(clearScrollback);
+blind.onCopy(copySelection);
+blind.onPaste(paste);
 window.addEventListener("resize", () => {
   for (const pane of terminals.values()) pane.fit.fit();
 });
