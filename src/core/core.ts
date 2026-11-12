@@ -6,7 +6,7 @@ import {
   removePane,
   replacePane,
   successorOf,
-} from "./layout";
+} from './layout'
 import {
   defaultSettings,
   type MenuBarIcon,
@@ -15,14 +15,14 @@ import {
   parseConfig,
   type Settings,
   starterConfig,
-} from "./config";
-import { fuzzyScore } from "./fuzzy";
-import { setJsoncProperty } from "./jsonc";
-import { type BoundAction, type KeyPress, matchesShortcut } from "./key-bindings";
-import { type LinkTarget, linkTarget } from "./links";
-import type { Clock, SavedScrollback, ShellHost, Snapshot, StateStore } from "./ports";
-import { capScrollback } from "./scrollback";
-import { builtInThemes, defaultTheme, loadThemes, type Theme, type ThemeFile } from "./themes";
+} from './config'
+import { fuzzyScore } from './fuzzy'
+import { setJsoncProperty } from './jsonc'
+import { type BoundAction, type KeyPress, matchesShortcut } from './key-bindings'
+import { type LinkTarget, linkTarget } from './links'
+import type { Clock, SavedScrollback, ShellHost, Snapshot, StateStore } from './ports'
+import { capScrollback } from './scrollback'
+import { builtInThemes, defaultTheme, loadThemes, type Theme, type ThemeFile } from './themes'
 import {
   type CoreState,
   idsIn,
@@ -34,109 +34,109 @@ import {
   type SplitDirection,
   type Tab,
   type TabId,
-} from "./state";
+} from './state'
 
 export type Effect =
-  | { type: "closeWindow"; sessionId: SessionId }
+  | { type: 'closeWindow'; sessionId: SessionId }
   // Fades the app in with the Session visible.
-  | { type: "showApp"; sessionId: SessionId }
+  | { type: 'showApp'; sessionId: SessionId }
   // Fades the app in with the Command Palette on its own, over no Session.
-  | { type: "showPalette" }
+  | { type: 'showPalette' }
   // Opens the Command Palette over the Session's window.
-  | { type: "openPalette"; sessionId: SessionId }
-  | { type: "hideApp" }
+  | { type: 'openPalette'; sessionId: SessionId }
+  | { type: 'hideApp' }
   // Makes the Session the visible one in place of the Session shown before, without a fade.
-  | { type: "showSession"; sessionId: SessionId }
+  | { type: 'showSession'; sessionId: SessionId }
   // Asks the user whether to quit, answered with `quitConfirmed`.
-  | { type: "confirmQuit" }
+  | { type: 'confirmQuit' }
   // Asks the user for the Session's name, offering `suggestion`, answered with `renameSession`.
-  | { type: "askSessionName"; sessionId: SessionId; suggestion: string }
+  | { type: 'askSessionName'; sessionId: SessionId; suggestion: string }
   // Asks the user whether to delete the Session, answered with `deleteConfirmed`.
-  | { type: "confirmDelete"; sessionId: SessionId }
+  | { type: 'confirmDelete'; sessionId: SessionId }
   // Asks the user for the title of a Tab in the Session, offering `suggestion`, answered with `renameTab`.
-  | { type: "askTabTitle"; sessionId: SessionId; tabId: TabId; suggestion: string }
+  | { type: 'askTabTitle'; sessionId: SessionId; tabId: TabId; suggestion: string }
   // Opens the config file for editing.
-  | { type: "openSettings" }
+  | { type: 'openSettings' }
   // Everything is saved; the app can exit.
-  | { type: "quit" }
+  | { type: 'quit' }
   // Tells the user the config file's settings that were rejected and fell back to their defaults.
-  | { type: "settingsRejected"; settings: string[] }
+  | { type: 'settingsRejected'; settings: string[] }
   // Tells the user the config file couldn't be read as a JSON object, comments allowed, so the settings stay as they were.
-  | { type: "configUnreadable" }
+  | { type: 'configUnreadable' }
   // The Theme in effect changed; every window follows it.
-  | { type: "applyTheme"; theme: Theme }
+  | { type: 'applyTheme'; theme: Theme }
   // The menu bar icon in effect changed.
-  | { type: "applyMenuBarIcon"; icon: MenuBarIcon }
+  | { type: 'applyMenuBarIcon'; icon: MenuBarIcon }
   // Replaces the config file's text, e.g. to set the theme setting to the Theme chosen in the Command Palette.
-  | { type: "writeConfig"; text: string }
+  | { type: 'writeConfig'; text: string }
   // Has the Command Palette list the Themes, over the Session's window or, without one, on its own.
-  | { type: "pickTheme"; sessionId?: SessionId }
+  | { type: 'pickTheme'; sessionId?: SessionId }
   // Has the Command Palette list the menu bar icons, like `pickTheme`.
-  | { type: "pickMenuBarIcon"; sessionId?: SessionId }
+  | { type: 'pickMenuBarIcon'; sessionId?: SessionId }
   // Tells the user the Theme files, or their fields, that were rejected, as `loadThemes` names them.
-  | { type: "themesRejected"; rejected: string[] }
+  | { type: 'themesRejected'; rejected: string[] }
   // Opens a search over the Pane's scrollback in the Session's window.
-  | { type: "findInPane"; sessionId: SessionId; paneId: PaneId }
+  | { type: 'findInPane'; sessionId: SessionId; paneId: PaneId }
   // Clears the scrollback of the Pane's terminal in the Session's window.
-  | { type: "clearScrollback"; sessionId: SessionId; paneId: PaneId }
+  | { type: 'clearScrollback'; sessionId: SessionId; paneId: PaneId }
   // Copies what is selected in the Session's window: in its focused Pane's terminal, or in a text field it has open.
-  | { type: "copy"; sessionId: SessionId }
+  | { type: 'copy'; sessionId: SessionId }
   // Pastes the clipboard's text where the Session's window takes typing.
-  | { type: "paste"; sessionId: SessionId };
+  | { type: 'paste'; sessionId: SessionId }
 
 // Every app action, in the order the Command Palette offers them, by its label.
 const paletteActionLabels = {
-  newSession: "New Session",
-  renameSession: "Rename Session",
-  setSessionRoot: "Set Session Root",
-  clearSessionRoot: "Clear Session Root",
-  closeSession: "Close Session",
-  deleteSession: "Delete Session",
-  newTab: "New Tab",
-  renameTab: "Rename Tab",
-  clearTabTitle: "Clear Tab Title",
-  splitPaneVertically: "Split Pane Vertically",
-  splitPaneHorizontally: "Split Pane Horizontally",
-  closePane: "Close Pane",
-  nextSession: "Next Session",
-  previousSession: "Previous Session",
-  nextTab: "Next Tab",
-  previousTab: "Previous Tab",
-  nextPane: "Next Pane",
-  previousPane: "Previous Pane",
-  focusPaneLeft: "Focus Pane Left",
-  focusPaneRight: "Focus Pane Right",
-  focusPaneUp: "Focus Pane Above",
-  focusPaneDown: "Focus Pane Below",
-  findInPane: "Find in Pane",
-  clearScrollback: "Clear Scrollback",
-  changeTheme: "Change Theme",
-  changeMenuBarIcon: "Change Menu Bar Icon",
-  openSettings: "Open Settings",
-  quit: "Quit Blind",
-} as const;
+  newSession: 'New Session',
+  renameSession: 'Rename Session',
+  setSessionRoot: 'Set Session Root',
+  clearSessionRoot: 'Clear Session Root',
+  closeSession: 'Close Session',
+  deleteSession: 'Delete Session',
+  newTab: 'New Tab',
+  renameTab: 'Rename Tab',
+  clearTabTitle: 'Clear Tab Title',
+  splitPaneVertically: 'Split Pane Vertically',
+  splitPaneHorizontally: 'Split Pane Horizontally',
+  closePane: 'Close Pane',
+  nextSession: 'Next Session',
+  previousSession: 'Previous Session',
+  nextTab: 'Next Tab',
+  previousTab: 'Previous Tab',
+  nextPane: 'Next Pane',
+  previousPane: 'Previous Pane',
+  focusPaneLeft: 'Focus Pane Left',
+  focusPaneRight: 'Focus Pane Right',
+  focusPaneUp: 'Focus Pane Above',
+  focusPaneDown: 'Focus Pane Below',
+  findInPane: 'Find in Pane',
+  clearScrollback: 'Clear Scrollback',
+  changeTheme: 'Change Theme',
+  changeMenuBarIcon: 'Change Menu Bar Icon',
+  openSettings: 'Open Settings',
+  quit: 'Quit Blind',
+} as const
 
-export type PaletteAction = keyof typeof paletteActionLabels;
+export type PaletteAction = keyof typeof paletteActionLabels
 
 // One entry the Command Palette offers.
 export type PaletteResult =
-  | { type: "session"; sessionId: SessionId; label: string; closed: boolean }
-  | { type: "tab"; tabId: TabId; label: string; sessionLabel: string }
-  | { type: "pane"; paneId: PaneId; label: string; workingDirectory: string; sessionLabel: string }
-  | { type: "action"; action: PaletteAction; label: string }
+  | { type: 'session'; sessionId: SessionId; label: string; closed: boolean }
+  | { type: 'tab'; tabId: TabId; label: string; sessionLabel: string }
+  | { type: 'pane'; paneId: PaneId; label: string; workingDirectory: string; sessionLabel: string }
+  | { type: 'action'; action: PaletteAction; label: string }
   // A Theme, labelled with its name.
-  | { type: "theme"; name: string; label: string }
-  | { type: "menuBarIcon"; icon: MenuBarIcon; label: string };
+  | { type: 'theme'; name: string; label: string }
+  | { type: 'menuBarIcon'; icon: MenuBarIcon; label: string }
 
 const menuBarIconLabels: Record<MenuBarIcon, string> = {
-  monochrome: "Monochrome",
-  colour: "Colour",
-};
+  monochrome: 'Monochrome',
+  colour: 'Colour',
+}
 
 // The app actions the menu bar icon's menu offers after the Sessions, in order.
-const menuBarActions = ["newSession", "openSettings", "quit"] as const satisfies PaletteAction[];
+const menuBarActions = ['newSession', 'openSettings', 'quit'] as const satisfies PaletteAction[]
 
-export type MenuBarAction = (typeof menuBarActions)[number];
+export type MenuBarAction = (typeof menuBarActions)[number]
 
 // A Session the menu bar icon's menu lists, under its label.
 export interface MenuBarSession {
@@ -276,134 +276,134 @@ export interface Core {
   onStateChange(listener: (state: CoreState) => void): void;
 }
 
-export function createCore({ shellHost, stateStore, clock, homeDirectory }: CoreDependencies): Core {
-  let state: CoreState = { sessions: [] };
+export function createCore ({ shellHost, stateStore, clock, homeDirectory }: CoreDependencies): Core {
+  let state: CoreState = { sessions: [] }
   // Kept out of the state: terminals report it far more often than anything else changes.
-  let scrollback: Record<PaneId, SavedScrollback> = {};
+  let scrollback: Record<PaneId, SavedScrollback> = {}
   // Whether the app is on screen. Not part of the snapshot: it says nothing about Sessions.
-  let appShown = true;
-  let settings: Settings = defaultSettings;
+  let appShown = true
+  let settings: Settings = defaultSettings
   // The config file's text the settings were last read from, read again when the Themes change.
-  let configText: string | undefined;
+  let configText: string | undefined
   // Whether the config file read as it is now, so that it's written only over text the settings came from.
-  let configReadable = true;
+  let configReadable = true
   // Whether the theme setting names no Theme loaded, so the user hears of it once.
-  let themeSettingRejected = false;
-  let themes: Theme[] = builtInThemes;
+  let themeSettingRejected = false
+  let themes: Theme[] = builtInThemes
   // The Theme the windows were last told to follow.
-  let appliedTheme = defaultTheme;
+  let appliedTheme = defaultTheme
   // The name of the Theme browsed to in the Command Palette, in effect until the palette closes; absent otherwise.
-  let previewedTheme: string | undefined;
+  let previewedTheme: string | undefined
   // The icon the menu bar was last told to show.
-  let appliedMenuBarIcon = defaultSettings.menuBarIcon;
+  let appliedMenuBarIcon = defaultSettings.menuBarIcon
   // The menu bar icon browsed to in the Command Palette, in effect until the palette closes; absent otherwise.
-  let previewedMenuBarIcon: MenuBarIcon | undefined;
+  let previewedMenuBarIcon: MenuBarIcon | undefined
   // The Session order taken at the first of a run of consecutive cycle presses; absent outside one.
-  let cycleStreak: SessionId[] | undefined;
-  const effectListeners: ((effect: Effect) => void)[] = [];
-  const stateListeners: ((state: CoreState) => void)[] = [];
-  let lastId = 0;
+  let cycleStreak: SessionId[] | undefined
+  const effectListeners: ((effect: Effect) => void)[] = []
+  const stateListeners: ((state: CoreState) => void)[] = []
+  let lastId = 0
 
-  function nextId(kind: "session" | "tab" | "pane") {
-    lastId += 1;
-    return `${kind}-${lastId}`;
+  function nextId (kind: 'session' | 'tab' | 'pane') {
+    lastId += 1
+    return `${kind}-${lastId}`
   }
 
-  function emit(effect: Effect) {
-    for (const listener of effectListeners) listener(effect);
+  function emit (effect: Effect) {
+    for (const listener of effectListeners) listener(effect)
   }
 
   // Absent for no name.
-  function findTheme(name: string | undefined) {
-    return themes.find((theme) => theme.name === name);
+  function findTheme (name: string | undefined) {
+    return themes.find((theme) => theme.name === name)
   }
 
   // The Theme being previewed, or else the one the theme setting names, or the Default Theme when none goes by that
   // name. A previewed Theme whose file went is passed over.
-  function themeInEffect() {
-    return findTheme(previewedTheme) ?? findTheme(settings.theme) ?? defaultTheme;
+  function themeInEffect () {
+    return findTheme(previewedTheme) ?? findTheme(settings.theme) ?? defaultTheme
   }
 
   // Sets the setting in the config file too, unless the file can't be read as it is now.
-  function writeSetting(name: keyof Settings, value: string) {
-    if (!configReadable) return emit({ type: "configUnreadable" });
-    configText = setJsoncProperty(configText ?? starterConfig, name, value);
-    emit({ type: "writeConfig", text: configText });
+  function writeSetting (name: keyof Settings, value: string) {
+    if (!configReadable) return emit({ type: 'configUnreadable' })
+    configText = setJsoncProperty(configText ?? starterConfig, name, value)
+    emit({ type: 'writeConfig', text: configText })
   }
 
   // Ends any preview, keeping the Theme chosen and setting the theme setting to it. A Theme whose file went since it
   // was listed leaves the setting as it was.
-  function chooseTheme(name: string) {
-    previewedTheme = undefined;
-    if (!findTheme(name)) return applyThemeInEffect();
-    settings = { ...settings, theme: name };
-    themeSettingRejected = false;
-    applyThemeInEffect();
-    writeSetting("theme", name);
+  function chooseTheme (name: string) {
+    previewedTheme = undefined
+    if (!findTheme(name)) return applyThemeInEffect()
+    settings = { ...settings, theme: name }
+    themeSettingRejected = false
+    applyThemeInEffect()
+    writeSetting('theme', name)
   }
 
   // Ends any preview, keeping the icon chosen and setting the menuBarIcon setting to it.
-  function chooseMenuBarIcon(icon: MenuBarIcon) {
-    previewedMenuBarIcon = undefined;
-    settings = { ...settings, menuBarIcon: icon };
-    applyMenuBarIconInEffect();
-    writeSetting("menuBarIcon", icon);
+  function chooseMenuBarIcon (icon: MenuBarIcon) {
+    previewedMenuBarIcon = undefined
+    settings = { ...settings, menuBarIcon: icon }
+    applyMenuBarIconInEffect()
+    writeSetting('menuBarIcon', icon)
   }
 
   // Noting whether the theme setting names no Theme loaded.
-  function takeSettings(parsed: ParsedConfig) {
-    settings = parsed.settings;
-    themeSettingRejected = parsed.rejected.includes("theme");
+  function takeSettings (parsed: ParsedConfig) {
+    settings = parsed.settings
+    themeSettingRejected = parsed.rejected.includes('theme')
   }
 
-  function themeNames() {
-    return themes.map((theme) => theme.name);
+  function themeNames () {
+    return themes.map((theme) => theme.name)
   }
 
   // Compared by value: reading the Theme files again makes new Themes of unchanged ones.
-  function applyThemeInEffect() {
-    const theme = themeInEffect();
-    if (JSON.stringify(theme) === JSON.stringify(appliedTheme)) return;
-    appliedTheme = theme;
-    emit({ type: "applyTheme", theme });
+  function applyThemeInEffect () {
+    const theme = themeInEffect()
+    if (JSON.stringify(theme) === JSON.stringify(appliedTheme)) return
+    appliedTheme = theme
+    emit({ type: 'applyTheme', theme })
   }
 
   // The icon being previewed, or else the one the menuBarIcon setting names.
-  function applyMenuBarIconInEffect() {
-    const icon = previewedMenuBarIcon ?? settings.menuBarIcon;
-    if (icon === appliedMenuBarIcon) return;
-    appliedMenuBarIcon = icon;
-    emit({ type: "applyMenuBarIcon", icon });
+  function applyMenuBarIconInEffect () {
+    const icon = previewedMenuBarIcon ?? settings.menuBarIcon
+    if (icon === appliedMenuBarIcon) return
+    appliedMenuBarIcon = icon
+    emit({ type: 'applyMenuBarIcon', icon })
   }
 
-  function save() {
-    stateStore.save({ state, scrollback });
+  function save () {
+    stateStore.save({ state, scrollback })
   }
 
-  function setState(next: CoreState) {
-    state = next;
-    save();
-    for (const listener of stateListeners) listener(state);
+  function setState (next: CoreState) {
+    state = next
+    save()
+    for (const listener of stateListeners) listener(state)
   }
 
-  function findSession(sessionId: SessionId) {
-    return state.sessions.find((session) => session.id === sessionId);
+  function findSession (sessionId: SessionId) {
+    return state.sessions.find((session) => session.id === sessionId)
   }
 
-  function findTab(tabId: TabId) {
-    return state.sessions.flatMap((session) => session.tabs).find((tab) => tab.id === tabId);
+  function findTab (tabId: TabId) {
+    return state.sessions.flatMap((session) => session.tabs).find((tab) => tab.id === tabId)
   }
 
   // Leaves the state, and its listeners, alone when `update` returns the Session unchanged.
-  function updateSession(sessionId: SessionId, update: (session: Session) => Session) {
-    const session = findSession(sessionId);
-    if (!session) return;
-    const updated = update(session);
-    if (updated === session) return;
-    setState({ ...state, sessions: state.sessions.map((candidate) => (candidate === session ? updated : candidate)) });
+  function updateSession (sessionId: SessionId, update: (session: Session) => Session) {
+    const session = findSession(sessionId)
+    if (!session) return
+    const updated = update(session)
+    if (updated === session) return
+    setState({ ...state, sessions: state.sessions.map((candidate) => (candidate === session ? updated : candidate)) })
   }
 
-  function updatePane(paneId: PaneId, update: (pane: Pane) => Pane) {
+  function updatePane (paneId: PaneId, update: (pane: Pane) => Pane) {
     setState({
       ...state,
       sessions: state.sessions.map((session) => ({
@@ -413,430 +413,430 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
           panes: tab.panes.map((pane) => (pane.id === paneId ? update(pane) : pane)),
         })),
       })),
-    });
+    })
   }
 
-  function focusedTab(session: Session) {
-    return session.tabs.find((tab) => tab.id === session.focusedTabId);
+  function focusedTab (session: Session) {
+    return session.tabs.find((tab) => tab.id === session.focusedTabId)
   }
 
-  function focusedPane(tab: Tab) {
-    return tab.panes.find((pane) => pane.id === tab.focusedPaneId)!;
+  function focusedPane (tab: Tab) {
+    return tab.panes.find((pane) => pane.id === tab.focusedPaneId)!
   }
 
   // Like `updateSession`, leaves the state alone when `update` returns the Tab unchanged.
-  function updateTab(tabId: TabId, update: (tab: Tab) => Tab) {
-    const session = state.sessions.find((candidate) => candidate.tabs.some((tab) => tab.id === tabId));
-    if (!session) return;
+  function updateTab (tabId: TabId, update: (tab: Tab) => Tab) {
+    const session = state.sessions.find((candidate) => candidate.tabs.some((tab) => tab.id === tabId))
+    if (!session) return
     updateSession(session.id, (session) => {
-      const tab = session.tabs.find((candidate) => candidate.id === tabId)!;
-      const updated = update(tab);
-      if (updated === tab) return session;
-      return { ...session, tabs: session.tabs.map((candidate) => (candidate === tab ? updated : candidate)) };
-    });
+      const tab = session.tabs.find((candidate) => candidate.id === tabId)!
+      const updated = update(tab)
+      if (updated === tab) return session
+      return { ...session, tabs: session.tabs.map((candidate) => (candidate === tab ? updated : candidate)) }
+    })
   }
 
   // The Session's focused Tab; absent for an unknown Session or one without Tabs.
-  function focusedTabOf(sessionId: SessionId) {
-    const session = findSession(sessionId);
-    return session && focusedTab(session);
+  function focusedTabOf (sessionId: SessionId) {
+    const session = findSession(sessionId)
+    return session && focusedTab(session)
   }
 
-  function updateFocusedTab(sessionId: SessionId, update: (tab: Tab) => Tab) {
-    const tab = focusedTabOf(sessionId);
-    if (tab) updateTab(tab.id, update);
+  function updateFocusedTab (sessionId: SessionId, update: (tab: Tab) => Tab) {
+    const tab = focusedTabOf(sessionId)
+    if (tab) updateTab(tab.id, update)
   }
 
-  function withFocusedPane(tab: Tab, paneId: PaneId): Tab {
-    return paneId === tab.focusedPaneId ? tab : { ...tab, focusedPaneId: paneId };
+  function withFocusedPane (tab: Tab, paneId: PaneId): Tab {
+    return paneId === tab.focusedPaneId ? tab : { ...tab, focusedPaneId: paneId }
   }
 
-  function hasPane(tab: Tab, paneId: PaneId) {
-    return tab.panes.some((pane) => pane.id === paneId);
+  function hasPane (tab: Tab, paneId: PaneId) {
+    return tab.panes.some((pane) => pane.id === paneId)
   }
 
-  function findSessionWithPane(paneId: PaneId) {
-    return state.sessions.find((session) => session.tabs.some((tab) => hasPane(tab, paneId)));
+  function findSessionWithPane (paneId: PaneId) {
+    return state.sessions.find((session) => session.tabs.some((tab) => hasPane(tab, paneId)))
   }
 
-  function findPane(paneId: PaneId) {
-    return panesIn(state).find((pane) => pane.id === paneId);
+  function findPane (paneId: PaneId) {
+    return panesIn(state).find((pane) => pane.id === paneId)
   }
 
-  function focusPaneBy(sessionId: SessionId, offset: number) {
+  function focusPaneBy (sessionId: SessionId, offset: number) {
     updateFocusedTab(sessionId, (tab) => {
-      const count = tab.panes.length;
-      const position = tab.panes.findIndex((pane) => pane.id === tab.focusedPaneId);
-      return withFocusedPane(tab, tab.panes[(position + offset + count) % count].id);
-    });
+      const count = tab.panes.length
+      const position = tab.panes.findIndex((pane) => pane.id === tab.focusedPaneId)
+      return withFocusedPane(tab, tab.panes[(position + offset + count) % count].id)
+    })
   }
 
-  function focusedTabPosition(session: Session) {
-    return session.tabs.findIndex((tab) => tab.id === session.focusedTabId);
+  function focusedTabPosition (session: Session) {
+    return session.tabs.findIndex((tab) => tab.id === session.focusedTabId)
   }
 
   // The last segment of a path, or "/" for the filesystem root.
-  function folderName(directory: string) {
-    return directory.split("/").filter(Boolean).at(-1) ?? "/";
+  function folderName (directory: string) {
+    return directory.split('/').filter(Boolean).at(-1) ?? '/'
   }
 
   // Runs the shell setting's program, so a change to it reaches only the Shells started after it.
-  function startShell({ id, workingDirectory }: Pane) {
-    shellHost.start(id, { workingDirectory, shell: settings.shell });
+  function startShell ({ id, workingDirectory }: Pane) {
+    shellHost.start(id, { workingDirectory, shell: settings.shell })
   }
 
   // A new Pane whose Shell starts in `workingDirectory`.
-  function openPane(workingDirectory: string): Pane {
-    const pane = { id: nextId("pane"), workingDirectory };
-    startShell(pane);
-    return pane;
+  function openPane (workingDirectory: string): Pane {
+    const pane = { id: nextId('pane'), workingDirectory }
+    startShell(pane)
+    return pane
   }
 
   // The Session's Panes with a fresh Shell each, in their working directories. Nothing that ran before runs again.
-  function restartShells(session: Session): Session {
+  function restartShells (session: Session): Session {
     return {
       ...session,
       tabs: session.tabs.map((tab) => ({
         ...tab,
         panes: tab.panes.map(({ runningProgram: _stopped, ...pane }) => {
-          startShell(pane);
-          return pane;
+          startShell(pane)
+          return pane
         }),
       })),
-    };
+    }
   }
 
   // Brings back the saved Sessions, starting Shells for the Open ones. New ids continue after the saved ones.
-  function restore(saved: Snapshot) {
-    lastId = Math.max(lastId, ...idsIn(saved.state).map((id) => Number(id.split("-").at(-1))));
-    scrollback = saved.scrollback;
+  function restore (saved: Snapshot) {
+    lastId = Math.max(lastId, ...idsIn(saved.state).map((id) => Number(id.split('-').at(-1))))
+    scrollback = saved.scrollback
     const sessions = saved.state.sessions.map((session) =>
-      session.status === "open" ? restartShells(session) : session,
-    );
-    setState({ ...saved.state, sessions });
+      session.status === 'open' ? restartShells(session) : session
+    )
+    setState({ ...saved.state, sessions })
   }
 
-  function openTab(workingDirectory: string): Tab {
-    const pane = openPane(workingDirectory);
-    return { id: nextId("tab"), panes: [pane], layout: { type: "pane", paneId: pane.id }, focusedPaneId: pane.id };
+  function openTab (workingDirectory: string): Tab {
+    const pane = openPane(workingDirectory)
+    return { id: nextId('tab'), panes: [pane], layout: { type: 'pane', paneId: pane.id }, focusedPaneId: pane.id }
   }
 
-  function focusTabBy(sessionId: SessionId, offset: number) {
+  function focusTabBy (sessionId: SessionId, offset: number) {
     updateSession(sessionId, (session) => {
-      const count = session.tabs.length;
-      if (count === 0) return session;
-      const position = focusedTabPosition(session);
-      return { ...session, focusedTabId: session.tabs[(position + offset + count) % count].id };
-    });
+      const count = session.tabs.length
+      if (count === 0) return session
+      const position = focusedTabPosition(session)
+      return { ...session, focusedTabId: session.tabs[(position + offset + count) % count].id }
+    })
   }
 
   // The Pane's sibling fills its space; closing the last Pane closes its Tab, and closing the last Tab closes the Session.
   // When the focused Pane closes, the Pane nearest to it in that sibling is focused. When the focused Tab closes, the
   // Tab that takes its place is focused, or the new last Tab.
-  function removePaneFromSession(paneId: PaneId) {
-    const session = findSessionWithPane(paneId);
-    if (!session) return;
-    const { [paneId]: _dropped, ...kept } = scrollback;
-    scrollback = kept;
+  function removePaneFromSession (paneId: PaneId) {
+    const session = findSessionWithPane(paneId)
+    if (!session) return
+    const { [paneId]: _dropped, ...kept } = scrollback
+    scrollback = kept
     const tabs = session.tabs.flatMap((tab): Tab[] => {
-      if (!hasPane(tab, paneId)) return [tab];
-      const layout = removePane(tab.layout, paneId);
-      if (!layout) return [];
-      const focusedPaneId = tab.focusedPaneId === paneId ? successorOf(tab.layout, paneId)! : tab.focusedPaneId;
-      return [{ ...tab, panes: tab.panes.filter((pane) => pane.id !== paneId), layout, focusedPaneId }];
-    });
+      if (!hasPane(tab, paneId)) return [tab]
+      const layout = removePane(tab.layout, paneId)
+      if (!layout) return []
+      const focusedPaneId = tab.focusedPaneId === paneId ? successorOf(tab.layout, paneId)! : tab.focusedPaneId
+      return [{ ...tab, panes: tab.panes.filter((pane) => pane.id !== paneId), layout, focusedPaneId }]
+    })
     updateSession(session.id, (session) => {
-      if (tabs.length === 0) return { ...session, status: "closed", tabs, focusedTabId: undefined };
-      if (tabs.some((tab) => tab.id === session.focusedTabId)) return { ...session, tabs };
-      const position = focusedTabPosition(session);
-      return { ...session, tabs, focusedTabId: tabs[Math.min(position, tabs.length - 1)].id };
-    });
-    if (tabs.length > 0) return;
-    closeWindow(session.id);
+      if (tabs.length === 0) return { ...session, status: 'closed', tabs, focusedTabId: undefined }
+      if (tabs.some((tab) => tab.id === session.focusedTabId)) return { ...session, tabs }
+      const position = focusedTabPosition(session)
+      return { ...session, tabs, focusedTabId: tabs[Math.min(position, tabs.length - 1)].id }
+    })
+    if (tabs.length > 0) return
+    closeWindow(session.id)
   }
 
   // When the Session's window was the one on screen, another Open Session takes its place.
-  function closeWindow(sessionId: SessionId) {
-    emit({ type: "closeWindow", sessionId });
-    if (sessionId === state.currentSessionId) replaceCurrentSession();
+  function closeWindow (sessionId: SessionId) {
+    emit({ type: 'closeWindow', sessionId })
+    if (sessionId === state.currentSessionId) replaceCurrentSession()
   }
 
-  function paneIdsOf(session: Session) {
-    return session.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id));
+  function paneIdsOf (session: Session) {
+    return session.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id))
   }
 
   // After the Current Session closes, the most recently used Open Session takes its place; with none left, the app
   // hides.
-  function replaceCurrentSession() {
-    const open = state.sessions.filter((session) => session.status === "open");
-    const next = open.toSorted((a, b) => b.lastUsedAt - a.lastUsedAt)[0];
-    if (next) return makeCurrent(next.id);
-    setState({ ...state, currentSessionId: undefined });
-    if (!appShown) return;
-    appShown = false;
-    emit({ type: "hideApp" });
+  function replaceCurrentSession () {
+    const open = state.sessions.filter((session) => session.status === 'open')
+    const next = open.toSorted((a, b) => b.lastUsedAt - a.lastUsedAt)[0]
+    if (next) return makeCurrent(next.id)
+    setState({ ...state, currentSessionId: undefined })
+    if (!appShown) return
+    appShown = false
+    emit({ type: 'hideApp' })
   }
 
   // With the Command Palette on its own, the only thing on screen, the app hides.
-  function hideWithNoCurrentSession() {
-    if (!appShown || state.currentSessionId !== undefined) return;
-    appShown = false;
-    emit({ type: "hideApp" });
+  function hideWithNoCurrentSession () {
+    if (!appShown || state.currentSessionId !== undefined) return
+    appShown = false
+    emit({ type: 'hideApp' })
   }
 
   // The smallest label number no Unnamed Session holds, starting at 1.
-  function freeLabelNumber() {
-    const taken = new Set(state.sessions.map((session) => session.labelNumber));
-    let number = 1;
-    while (taken.has(number)) number += 1;
-    return number;
+  function freeLabelNumber () {
+    const taken = new Set(state.sessions.map((session) => session.labelNumber))
+    let number = 1
+    while (taken.has(number)) number += 1
+    return number
   }
 
   // The name, or when another Session holds it, the name with the smallest free number from 2, e.g. `api 2`.
-  function uniqueName(name: string, sessionId: SessionId) {
-    const taken = new Set(state.sessions.filter((session) => session.id !== sessionId).map((session) => session.name));
-    if (!taken.has(name)) return name;
-    let number = 2;
-    while (taken.has(`${name} ${number}`)) number += 1;
-    return `${name} ${number}`;
+  function uniqueName (name: string, sessionId: SessionId) {
+    const taken = new Set(state.sessions.filter((session) => session.id !== sessionId).map((session) => session.name))
+    if (!taken.has(name)) return name
+    let number = 2
+    while (taken.has(`${name} ${number}`)) number += 1
+    return `${name} ${number}`
   }
 
-  function openSession(): Session {
-    const now = clock.now();
-    const tab = openTab(homeDirectory);
+  function openSession (): Session {
+    const now = clock.now()
+    const tab = openTab(homeDirectory)
     return {
-      id: nextId("session"),
+      id: nextId('session'),
       labelNumber: freeLabelNumber(),
-      status: "open",
+      status: 'open',
       createdAt: now,
       lastUsedAt: now,
       tabs: [tab],
       focusedTabId: tab.id,
-    };
+    }
   }
 
   // Named Sessions before Unnamed Sessions, each group in the cycle order setting's order. Alphabetically, Unnamed
   // Sessions go by label number.
-  function compareInCycleOrder(a: Session, b: Session) {
-    if ((a.name === undefined) !== (b.name === undefined)) return a.name === undefined ? 1 : -1;
-    if (settings.cycleOrder === "recent") return b.lastUsedAt - a.lastUsedAt;
-    if (settings.cycleOrder === "created") return a.createdAt - b.createdAt;
-    if (a.name !== undefined) return a.name.localeCompare(b.name!, undefined, { numeric: true });
-    return a.labelNumber! - b.labelNumber!;
+  function compareInCycleOrder (a: Session, b: Session) {
+    if ((a.name === undefined) !== (b.name === undefined)) return a.name === undefined ? 1 : -1
+    if (settings.cycleOrder === 'recent') return b.lastUsedAt - a.lastUsedAt
+    if (settings.cycleOrder === 'created') return a.createdAt - b.createdAt
+    if (a.name !== undefined) return a.name.localeCompare(b.name!, undefined, { numeric: true })
+    return a.labelNumber! - b.labelNumber!
   }
 
-  function sessionsInCycleOrder() {
-    return state.sessions.toSorted(compareInCycleOrder);
+  function sessionsInCycleOrder () {
+    return state.sessions.toSorted(compareInCycleOrder)
   }
 
   // Wraps a command so that it ends any run of cycle presses.
-  function command<Args extends unknown[]>(run: (...args: Args) => void) {
+  function command<Args extends unknown[]> (run: (...args: Args) => void) {
     return (...args: Args) => {
-      cycleStreak = undefined;
-      run(...args);
-    };
+      cycleStreak = undefined
+      run(...args)
+    }
   }
 
   // Makes the Session the Current Session, marking it as the most recently used, and swaps it in while the app is shown.
-  function makeCurrent(sessionId: SessionId) {
-    const now = clock.now();
+  function makeCurrent (sessionId: SessionId) {
+    const now = clock.now()
     setState({
       ...state,
       currentSessionId: sessionId,
       sessions: state.sessions.map((session) => (session.id === sessionId ? { ...session, lastUsedAt: now } : session)),
-    });
-    if (appShown) emit({ type: "showSession", sessionId });
+    })
+    if (appShown) emit({ type: 'showSession', sessionId })
   }
 
   // Consecutive presses keep the order from the first one, so that marking each Session as used on the way doesn't
   // re-sort the `recent` order under them.
-  function focusSessionBy(offset: number) {
-    const order = cycleStreak ?? sessionsInCycleOrder().map((session) => session.id);
-    const open = order.filter((sessionId) => findSession(sessionId)?.status === "open");
-    if (open.length < 2) return;
-    const position = open.indexOf(state.currentSessionId!);
-    makeCurrent(open[(position + offset + open.length) % open.length]);
-    cycleStreak = order;
+  function focusSessionBy (offset: number) {
+    const order = cycleStreak ?? sessionsInCycleOrder().map((session) => session.id)
+    const open = order.filter((sessionId) => findSession(sessionId)?.status === 'open')
+    if (open.length < 2) return
+    const position = open.indexOf(state.currentSessionId!)
+    makeCurrent(open[(position + offset + open.length) % open.length])
+    cycleStreak = order
   }
 
   // Opens a new Session as the Current Session.
-  function addSession() {
-    const session = openSession();
-    setState({ sessions: [...state.sessions, session], currentSessionId: session.id });
+  function addSession () {
+    const session = openSession()
+    setState({ sessions: [...state.sessions, session], currentSessionId: session.id })
   }
 
   // The directory with the home directory shown as `~`.
-  function displayDirectory(directory: string) {
-    if (directory === homeDirectory) return "~";
-    return directory.startsWith(`${homeDirectory}/`) ? `~${directory.slice(homeDirectory.length)}` : directory;
+  function displayDirectory (directory: string) {
+    if (directory === homeDirectory) return '~'
+    return directory.startsWith(`${homeDirectory}/`) ? `~${directory.slice(homeDirectory.length)}` : directory
   }
 
-  function labelOf(session: Session) {
-    if (session.name !== undefined) return session.name;
-    const tab = focusedTab(session);
-    const directory = tab ? focusedPane(tab).workingDirectory : homeDirectory;
-    return `Session ${session.labelNumber} (${displayDirectory(directory)})`;
+  function labelOf (session: Session) {
+    if (session.name !== undefined) return session.name
+    const tab = focusedTab(session)
+    const directory = tab ? focusedPane(tab).workingDirectory : homeDirectory
+    return `Session ${session.labelNumber} (${displayDirectory(directory)})`
   }
 
   // The Pane's running program, or its working directory's folder name while the Shell is idle.
-  function paneTitle(pane: Pane) {
-    return pane.runningProgram ?? folderName(pane.workingDirectory);
+  function paneTitle (pane: Pane) {
+    return pane.runningProgram ?? folderName(pane.workingDirectory)
   }
 
-  function titleOf(tab: Tab) {
-    return tab.title ?? paneTitle(focusedPane(tab));
+  function titleOf (tab: Tab) {
+    return tab.title ?? paneTitle(focusedPane(tab))
   }
 
-  function clearTitle(tab: Tab): Tab {
-    if (tab.title === undefined) return tab;
-    const { title: _cleared, ...cleared } = tab;
-    return cleared;
+  function clearTitle (tab: Tab): Tab {
+    if (tab.title === undefined) return tab
+    const { title: _cleared, ...cleared } = tab
+    return cleared
   }
 
-  function sessionResults(): PaletteResult[] {
+  function sessionResults (): PaletteResult[] {
     return sessionsInCycleOrder().map((session) => ({
-      type: "session",
+      type: 'session',
       sessionId: session.id,
       label: labelOf(session),
-      closed: session.status === "closed",
-    }));
+      closed: session.status === 'closed',
+    }))
   }
 
-  function openSessionsInCycleOrder() {
-    return sessionsInCycleOrder().filter((session) => session.status === "open");
+  function openSessionsInCycleOrder () {
+    return sessionsInCycleOrder().filter((session) => session.status === 'open')
   }
 
-  function tabResults(): PaletteResult[] {
+  function tabResults (): PaletteResult[] {
     return openSessionsInCycleOrder().flatMap((session) =>
       session.tabs.map((tab) => ({
-        type: "tab" as const,
+        type: 'tab' as const,
         tabId: tab.id,
         label: titleOf(tab),
         sessionLabel: labelOf(session),
-      })),
-    );
+      }))
+    )
   }
 
-  function paneResults(): PaletteResult[] {
+  function paneResults (): PaletteResult[] {
     return openSessionsInCycleOrder().flatMap((session) =>
       session.tabs.flatMap((tab) =>
         tab.panes.map((pane) => ({
-          type: "pane" as const,
+          type: 'pane' as const,
           paneId: pane.id,
           label: paneTitle(pane),
           workingDirectory: displayDirectory(pane.workingDirectory),
           sessionLabel: labelOf(session),
-        })),
-      ),
-    );
+        }))
+      )
+    )
   }
 
   // The results each prefix narrows the Command Palette to.
   const paletteScopes: Record<string, () => PaletteResult[]> = {
-    "ss ": sessionResults,
-    "tt ": tabResults,
-    "pp ": paneResults,
-  };
-
-  // The results a query's prefix narrows to, in the order they're offered, and the rest of the query to search them by.
-  function parsePaletteQuery(query: string) {
-    const prefix = Object.keys(paletteScopes).find((candidate) => query.startsWith(candidate));
-    if (prefix) return { results: paletteScopes[prefix](), search: query.slice(prefix.length) };
-    return { results: [...sessionResults(), ...tabResults(), ...paneResults(), ...actionResults()], search: query };
+    'ss ': sessionResults,
+    'tt ': tabResults,
+    'pp ': paneResults,
   }
 
-  function reopenSession(sessionId: SessionId) {
-    if (findSession(sessionId)?.status !== "closed") return;
+  // The results a query's prefix narrows to, in the order they're offered, and the rest of the query to search them by.
+  function parsePaletteQuery (query: string) {
+    const prefix = Object.keys(paletteScopes).find((candidate) => query.startsWith(candidate))
+    if (prefix) return { results: paletteScopes[prefix](), search: query.slice(prefix.length) }
+    return { results: [...sessionResults(), ...tabResults(), ...paneResults(), ...actionResults()], search: query }
+  }
+
+  function reopenSession (sessionId: SessionId) {
+    if (findSession(sessionId)?.status !== 'closed') return
     updateSession(sessionId, (session) => {
-      if (session.tabs.length > 0) return { ...restartShells(session), status: "open" };
-      const tab = openTab(session.rootDirectory ?? homeDirectory);
-      return { ...session, status: "open", tabs: [tab], focusedTabId: tab.id };
-    });
-    makeCurrent(sessionId);
+      if (session.tabs.length > 0) return { ...restartShells(session), status: 'open' }
+      const tab = openTab(session.rootDirectory ?? homeDirectory)
+      return { ...session, status: 'open', tabs: [tab], focusedTabId: tab.id }
+    })
+    makeCurrent(sessionId)
   }
 
   // Makes the Session the Current Session, reopening it first when it's closed.
-  function jumpToSession(sessionId: SessionId) {
-    const session = findSession(sessionId);
-    if (session?.status === "closed") reopenSession(sessionId);
-    else if (session) makeCurrent(sessionId);
+  function jumpToSession (sessionId: SessionId) {
+    const session = findSession(sessionId)
+    if (session?.status === 'closed') reopenSession(sessionId)
+    else if (session) makeCurrent(sessionId)
   }
 
   // Fades the app in with the Current Session visible; while shown, making it current has already swapped it in.
-  function showAppIfHidden() {
-    if (appShown) return;
-    appShown = true;
-    emit({ type: "showApp", sessionId: state.currentSessionId! });
+  function showAppIfHidden () {
+    if (appShown) return
+    appShown = true
+    emit({ type: 'showApp', sessionId: state.currentSessionId! })
   }
 
   // Makes the Tab's Session, when open, the Current Session with the Tab focused.
-  function jumpToTab(tabId: TabId) {
-    const session = state.sessions.find((candidate) => candidate.tabs.some((tab) => tab.id === tabId));
-    if (session?.status !== "open") return;
+  function jumpToTab (tabId: TabId) {
+    const session = state.sessions.find((candidate) => candidate.tabs.some((tab) => tab.id === tabId))
+    if (session?.status !== 'open') return
     updateSession(session.id, (session) =>
-      session.focusedTabId === tabId ? session : { ...session, focusedTabId: tabId },
-    );
-    makeCurrent(session.id);
+      session.focusedTabId === tabId ? session : { ...session, focusedTabId: tabId }
+    )
+    makeCurrent(session.id)
   }
 
   // Makes the Pane's Session, when open, the Current Session with the Pane and its Tab focused.
-  function jumpToPane(paneId: PaneId) {
-    const session = findSessionWithPane(paneId);
-    if (session?.status !== "open") return;
-    const tab = session.tabs.find((candidate) => hasPane(candidate, paneId))!;
+  function jumpToPane (paneId: PaneId) {
+    const session = findSessionWithPane(paneId)
+    if (session?.status !== 'open') return
+    const tab = session.tabs.find((candidate) => hasPane(candidate, paneId))!
     updateSession(session.id, (session) => ({
       ...session,
       tabs: session.tabs.map((candidate) => (candidate === tab ? withFocusedPane(tab, paneId) : candidate)),
-    }));
-    jumpToTab(tab.id);
+    }))
+    jumpToTab(tab.id)
   }
 
   // A result's label and, for a Tab or Pane, what places it: the Pane's working directory and the Session's label.
-  function searchedText(result: PaletteResult) {
-    if (result.type === "tab") return `${result.label} ${result.sessionLabel}`;
-    if (result.type === "pane") return `${result.label} ${result.workingDirectory} ${result.sessionLabel}`;
-    return result.label;
+  function searchedText (result: PaletteResult) {
+    if (result.type === 'tab') return `${result.label} ${result.sessionLabel}`
+    if (result.type === 'pane') return `${result.label} ${result.workingDirectory} ${result.sessionLabel}`
+    return result.label
   }
 
   // The results that match the search, best first, keeping their order on ties.
-  function searchResults(results: PaletteResult[], search: string) {
+  function searchResults (results: PaletteResult[], search: string) {
     return results
       .map((result) => ({ result, score: fuzzyScore(search, searchedText(result)) }))
       .filter((scored) => scored.score !== undefined)
       .toSorted((a, b) => b.score! - a.score!)
-      .map(({ result }) => result);
+      .map(({ result }) => result)
   }
 
-  function actionResults(): PaletteResult[] {
+  function actionResults (): PaletteResult[] {
     return Object.entries(paletteActionLabels).map(([action, label]) => ({
-      type: "action",
+      type: 'action',
       action: action as PaletteAction,
       label,
-    }));
+    }))
   }
 
   // A stopped Shell can still report on its way out, and a Closed Session keeps its Panes as they were when it closed.
   shellHost.subscribe((event) => {
-    if (findSessionWithPane(event.paneId)?.status !== "open") return;
-    if (event.type === "shellExited") removePaneFromSession(event.paneId);
-    if (event.type === "workingDirectoryChanged") {
-      updatePane(event.paneId, (pane) => ({ ...pane, workingDirectory: event.workingDirectory }));
+    if (findSessionWithPane(event.paneId)?.status !== 'open') return
+    if (event.type === 'shellExited') removePaneFromSession(event.paneId)
+    if (event.type === 'workingDirectoryChanged') {
+      updatePane(event.paneId, (pane) => ({ ...pane, workingDirectory: event.workingDirectory }))
     }
-    if (event.type === "runningProgramChanged") {
-      updatePane(event.paneId, (pane) => ({ ...pane, runningProgram: event.runningProgram }));
+    if (event.type === 'runningProgramChanged') {
+      updatePane(event.paneId, (pane) => ({ ...pane, runningProgram: event.runningProgram }))
     }
-  });
+  })
 
   // The app actions on the Current Session, by the core's own commands.
   const sessionActions: Record<
-    Exclude<PaletteAction, "newSession" | "changeTheme" | "changeMenuBarIcon" | "openSettings" | "quit">,
+    Exclude<PaletteAction, 'newSession' | 'changeTheme' | 'changeMenuBarIcon' | 'openSettings' | 'quit'>,
     (sessionId: SessionId) => void
   > = {
     renameSession: (sessionId) => {
-      const tab = focusedTabOf(sessionId);
-      if (!tab) return;
-      const suggestion = uniqueName(folderName(focusedPane(tab).workingDirectory), sessionId);
-      emit({ type: "askSessionName", sessionId, suggestion });
+      const tab = focusedTabOf(sessionId)
+      if (!tab) return
+      const suggestion = uniqueName(folderName(focusedPane(tab).workingDirectory), sessionId)
+      emit({ type: 'askSessionName', sessionId, suggestion })
     },
     setSessionRoot: (sessionId) => core.setSessionRoot(sessionId),
     clearSessionRoot: (sessionId) => core.clearSessionRoot(sessionId),
@@ -844,15 +844,15 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     deleteSession: (sessionId) => core.deleteRequested(sessionId),
     newTab: (sessionId) => core.newTab(sessionId),
     renameTab: (sessionId) => {
-      const tab = focusedTabOf(sessionId);
-      if (tab) emit({ type: "askTabTitle", sessionId, tabId: tab.id, suggestion: titleOf(tab) });
+      const tab = focusedTabOf(sessionId)
+      if (tab) emit({ type: 'askTabTitle', sessionId, tabId: tab.id, suggestion: titleOf(tab) })
     },
     clearTabTitle: (sessionId) => {
-      const tab = focusedTabOf(sessionId);
-      if (tab) core.clearTabTitle(tab.id);
+      const tab = focusedTabOf(sessionId)
+      if (tab) core.clearTabTitle(tab.id)
     },
-    splitPaneVertically: (sessionId) => core.splitPane(sessionId, "vertical"),
-    splitPaneHorizontally: (sessionId) => core.splitPane(sessionId, "horizontal"),
+    splitPaneVertically: (sessionId) => core.splitPane(sessionId, 'vertical'),
+    splitPaneHorizontally: (sessionId) => core.splitPane(sessionId, 'horizontal'),
     closePane: (sessionId) => core.closePane(sessionId),
     nextSession: () => core.focusNextSession(),
     previousSession: () => core.focusPreviousSession(),
@@ -860,90 +860,90 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     previousTab: (sessionId) => core.focusPreviousTab(sessionId),
     nextPane: (sessionId) => core.focusNextPane(sessionId),
     previousPane: (sessionId) => core.focusPreviousPane(sessionId),
-    focusPaneLeft: (sessionId) => core.focusPaneInDirection(sessionId, "left"),
-    focusPaneRight: (sessionId) => core.focusPaneInDirection(sessionId, "right"),
-    focusPaneUp: (sessionId) => core.focusPaneInDirection(sessionId, "up"),
-    focusPaneDown: (sessionId) => core.focusPaneInDirection(sessionId, "down"),
+    focusPaneLeft: (sessionId) => core.focusPaneInDirection(sessionId, 'left'),
+    focusPaneRight: (sessionId) => core.focusPaneInDirection(sessionId, 'right'),
+    focusPaneUp: (sessionId) => core.focusPaneInDirection(sessionId, 'up'),
+    focusPaneDown: (sessionId) => core.focusPaneInDirection(sessionId, 'down'),
     findInPane: (sessionId) => {
-      const tab = focusedTabOf(sessionId);
-      if (tab) emit({ type: "findInPane", sessionId, paneId: tab.focusedPaneId });
+      const tab = focusedTabOf(sessionId)
+      if (tab) emit({ type: 'findInPane', sessionId, paneId: tab.focusedPaneId })
     },
     // The saved scrollback goes too, so Restore doesn't bring back what was cleared before the terminal reports again.
     clearScrollback: (sessionId) => {
-      const tab = focusedTabOf(sessionId);
-      if (!tab) return;
-      const { [tab.focusedPaneId]: _cleared, ...kept } = scrollback;
-      scrollback = kept;
-      save();
-      emit({ type: "clearScrollback", sessionId, paneId: tab.focusedPaneId });
+      const tab = focusedTabOf(sessionId)
+      if (!tab) return
+      const { [tab.focusedPaneId]: _cleared, ...kept } = scrollback
+      scrollback = kept
+      save()
+      emit({ type: 'clearScrollback', sessionId, paneId: tab.focusedPaneId })
     },
-  };
+  }
 
   // Without a Session, only the actions that don't act on one run.
-  function runAction(action: BoundAction, sessionId: SessionId | undefined) {
-    if (action === "newSession") return core.newSession();
-    if (action === "changeTheme" || action === "changeMenuBarIcon") {
-      const type = action === "changeTheme" ? "pickTheme" : "pickMenuBarIcon";
-      return emit(sessionId === undefined ? { type } : { type, sessionId });
+  function runAction (action: BoundAction, sessionId: SessionId | undefined) {
+    if (action === 'newSession') return core.newSession()
+    if (action === 'changeTheme' || action === 'changeMenuBarIcon') {
+      const type = action === 'changeTheme' ? 'pickTheme' : 'pickMenuBarIcon'
+      return emit(sessionId === undefined ? { type } : { type, sessionId })
     }
-    if (action === "openSettings") return emit({ type: "openSettings" });
-    if (action === "quit") return core.quitRequested();
-    if (sessionId === undefined) return;
-    if (action === "openCommandPalette") return emit({ type: "openPalette", sessionId });
-    if (action === "copy" || action === "paste") return emit({ type: action, sessionId });
-    if (action.startsWith("focusTab")) return core.focusTab(sessionId, Number(action.slice("focusTab".length)) - 1);
-    sessionActions[action as keyof typeof sessionActions](sessionId);
+    if (action === 'openSettings') return emit({ type: 'openSettings' })
+    if (action === 'quit') return core.quitRequested()
+    if (sessionId === undefined) return
+    if (action === 'openCommandPalette') return emit({ type: 'openPalette', sessionId })
+    if (action === 'copy' || action === 'paste') return emit({ type: action, sessionId })
+    if (action.startsWith('focusTab')) return core.focusTab(sessionId, Number(action.slice('focusTab'.length)) - 1)
+    sessionActions[action as keyof typeof sessionActions](sessionId)
   }
 
   const core: Core = {
     start: command(({ hidden }: { hidden: boolean }) => {
-      appShown = !hidden;
-      const saved = stateStore.load();
-      if (saved) restore(saved);
+      appShown = !hidden
+      const saved = stateStore.load()
+      if (saved) restore(saved)
       // Started shown, the app needs a Session to show. Started hidden, it leaves that to the Hotkey.
-      if (appShown && state.currentSessionId === undefined) addSession();
+      if (appShown && state.currentSessionId === undefined) addSession()
     }),
     state: () => state,
     hotkeyPressed: command(() => {
-      appShown = !appShown;
-      if (!appShown) return emit({ type: "hideApp" });
+      appShown = !appShown
+      if (!appShown) return emit({ type: 'hideApp' })
       if (state.currentSessionId === undefined) {
-        if (settings.hotkeyWithNoOpenSessions === "palette") return emit({ type: "showPalette" });
-        addSession();
+        if (settings.hotkeyWithNoOpenSessions === 'palette') return emit({ type: 'showPalette' })
+        addSession()
       }
-      emit({ type: "showApp", sessionId: state.currentSessionId! });
+      emit({ type: 'showApp', sessionId: state.currentSessionId! })
     }),
     paletteDismissed: command(() => {
-      previewedTheme = undefined;
-      previewedMenuBarIcon = undefined;
-      applyThemeInEffect();
-      applyMenuBarIconInEffect();
-      hideWithNoCurrentSession();
+      previewedTheme = undefined
+      previewedMenuBarIcon = undefined
+      applyThemeInEffect()
+      applyMenuBarIconInEffect()
+      hideWithNoCurrentSession()
     }),
     focusLost: command(() => {
-      if (!appShown) return;
-      appShown = false;
-      emit({ type: "hideApp" });
+      if (!appShown) return
+      appShown = false
+      emit({ type: 'hideApp' })
     }),
-    quitRequested: command(() => emit({ type: "confirmQuit" })),
+    quitRequested: command(() => emit({ type: 'confirmQuit' })),
     quitCancelled: command(hideWithNoCurrentSession),
     quitConfirmed: command(() => {
-      stateStore.flush();
-      emit({ type: "quit" });
+      stateStore.flush()
+      emit({ type: 'quit' })
     }),
     configChanged: command((config) => {
-      const parsed = parseConfig(config, themeNames());
-      configReadable = parsed !== undefined;
-      if (!parsed) return emit({ type: "configUnreadable" });
-      configText = config;
-      takeSettings(parsed);
-      if (parsed.rejected.length > 0) emit({ type: "settingsRejected", settings: parsed.rejected });
-      applyThemeInEffect();
-      applyMenuBarIconInEffect();
+      const parsed = parseConfig(config, themeNames())
+      configReadable = parsed !== undefined
+      if (!parsed) return emit({ type: 'configUnreadable' })
+      configText = config
+      takeSettings(parsed)
+      if (parsed.rejected.length > 0) emit({ type: 'settingsRejected', settings: parsed.rejected })
+      applyThemeInEffect()
+      applyMenuBarIconInEffect()
     }),
     configUnreadable: command(() => {
-      configReadable = false;
-      emit({ type: "configUnreadable" });
+      configReadable = false
+      emit({ type: 'configUnreadable' })
     }),
     settings: () => settings,
     theme: () => appliedTheme,
@@ -952,237 +952,237 @@ export function createCore({ shellHost, stateStore, clock, homeDirectory }: Core
     // named it takes effect, and one that goes takes the Default Theme's place. While the config file can't be read,
     // the settings stay as they are, a Theme chosen meanwhile included.
     themeFilesChanged: command((files) => {
-      const loaded = loadThemes(files);
-      themes = loaded.themes;
-      if (loaded.rejected.length > 0) emit({ type: "themesRejected", rejected: loaded.rejected });
+      const loaded = loadThemes(files)
+      themes = loaded.themes
+      if (loaded.rejected.length > 0) emit({ type: 'themesRejected', rejected: loaded.rejected })
       if (configReadable) {
-        const parsed = parseConfig(configText, themeNames())!;
-        if (parsed.rejected.includes("theme") && !themeSettingRejected) {
-          emit({ type: "settingsRejected", settings: ["theme"] });
+        const parsed = parseConfig(configText, themeNames())!
+        if (parsed.rejected.includes('theme') && !themeSettingRejected) {
+          emit({ type: 'settingsRejected', settings: ['theme'] })
         }
-        takeSettings(parsed);
+        takeSettings(parsed)
       }
-      applyThemeInEffect();
+      applyThemeInEffect()
     }),
     newSession: command(() => {
-      addSession();
-      emit({ type: "showSession", sessionId: state.currentSessionId! });
+      addSession()
+      emit({ type: 'showSession', sessionId: state.currentSessionId! })
     }),
     reopenSession: command(reopenSession),
     menuBarSessionChosen: command((sessionId) => {
-      if (!findSession(sessionId)) return;
-      jumpToSession(sessionId);
-      showAppIfHidden();
+      if (!findSession(sessionId)) return
+      jumpToSession(sessionId)
+      showAppIfHidden()
     }),
     menuBarActionChosen: command((action) => {
-      if (action !== "newSession") return runAction(action, undefined);
-      addSession();
-      if (appShown) return emit({ type: "showSession", sessionId: state.currentSessionId! });
-      appShown = true;
-      emit({ type: "showApp", sessionId: state.currentSessionId! });
+      if (action !== 'newSession') return runAction(action, undefined)
+      addSession()
+      if (appShown) return emit({ type: 'showSession', sessionId: state.currentSessionId! })
+      appShown = true
+      emit({ type: 'showApp', sessionId: state.currentSessionId! })
     }),
     renameSession: command((sessionId, name) => {
-      const trimmed = name.trim();
-      if (trimmed === "") return;
+      const trimmed = name.trim()
+      if (trimmed === '') return
       updateSession(sessionId, ({ labelNumber: _freed, ...session }) => ({
         ...session,
         name: uniqueName(trimmed, sessionId),
-      }));
+      }))
     }),
     setSessionRoot: command((sessionId) => {
       updateSession(sessionId, (session) => {
-        const tab = focusedTab(session);
-        if (!tab) return session;
-        const rootDirectory = focusedPane(tab).workingDirectory;
-        return rootDirectory === session.rootDirectory ? session : { ...session, rootDirectory };
-      });
+        const tab = focusedTab(session)
+        if (!tab) return session
+        const rootDirectory = focusedPane(tab).workingDirectory
+        return rootDirectory === session.rootDirectory ? session : { ...session, rootDirectory }
+      })
     }),
     clearSessionRoot: command((sessionId) => {
       updateSession(sessionId, (session) => {
-        if (session.rootDirectory === undefined) return session;
-        const { rootDirectory: _cleared, ...cleared } = session;
-        return cleared;
-      });
+        if (session.rootDirectory === undefined) return session
+        const { rootDirectory: _cleared, ...cleared } = session
+        return cleared
+      })
     }),
     closeSession: command((sessionId) => {
-      const session = findSession(sessionId);
-      if (session?.status !== "open") return;
-      updateSession(sessionId, (session) => ({ ...session, status: "closed" }));
-      for (const paneId of paneIdsOf(session)) shellHost.stop(paneId);
-      closeWindow(sessionId);
+      const session = findSession(sessionId)
+      if (session?.status !== 'open') return
+      updateSession(sessionId, (session) => ({ ...session, status: 'closed' }))
+      for (const paneId of paneIdsOf(session)) shellHost.stop(paneId)
+      closeWindow(sessionId)
     }),
     deleteRequested: command((sessionId) => {
-      if (findSession(sessionId)) emit({ type: "confirmDelete", sessionId });
+      if (findSession(sessionId)) emit({ type: 'confirmDelete', sessionId })
     }),
     deleteConfirmed: command((sessionId) => {
-      const session = findSession(sessionId);
-      if (!session) return;
-      const paneIds = paneIdsOf(session);
-      scrollback = Object.fromEntries(Object.entries(scrollback).filter(([paneId]) => !paneIds.includes(paneId)));
+      const session = findSession(sessionId)
+      if (!session) return
+      const paneIds = paneIdsOf(session)
+      scrollback = Object.fromEntries(Object.entries(scrollback).filter(([paneId]) => !paneIds.includes(paneId)))
       // The Current Session goes with it, so no state names a Session that no longer exists.
-      const wasCurrent = sessionId === state.currentSessionId;
+      const wasCurrent = sessionId === state.currentSessionId
       setState({
         sessions: state.sessions.filter((candidate) => candidate !== session),
         currentSessionId: wasCurrent ? undefined : state.currentSessionId,
-      });
-      if (session.status !== "open") return;
-      for (const paneId of paneIds) shellHost.stop(paneId);
-      emit({ type: "closeWindow", sessionId });
-      if (wasCurrent) replaceCurrentSession();
+      })
+      if (session.status !== 'open') return
+      for (const paneId of paneIds) shellHost.stop(paneId)
+      emit({ type: 'closeWindow', sessionId })
+      if (wasCurrent) replaceCurrentSession()
     }),
     focusPreviousSession: () => focusSessionBy(-1),
     focusNextSession: () => focusSessionBy(1),
     newTab: command((sessionId) => {
-      const session = findSession(sessionId);
-      const current = session && focusedTab(session);
-      if (!current) return;
-      const tab = openTab(session.rootDirectory ?? focusedPane(current).workingDirectory);
-      updateSession(sessionId, (session) => ({ ...session, tabs: [...session.tabs, tab], focusedTabId: tab.id }));
+      const session = findSession(sessionId)
+      const current = session && focusedTab(session)
+      if (!current) return
+      const tab = openTab(session.rootDirectory ?? focusedPane(current).workingDirectory)
+      updateSession(sessionId, (session) => ({ ...session, tabs: [...session.tabs, tab], focusedTabId: tab.id }))
     }),
     splitPane: command((sessionId, direction) => {
       updateFocusedTab(sessionId, (tab) => {
-        const current = focusedPane(tab);
-        const pane = openPane(current.workingDirectory);
+        const current = focusedPane(tab)
+        const pane = openPane(current.workingDirectory)
         return {
           ...tab,
           panes: tab.panes.flatMap((candidate) => (candidate === current ? [current, pane] : [candidate])),
           layout: replacePane(tab.layout, current.id, {
-            type: "split",
+            type: 'split',
             direction,
-            first: { type: "pane", paneId: current.id },
-            second: { type: "pane", paneId: pane.id },
+            first: { type: 'pane', paneId: current.id },
+            second: { type: 'pane', paneId: pane.id },
           }),
           focusedPaneId: pane.id,
-        };
-      });
+        }
+      })
     }),
     closePane: command((sessionId) => {
-      const tab = focusedTabOf(sessionId);
-      if (!tab) return;
-      removePaneFromSession(tab.focusedPaneId);
-      shellHost.stop(tab.focusedPaneId);
+      const tab = focusedTabOf(sessionId)
+      if (!tab) return
+      removePaneFromSession(tab.focusedPaneId)
+      shellHost.stop(tab.focusedPaneId)
     }),
     focusPreviousPane: command((sessionId) => focusPaneBy(sessionId, -1)),
     focusNextPane: command((sessionId) => focusPaneBy(sessionId, 1)),
     focusPaneInDirection: command((sessionId, direction) => {
       updateFocusedTab(sessionId, (tab) => {
-        const neighbour = neighbourOf(tab.layout, tab.focusedPaneId, direction);
-        return neighbour ? withFocusedPane(tab, neighbour) : tab;
-      });
+        const neighbour = neighbourOf(tab.layout, tab.focusedPaneId, direction)
+        return neighbour ? withFocusedPane(tab, neighbour) : tab
+      })
     }),
     // Not a command itself, so that cycling Sessions by shortcut keeps its run of presses going.
-    keyPressed(sessionId, keyPress) {
+    keyPressed (sessionId, keyPress) {
       const bound = Object.entries(settings.keyBindings).find(
-        ([, shortcut]) => shortcut && matchesShortcut(keyPress, shortcut),
-      );
-      if (!bound) return false;
-      runAction(bound[0] as BoundAction, sessionId);
-      return true;
+        ([, shortcut]) => shortcut && matchesShortcut(keyPress, shortcut)
+      )
+      if (!bound) return false
+      runAction(bound[0] as BoundAction, sessionId)
+      return true
     },
     focusPane: command((paneId) => {
-      const session = findSessionWithPane(paneId);
-      if (!session) return;
+      const session = findSessionWithPane(paneId)
+      if (!session) return
       updateSession(session.id, (session) => ({
         ...session,
         tabs: session.tabs.map((tab) => (hasPane(tab, paneId) ? withFocusedPane(tab, paneId) : tab)),
-      }));
+      }))
     }),
     focusTab: command((sessionId, position) => {
       updateSession(sessionId, (session) => {
-        const tab = session.tabs[position];
-        return tab && tab.id !== session.focusedTabId ? { ...session, focusedTabId: tab.id } : session;
-      });
+        const tab = session.tabs[position]
+        return tab && tab.id !== session.focusedTabId ? { ...session, focusedTabId: tab.id } : session
+      })
     }),
     focusPreviousTab: command((sessionId) => focusTabBy(sessionId, -1)),
     focusNextTab: command((sessionId) => focusTabBy(sessionId, 1)),
     renameTab: command((tabId, title) => {
-      const trimmed = title.trim();
+      const trimmed = title.trim()
       updateTab(tabId, (tab) => {
-        if (trimmed === "") return clearTitle(tab);
-        return trimmed === tab.title ? tab : { ...tab, title: trimmed };
-      });
+        if (trimmed === '') return clearTitle(tab)
+        return trimmed === tab.title ? tab : { ...tab, title: trimmed }
+      })
     }),
     clearTabTitle: command((tabId) => updateTab(tabId, clearTitle)),
-    tabTitle(tabId) {
-      const tab = findTab(tabId);
-      return tab && titleOf(tab);
+    tabTitle (tabId) {
+      const tab = findTab(tabId)
+      return tab && titleOf(tab)
     },
-    sessionLabel(sessionId) {
-      const session = findSession(sessionId);
-      return session && labelOf(session);
+    sessionLabel (sessionId) {
+      const session = findSession(sessionId)
+      return session && labelOf(session)
     },
     sessionsInCycleOrder,
-    menuBar() {
-      const sessions = sessionsInCycleOrder();
-      const withStatus = (status: Session["status"]) =>
+    menuBar () {
+      const sessions = sessionsInCycleOrder()
+      const withStatus = (status: Session['status']) =>
         sessions
           .filter((session) => session.status === status)
-          .map((session) => ({ sessionId: session.id, label: labelOf(session) }));
+          .map((session) => ({ sessionId: session.id, label: labelOf(session) }))
       return {
-        open: withStatus("open"),
-        closed: withStatus("closed"),
+        open: withStatus('open'),
+        closed: withStatus('closed'),
         actions: menuBarActions.map((action) => ({ action, label: paletteActionLabels[action] })),
-      };
+      }
     },
-    paletteResults(query) {
-      const { results, search } = parsePaletteQuery(query);
-      return searchResults(results, search);
+    paletteResults (query) {
+      const { results, search } = parsePaletteQuery(query)
+      return searchResults(results, search)
     },
     previewTheme: command((name) => {
-      if (!findTheme(name)) return;
-      previewedTheme = name;
-      applyThemeInEffect();
+      if (!findTheme(name)) return
+      previewedTheme = name
+      applyThemeInEffect()
     }),
-    themeResults(query) {
-      const results = themes.map((theme): PaletteResult => ({ type: "theme", name: theme.name, label: theme.name }));
-      return searchResults(results, query);
+    themeResults (query) {
+      const results = themes.map((theme): PaletteResult => ({ type: 'theme', name: theme.name, label: theme.name }))
+      return searchResults(results, query)
     },
     previewMenuBarIcon: command((icon) => {
-      if (!menuBarIcons.includes(icon)) return;
-      previewedMenuBarIcon = icon;
-      applyMenuBarIconInEffect();
+      if (!menuBarIcons.includes(icon)) return
+      previewedMenuBarIcon = icon
+      applyMenuBarIconInEffect()
     }),
-    menuBarIconResults(query) {
+    menuBarIconResults (query) {
       const results = menuBarIcons.map(
-        (icon): PaletteResult => ({ type: "menuBarIcon", icon, label: menuBarIconLabels[icon] }),
-      );
-      return searchResults(results, query);
+        (icon): PaletteResult => ({ type: 'menuBarIcon', icon, label: menuBarIconLabels[icon] })
+      )
+      return searchResults(results, query)
     },
     // The Command Palette on its own leaves nothing on screen after a choice that shows no Session, except while the
     // quit confirmation waits for an answer or the palette lists the Themes or the menu bar icons.
     choosePaletteResult: command((result) => {
-      if (result.type === "session") jumpToSession(result.sessionId);
-      if (result.type === "tab") jumpToTab(result.tabId);
-      if (result.type === "pane") jumpToPane(result.paneId);
-      if (result.type === "action") runAction(result.action, state.currentSessionId);
-      if (result.type === "theme") chooseTheme(result.name);
-      if (result.type === "menuBarIcon") chooseMenuBarIcon(result.icon);
-      const keepsPaletteBusy = ["quit", "changeTheme", "changeMenuBarIcon"];
-      if (!(result.type === "action" && keepsPaletteBusy.includes(result.action))) {
-        hideWithNoCurrentSession();
+      if (result.type === 'session') jumpToSession(result.sessionId)
+      if (result.type === 'tab') jumpToTab(result.tabId)
+      if (result.type === 'pane') jumpToPane(result.paneId)
+      if (result.type === 'action') runAction(result.action, state.currentSessionId)
+      if (result.type === 'theme') chooseTheme(result.name)
+      if (result.type === 'menuBarIcon') chooseMenuBarIcon(result.icon)
+      const keepsPaletteBusy = ['quit', 'changeTheme', 'changeMenuBarIcon']
+      if (!(result.type === 'action' && keepsPaletteBusy.includes(result.action))) {
+        hideWithNoCurrentSession()
       }
     }),
-    paneRects(tabId) {
-      const tab = findTab(tabId);
-      return tab ? paneRects(tab.layout) : [];
+    paneRects (tabId) {
+      const tab = findTab(tabId)
+      return tab ? paneRects(tab.layout) : []
     },
-    scrollbackChanged(paneId, reported) {
-      if (!findSessionWithPane(paneId)) return;
-      const text = capScrollback(reported, settings.scrollbackLines);
-      scrollback = { ...scrollback, [paneId]: { text, savedAt: clock.now() } };
-      save();
+    scrollbackChanged (paneId, reported) {
+      if (!findSessionWithPane(paneId)) return
+      const text = capScrollback(reported, settings.scrollbackLines)
+      scrollback = { ...scrollback, [paneId]: { text, savedAt: clock.now() } }
+      save()
     },
     scrollback: (paneId) => scrollback[paneId],
-    linkTarget(paneId, text) {
-      const pane = findPane(paneId);
-      return pane && linkTarget(text, pane.workingDirectory, homeDirectory);
+    linkTarget (paneId, text) {
+      const pane = findPane(paneId)
+      return pane && linkTarget(text, pane.workingDirectory, homeDirectory)
     },
-    onEffect(listener) {
-      effectListeners.push(listener);
+    onEffect (listener) {
+      effectListeners.push(listener)
     },
-    onStateChange(listener) {
-      stateListeners.push(listener);
+    onStateChange (listener) {
+      stateListeners.push(listener)
     },
-  };
-  return core;
+  }
+  return core
 }

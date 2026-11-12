@@ -1,8 +1,8 @@
-import type { MenuBarIcon } from "../core/config";
-import type { Effect, PaletteResult } from "../core/core";
-import type { PaneRect } from "../core/layout";
-import type { PaneId, TabId } from "../core/state";
-import type { Theme } from "../core/themes";
+import type { MenuBarIcon } from '../core/config'
+import type { Effect, PaletteResult } from '../core/core'
+import type { PaneRect } from '../core/layout'
+import type { PaneId, TabId } from '../core/state'
+import type { Theme } from '../core/themes'
 
 export interface TerminalSize {
   cols: number;
@@ -21,40 +21,40 @@ export interface TerminalSettings {
 }
 
 // What the Command Palette asks for in place of a search: a Session's name or a Tab's title.
-export type PalettePrompt = Extract<Effect, { type: "askSessionName" | "askTabTitle" }>;
+export type PalettePrompt = Extract<Effect, { type: 'askSessionName' | 'askTabTitle' }>
 
 export const channels = {
-  sessionView: "session:view",
-  terminalSettings: "settings:terminal",
-  focusPane: "pane:focus",
-  attachPane: "pane:attach",
-  writeToPane: "pane:write",
-  resizePane: "pane:resize",
-  paneData: "pane:data",
-  reportScrollback: "pane:scrollback",
-  flushScrollback: "scrollback:flush",
-  scrollbackFlushed: "scrollback:flushed",
-  openPalette: "palette:open",
-  dismissPalette: "palette:dismiss",
-  searchPalette: "palette:search",
-  choosePaletteResult: "palette:choose",
-  promptPalette: "palette:prompt",
-  answerPalettePrompt: "palette:answer",
-  applyTheme: "theme:apply",
-  pickTheme: "theme:pick",
-  searchThemes: "theme:search",
-  previewTheme: "theme:preview",
-  pickMenuBarIcon: "menuBarIcon:pick",
-  searchMenuBarIcons: "menuBarIcon:search",
-  previewMenuBarIcon: "menuBarIcon:preview",
-  findInPane: "pane:find",
-  clearScrollback: "pane:clear",
-  copy: "clipboard:copy",
-  copyText: "clipboard:write",
-  paste: "clipboard:paste",
-  openableLinks: "link:openable",
-  openLink: "link:open",
-} as const;
+  sessionView: 'session:view',
+  terminalSettings: 'settings:terminal',
+  focusPane: 'pane:focus',
+  attachPane: 'pane:attach',
+  writeToPane: 'pane:write',
+  resizePane: 'pane:resize',
+  paneData: 'pane:data',
+  reportScrollback: 'pane:scrollback',
+  flushScrollback: 'scrollback:flush',
+  scrollbackFlushed: 'scrollback:flushed',
+  openPalette: 'palette:open',
+  dismissPalette: 'palette:dismiss',
+  searchPalette: 'palette:search',
+  choosePaletteResult: 'palette:choose',
+  promptPalette: 'palette:prompt',
+  answerPalettePrompt: 'palette:answer',
+  applyTheme: 'theme:apply',
+  pickTheme: 'theme:pick',
+  searchThemes: 'theme:search',
+  previewTheme: 'theme:preview',
+  pickMenuBarIcon: 'menuBarIcon:pick',
+  searchMenuBarIcons: 'menuBarIcon:search',
+  previewMenuBarIcon: 'menuBarIcon:preview',
+  findInPane: 'pane:find',
+  clearScrollback: 'pane:clear',
+  copy: 'clipboard:copy',
+  copyText: 'clipboard:write',
+  paste: 'clipboard:paste',
+  openableLinks: 'link:openable',
+  openLink: 'link:open',
+} as const
 
 // What the preload script exposes to the renderer as `window.blind`.
 export interface BlindApi {

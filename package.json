@@ -15,16 +15,25 @@
     "install-app": "electron-vite build && iconutil -c icns build/icon.iconset -o build/icon.icns && electron-builder --mac && rm -rf /Applications/Blind.app && ditto dist/mac*/Blind.app /Applications/Blind.app",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper && node node_modules/electron/install.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.core.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "eslint",
+    "lint:fix": "eslint --fix"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "electron": "^45.2.2",
     "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
+    "eslint": "^10.14.0",
+    "neostandard": "^0.14.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.1.0"
+  },
+  "overrides": {
+    "neostandard": {
+      "typescript": "~6.0.3"
+    }
   },
   "build": {
     "appId": "com.diogoleitao.blind",

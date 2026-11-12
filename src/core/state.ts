@@ -1,6 +1,6 @@
-export type SessionId = string;
-export type TabId = string;
-export type PaneId = string;
+export type SessionId = string
+export type TabId = string
+export type PaneId = string
 
 export interface CoreState {
   sessions: Session[];
@@ -16,7 +16,7 @@ export interface Session {
   labelNumber?: number;
   // Absent until set explicitly.
   rootDirectory?: string;
-  status: "open" | "closed";
+  status: 'open' | 'closed';
   createdAt: number;
   lastUsedAt: number;
   tabs: Tab[];
@@ -35,12 +35,12 @@ export interface Tab {
 }
 
 // A vertical split puts its halves side by side with a vertical divider; a horizontal one stacks them.
-export type SplitDirection = "vertical" | "horizontal";
+export type SplitDirection = 'vertical' | 'horizontal'
 
 // A Tab's Panes as a tree of splits, each dividing its space in half.
 export type Layout =
-  | { type: "pane"; paneId: PaneId }
-  | { type: "split"; direction: SplitDirection; first: Layout; second: Layout };
+  | { type: 'pane'; paneId: PaneId }
+  | { type: 'split'; direction: SplitDirection; first: Layout; second: Layout }
 
 export interface Pane {
   id: PaneId;
@@ -50,14 +50,14 @@ export interface Pane {
 }
 
 // Every Pane, Session by Session and Tab by Tab.
-export function panesIn(state: CoreState): Pane[] {
-  return state.sessions.flatMap((session) => session.tabs.flatMap((tab) => tab.panes));
+export function panesIn (state: CoreState): Pane[] {
+  return state.sessions.flatMap((session) => session.tabs.flatMap((tab) => tab.panes))
 }
 
 // Every Session, Tab and Pane id.
-export function idsIn(state: CoreState): string[] {
+export function idsIn (state: CoreState): string[] {
   return state.sessions.flatMap((session) => [
     session.id,
     ...session.tabs.flatMap((tab) => [tab.id, ...tab.panes.map((pane) => pane.id)]),
-  ]);
+  ])
 }

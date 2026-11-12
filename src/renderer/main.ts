@@ -1,21 +1,21 @@
-import { FitAddon } from "@xterm/addon-fit";
-import { type ISearchOptions, SearchAddon } from "@xterm/addon-search";
-import { SerializeAddon } from "@xterm/addon-serialize";
+import { FitAddon } from '@xterm/addon-fit'
+import { type ISearchOptions, SearchAddon } from '@xterm/addon-search'
+import { SerializeAddon } from '@xterm/addon-serialize'
 import {
   type IBufferCellPosition,
   type ILink,
   type ILinkProvider,
   type ITerminalOptions,
   Terminal,
-} from "@xterm/xterm";
-import "@xterm/xterm/css/xterm.css";
-import { defaultSettings } from "../core/config";
-import type { PaletteResult } from "../core/core";
-import type { PaneRect } from "../core/layout";
-import { findLinks } from "../core/links";
-import type { PaneId } from "../core/state";
-import { type Colour, defaultTheme, type Theme } from "../core/themes";
-import type { BlindApi, PalettePrompt, SessionView, TerminalSettings } from "../shared/ipc";
+} from '@xterm/xterm'
+import '@xterm/xterm/css/xterm.css'
+import { defaultSettings } from '../core/config'
+import type { PaletteResult } from '../core/core'
+import type { PaneRect } from '../core/layout'
+import { findLinks } from '../core/links'
+import type { PaneId } from '../core/state'
+import { type Colour, defaultTheme, type Theme } from '../core/themes'
+import type { BlindApi, PalettePrompt, SessionView, TerminalSettings } from '../shared/ipc'
 
 declare global {
   interface Window {
@@ -24,7 +24,7 @@ declare global {
 }
 
 // How long after output starts a Pane's scrollback is reported, so a burst of output is reported once.
-const reportDelayMilliseconds = 1_000;
+const reportDelayMilliseconds = 1_000
 
 interface PaneTerminal {
   element: HTMLDivElement;
@@ -36,30 +36,30 @@ interface PaneTerminal {
   reportTimer?: ReturnType<typeof setTimeout>;
 }
 
-const { blind } = window;
+const { blind } = window
 // The page of the Command Palette on its own, which the app shows with no Open Sessions, rather than a Session's.
-const standalone = location.hash === "#palette";
-const panesElement = document.getElementById("panes")!;
-const tabBar = document.getElementById("tab-bar")!;
-const terminals = new Map<PaneId, PaneTerminal>();
-let focusedPaneId: PaneId | undefined;
+const standalone = location.hash === '#palette'
+const panesElement = document.getElementById('panes')!
+const tabBar = document.getElementById('tab-bar')!
+const terminals = new Map<PaneId, PaneTerminal>()
+let focusedPaneId: PaneId | undefined
 // Both replaced by the main process's before any terminal opens.
-let terminalSettings: TerminalSettings = { scrollbackLines: defaultSettings.scrollbackLines };
-let theme: Theme = defaultTheme;
+let terminalSettings: TerminalSettings = { scrollbackLines: defaultSettings.scrollbackLines }
+let theme: Theme = defaultTheme
 
 // The opacity of the window's background over its blur, as iTerm2's 25% transparency.
-const windowOpacity = 0.75;
+const windowOpacity = 0.75
 
 // The colour with its alpha scaled by `factor`.
-function withOpacity(colour: Colour, factor: number) {
-  const alpha = colour.length === 9 ? Number.parseInt(colour.slice(7), 16) : 255;
-  return `${colour.slice(0, 7)}${Math.round(alpha * factor).toString(16).padStart(2, "0")}`;
+function withOpacity (colour: Colour, factor: number) {
+  const alpha = colour.length === 9 ? Number.parseInt(colour.slice(7), 16) : 255
+  return `${colour.slice(0, 7)}${Math.round(alpha * factor).toString(16).padStart(2, '0')}`
 }
 
 // The terminal's options for the Theme. The terminal's background stays clear, since the page's background shows
 // through, keeping the window's transparency and blur.
-function terminalOptions({ font, cursor, terminal }: Theme): ITerminalOptions {
-  const { cursorText, selection, selectionText, ...colours } = terminal;
+function terminalOptions ({ font, cursor, terminal }: Theme): ITerminalOptions {
+  const { cursorText, selection, selectionText, ...colours } = terminal
   return {
     fontFamily: `${JSON.stringify(font.family)}, monospace`,
     fontSize: font.size,
@@ -67,56 +67,56 @@ function terminalOptions({ font, cursor, terminal }: Theme): ITerminalOptions {
     cursorBlink: cursor.blink,
     theme: {
       ...colours,
-      background: "#00000000",
+      background: '#00000000',
       cursorAccent: cursorText,
       selectionBackground: selection,
       selectionForeground: selectionText,
     },
-  };
+  }
 }
 
 // The page's colours, as the CSS variables the stylesheet uses, e.g. `--palette-muted-text`.
-function applyChromeColours({ terminal, chrome }: Theme) {
-  const root = document.documentElement.style;
-  root.setProperty("--window-background", withOpacity(terminal.background, windowOpacity));
+function applyChromeColours ({ terminal, chrome }: Theme) {
+  const root = document.documentElement.style
+  root.setProperty('--window-background', withOpacity(terminal.background, windowOpacity))
   for (const [name, colour] of Object.entries(chrome)) {
-    root.setProperty(`--${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`, colour);
+    root.setProperty(`--${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`, colour)
   }
 }
 
 // Open terminals take the Theme at once; a new font changes how many rows and columns fit.
-function applyTheme(next: Theme) {
-  theme = next;
-  applyChromeColours(theme);
+function applyTheme (next: Theme) {
+  theme = next
+  applyChromeColours(theme)
   for (const pane of terminals.values()) {
-    Object.assign(pane.terminal.options, terminalOptions(theme));
-    pane.fit.fit();
+    Object.assign(pane.terminal.options, terminalOptions(theme))
+    pane.fit.fit()
   }
 }
 
 // Puts a Pane's element at its rectangle, with a divider along each edge it shares with another Pane.
-function place(element: HTMLDivElement, rect: PaneRect) {
+function place (element: HTMLDivElement, rect: PaneRect) {
   Object.assign(element.style, {
     left: `${rect.x * 100}%`,
     top: `${rect.y * 100}%`,
     width: `${rect.width * 100}%`,
     height: `${rect.height * 100}%`,
-  });
-  element.classList.toggle("divided-left", rect.x > 0);
-  element.classList.toggle("divided-top", rect.y > 0);
+  })
+  element.classList.toggle('divided-left', rect.x > 0)
+  element.classList.toggle('divided-top', rect.y > 0)
 }
 
 // The terminal sits inside the Pane's element, so the fit leaves room for the Pane's dividers. The element is placed
 // before the terminal opens, so the Shell starts at the Pane's size.
-function openPane(rect: PaneRect): PaneTerminal {
-  const { paneId } = rect;
-  const element = document.createElement("div");
-  element.className = "pane";
-  place(element, rect);
-  const terminalElement = document.createElement("div");
-  terminalElement.className = "terminal";
-  element.append(terminalElement);
-  panesElement.append(element);
+function openPane (rect: PaneRect): PaneTerminal {
+  const { paneId } = rect
+  const element = document.createElement('div')
+  element.className = 'pane'
+  place(element, rect)
+  const terminalElement = document.createElement('div')
+  terminalElement.className = 'terminal'
+  element.append(terminalElement)
+  panesElement.append(element)
   // Option types macOS's special characters, e.g. `€` for Option+Shift+2, rather than sending Meta sequences.
   const terminal = new Terminal({
     allowTransparency: true,
@@ -127,80 +127,80 @@ function openPane(rect: PaneRect): PaneTerminal {
     allowProposedApi: true,
     // Links a program prints with OSC 8, which the terminal only offers when they're http(s) URLs.
     linkHandler: { activate: (event, uri) => openLinkOnCmdClick(paneId, event, uri) },
-  });
-  const fit = new FitAddon();
-  const serialize = new SerializeAddon();
-  const search = new SearchAddon();
-  terminal.loadAddon(fit);
-  terminal.loadAddon(serialize);
-  terminal.loadAddon(search);
-  terminal.registerLinkProvider(linkProvider(paneId, terminal));
+  })
+  const fit = new FitAddon()
+  const serialize = new SerializeAddon()
+  const search = new SearchAddon()
+  terminal.loadAddon(fit)
+  terminal.loadAddon(serialize)
+  terminal.loadAddon(search)
+  terminal.registerLinkProvider(linkProvider(paneId, terminal))
   terminal.attachCustomKeyEventHandler((event) => {
-    const jump = wordJump(event);
-    if (jump === undefined) return true;
-    if (event.type === "keydown") terminal.input(jump);
-    return false;
-  });
+    const jump = wordJump(event)
+    if (jump === undefined) return true
+    if (event.type === 'keydown') terminal.input(jump)
+    return false
+  })
   search.onDidChangeResults(({ resultIndex, resultCount }) => {
-    if (findingPaneId === paneId) showFindResults(resultIndex, resultCount);
-  });
-  terminal.open(terminalElement);
-  fit.fit();
-  terminal.onData((data) => blind.writeToPane(paneId, data));
-  terminal.onResize((size) => blind.resizePane(paneId, size));
-  element.addEventListener("mousedown", () => blind.focusPane(paneId));
-  void blind.attachPane(paneId, { cols: terminal.cols, rows: terminal.rows });
-  return { element, terminal, fit, serialize, search };
+    if (findingPaneId === paneId) showFindResults(resultIndex, resultCount)
+  })
+  terminal.open(terminalElement)
+  fit.fit()
+  terminal.onData((data) => blind.writeToPane(paneId, data))
+  terminal.onResize((size) => blind.resizePane(paneId, size))
+  element.addEventListener('mousedown', () => blind.focusPane(paneId))
+  blind.attachPane(paneId, { cols: terminal.cols, rows: terminal.rows })
+  return { element, terminal, fit, serialize, search }
 }
 
 // Option+Left and Option+Right move by word as iTerm2's Natural Text Editing has them, sending Esc b and Esc f, which
 // shells bind to moving back and forward a word. Absent for any other key.
-function wordJump({ key, altKey, metaKey, ctrlKey, shiftKey }: KeyboardEvent) {
-  if (!altKey || metaKey || ctrlKey || shiftKey) return undefined;
-  if (key === "ArrowLeft") return "\x1bb";
-  if (key === "ArrowRight") return "\x1bf";
-  return undefined;
+function wordJump ({ key, altKey, metaKey, ctrlKey, shiftKey }: KeyboardEvent) {
+  if (!altKey || metaKey || ctrlKey || shiftKey) return undefined
+  if (key === 'ArrowLeft') return '\x1bb'
+  if (key === 'ArrowRight') return '\x1bf'
+  return undefined
 }
 
 // A plain click on a link is left to selecting text.
-function openLinkOnCmdClick(paneId: PaneId, event: MouseEvent, text: string) {
-  if (event.metaKey) blind.openLink(paneId, text);
+function openLinkOnCmdClick (paneId: PaneId, event: MouseEvent, text: string) {
+  if (event.metaKey) blind.openLink(paneId, text)
 }
 
 // The text of the buffer line at `y`, one-based, joined with the lines it wraps onto and from, and each of its
 // characters' first and last cell. A wide character's two cells hold one character.
-function wrappedLine(terminal: Terminal, y: number) {
-  const buffer = terminal.buffer.active;
-  let first = y - 1;
-  while (first > 0 && buffer.getLine(first)?.isWrapped) first -= 1;
-  let text = "";
-  const cells: { start: IBufferCellPosition; end: IBufferCellPosition }[] = [];
+function wrappedLine (terminal: Terminal, y: number) {
+  const buffer = terminal.buffer.active
+  let first = y - 1
+  while (first > 0 && buffer.getLine(first)?.isWrapped) first -= 1
+  let text = ''
+  const cells: { start: IBufferCellPosition; end: IBufferCellPosition }[] = []
   for (let row = first; row === first || buffer.getLine(row)?.isWrapped; row += 1) {
-    const line = buffer.getLine(row);
-    if (!line) break;
+    const line = buffer.getLine(row)
+    if (!line) break
     for (let x = 0; x < terminal.cols; x += 1) {
-      const cell = line.getCell(x);
-      if (!cell || cell.getWidth() === 0) continue;
-      const characters = cell.getChars() || " ";
-      text += characters;
+      const cell = line.getCell(x)
+      if (!cell || cell.getWidth() === 0) continue
+      const characters = cell.getChars() || ' '
+      text += characters
       for (let unit = 0; unit < characters.length; unit += 1) {
-        cells.push({ start: { x: x + 1, y: row + 1 }, end: { x: x + cell.getWidth(), y: row + 1 } });
+        cells.push({ start: { x: x + 1, y: row + 1 }, end: { x: x + cell.getWidth(), y: row + 1 } })
       }
     }
   }
-  return { text, cells };
+  return { text, cells }
 }
 
 // URLs, and paths to files or folders that exist, on the line and the lines it wraps with, opened by Cmd+click.
-function linkProvider(paneId: PaneId, terminal: Terminal): ILinkProvider {
+function linkProvider (paneId: PaneId, terminal: Terminal): ILinkProvider {
   return {
-    provideLinks(y, callback) {
-      const { text, cells } = wrappedLine(terminal, y);
+    provideLinks (y, callback) {
+      const { text, cells } = wrappedLine(terminal, y)
       const links = findLinks(text)
         .map((link) => ({ text: link.text, range: { start: cells[link.start].start, end: cells[link.end - 1].end } }))
-        .filter(({ range }) => range.start.y <= y && y <= range.end.y);
-      if (links.length === 0) return callback(undefined);
-      void blind.openableLinks(paneId, links.map((link) => link.text)).then((openable) => {
+        .filter(({ range }) => range.start.y <= y && y <= range.end.y)
+      if (links.length === 0) return callback(undefined)
+      blind.openableLinks(paneId, links.map((link) => link.text)).then((openable) => {
         callback(
           links
             .filter((_, index) => openable[index])
@@ -210,84 +210,84 @@ function linkProvider(paneId: PaneId, terminal: Terminal): ILinkProvider {
                 decorations: { underline: cmdHeld, pointerCursor: cmdHeld },
                 activate: (event, text) => openLinkOnCmdClick(paneId, event, text),
                 hover: () => {
-                  hoveredLink = provided;
+                  hoveredLink = provided
                 },
                 leave: () => {
-                  if (hoveredLink === provided) hoveredLink = undefined;
+                  if (hoveredLink === provided) hoveredLink = undefined
                 },
-              };
-              return provided;
-            }),
-        );
-      });
+              }
+              return provided
+            })
+        )
+      })
     },
-  };
+  }
 }
 
 // Whether Cmd is held, so a link shows its underline and hand cursor only while Cmd+click would open it.
-let cmdHeld = false;
+let cmdHeld = false
 // The link under the mouse. Once hovered, the terminal watches its decorations for changes.
-let hoveredLink: ILink | undefined;
+let hoveredLink: ILink | undefined
 
-function holdCmd(held: boolean) {
-  if (held === cmdHeld) return;
-  cmdHeld = held;
-  if (hoveredLink?.decorations) Object.assign(hoveredLink.decorations, { underline: held, pointerCursor: held });
+function holdCmd (held: boolean) {
+  if (held === cmdHeld) return
+  cmdHeld = held
+  if (hoveredLink?.decorations) Object.assign(hoveredLink.decorations, { underline: held, pointerCursor: held })
 }
 
 // Pressing or letting go of Cmd alone is a key event; a mouse move catches up with a Cmd changed while the window
 // wasn't listening.
-window.addEventListener("keydown", (event) => holdCmd(event.metaKey), true);
-window.addEventListener("keyup", (event) => holdCmd(event.metaKey), true);
-window.addEventListener("mousemove", (event) => holdCmd(event.metaKey), true);
-window.addEventListener("blur", () => holdCmd(false));
+window.addEventListener('keydown', (event) => holdCmd(event.metaKey), true)
+window.addEventListener('keyup', (event) => holdCmd(event.metaKey), true)
+window.addEventListener('mousemove', (event) => holdCmd(event.metaKey), true)
+window.addEventListener('blur', () => holdCmd(false))
 
 // The Pane's terminal clears its scrollback and screen, keeping the line the cursor is on, usually the Shell's prompt.
 // A full-screen program's screen is left alone, since clearing would only blank the program's screen while its
 // scrollback stays out of reach. Either way the terminal reports what it holds, so Restore brings back no more.
-function clearScrollback(paneId: PaneId) {
-  const pane = terminals.get(paneId);
-  if (!pane) return;
-  if (pane.terminal.buffer.active.type === "normal") pane.terminal.clear();
-  reportScrollback(paneId, pane);
+function clearScrollback (paneId: PaneId) {
+  const pane = terminals.get(paneId)
+  if (!pane) return
+  if (pane.terminal.buffer.active.type === 'normal') pane.terminal.clear()
+  reportScrollback(paneId, pane)
 }
 
 // The text field taking typing, e.g. the Command Palette's or the find bar's; absent while a terminal takes it.
-function focusedField() {
-  return document.activeElement instanceof HTMLInputElement ? document.activeElement : undefined;
+function focusedField () {
+  return document.activeElement instanceof HTMLInputElement ? document.activeElement : undefined
 }
 
 // Copies what is selected in the focused text field, or else in the focused Pane's terminal. Nothing selected leaves
 // the clipboard as it was.
-function copySelection() {
-  const field = focusedField();
+function copySelection () {
+  const field = focusedField()
   const selected = field
     ? field.value.slice(field.selectionStart ?? 0, field.selectionEnd ?? 0)
-    : focusedPaneId && terminals.get(focusedPaneId)?.terminal.getSelection();
-  if (selected) blind.copyText(selected);
+    : focusedPaneId && terminals.get(focusedPaneId)?.terminal.getSelection()
+  if (selected) blind.copyText(selected)
 }
 
 // Into a text field the text goes on one line, replacing what is selected there, as typing it would; the terminal
 // takes it as a paste, which programs that ask can tell from typing.
-function paste(text: string) {
-  const field = focusedField();
+function paste (text: string) {
+  const field = focusedField()
   if (!field) {
-    if (focusedPaneId) terminals.get(focusedPaneId)?.terminal.paste(text);
-    return;
+    if (focusedPaneId) terminals.get(focusedPaneId)?.terminal.paste(text)
+    return
   }
-  field.setRangeText(text.replace(/\r?\n/g, " "), field.selectionStart ?? 0, field.selectionEnd ?? 0, "end");
-  field.dispatchEvent(new Event("input"));
+  field.setRangeText(text.replace(/\r?\n/g, ' '), field.selectionStart ?? 0, field.selectionEnd ?? 0, 'end')
+  field.dispatchEvent(new Event('input'))
 }
 
-const findBar = document.getElementById("find")!;
-const findInput = document.getElementById("find-input") as HTMLInputElement;
-const findCount = document.getElementById("find-count")!;
+const findBar = document.getElementById('find')!
+const findInput = document.getElementById('find-input') as HTMLInputElement
+const findCount = document.getElementById('find-count')!
 // The Pane the find bar searches; absent while it's closed.
-let findingPaneId: PaneId | undefined;
+let findingPaneId: PaneId | undefined
 
 // Every match outlined, the current one selected as well.
-function searchOptions({ terminal }: Theme): ISearchOptions {
-  const opaque = (colour: Colour) => colour.slice(0, 7);
+function searchOptions ({ terminal }: Theme): ISearchOptions {
+  const opaque = (colour: Colour) => colour.slice(0, 7)
   return {
     decorations: {
       matchBorder: opaque(terminal.yellow),
@@ -295,342 +295,342 @@ function searchOptions({ terminal }: Theme): ISearchOptions {
       activeMatchBorder: opaque(terminal.cursor),
       activeMatchColorOverviewRuler: opaque(terminal.cursor),
     },
-  };
+  }
 }
 
 // Without an index, there were more matches than are highlighted.
-function showFindResults(resultIndex: number, resultCount: number) {
-  if (findInput.value === "") findCount.textContent = "";
-  else if (resultCount === 0) findCount.textContent = "No matches";
-  else if (resultIndex === -1) findCount.textContent = `${resultCount}+ matches`;
-  else findCount.textContent = `${resultIndex + 1} of ${resultCount}`;
+function showFindResults (resultIndex: number, resultCount: number) {
+  if (findInput.value === '') findCount.textContent = ''
+  else if (resultCount === 0) findCount.textContent = 'No matches'
+  else if (resultIndex === -1) findCount.textContent = `${resultCount}+ matches`
+  else findCount.textContent = `${resultIndex + 1} of ${resultCount}`
 }
 
 // Opening again, e.g. by Cmd+F while it's open, selects what was searched for, so typing replaces it.
-function openFind(paneId: PaneId) {
-  if (findingPaneId !== undefined && findingPaneId !== paneId) closeFind();
-  findingPaneId = paneId;
-  findBar.hidden = false;
-  findInput.focus();
-  findInput.select();
+function openFind (paneId: PaneId) {
+  if (findingPaneId !== undefined && findingPaneId !== paneId) closeFind()
+  findingPaneId = paneId
+  findBar.hidden = false
+  findInput.focus()
+  findInput.select()
 }
 
 // The Pane's terminal takes the keyboard back unless the Pane went.
-function closeFind() {
-  if (findingPaneId === undefined) return;
-  const pane = terminals.get(findingPaneId);
-  findingPaneId = undefined;
-  findBar.hidden = true;
-  findCount.textContent = "";
-  pane?.search.clearDecorations();
-  pane?.terminal.focus();
+function closeFind () {
+  if (findingPaneId === undefined) return
+  const pane = terminals.get(findingPaneId)
+  findingPaneId = undefined
+  findBar.hidden = true
+  findCount.textContent = ''
+  pane?.search.clearDecorations()
+  pane?.terminal.focus()
 }
 
 // Typing searches on from the current match, keeping it while it still matches.
-function find(direction: "next" | "previous", incremental = false) {
-  const pane = findingPaneId && terminals.get(findingPaneId);
-  if (!pane) return;
-  if (findInput.value === "") {
-    pane.search.clearDecorations();
-    showFindResults(-1, 0);
-    return;
+function find (direction: 'next' | 'previous', incremental = false) {
+  const pane = findingPaneId && terminals.get(findingPaneId)
+  if (!pane) return
+  if (findInput.value === '') {
+    pane.search.clearDecorations()
+    showFindResults(-1, 0)
+    return
   }
-  const options = { ...searchOptions(theme), incremental };
-  if (direction === "next") pane.search.findNext(findInput.value, options);
-  else pane.search.findPrevious(findInput.value, options);
+  const options = { ...searchOptions(theme), incremental }
+  if (direction === 'next') pane.search.findNext(findInput.value, options)
+  else pane.search.findPrevious(findInput.value, options)
 }
 
-findInput.addEventListener("input", () => find("next", true));
-findInput.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeFind();
-  else if (event.key === "Enter") find(event.shiftKey ? "previous" : "next");
-  else return;
-  event.preventDefault();
-});
+findInput.addEventListener('input', () => find('next', true))
+findInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeFind()
+  else if (event.key === 'Enter') find(event.shiftKey ? 'previous' : 'next')
+  else return
+  event.preventDefault()
+})
 
 // A full-screen program's screen and the modes it set belong to a process that won't be there after Restore.
-function reportScrollback(paneId: PaneId, pane: PaneTerminal) {
-  clearTimeout(pane.reportTimer);
-  pane.reportTimer = undefined;
+function reportScrollback (paneId: PaneId, pane: PaneTerminal) {
+  clearTimeout(pane.reportTimer)
+  pane.reportTimer = undefined
   const scrollback = pane.serialize.serialize({
     scrollback: terminalSettings.scrollbackLines,
     excludeAltBuffer: true,
     excludeModes: true,
-  });
-  blind.reportScrollback(paneId, scrollback);
+  })
+  blind.reportScrollback(paneId, scrollback)
 }
 
 // Open terminals keep their scrollback up to the new number of lines from now on.
-function applyTerminalSettings(settings: TerminalSettings) {
-  terminalSettings = settings;
-  for (const pane of terminals.values()) pane.terminal.options.scrollback = settings.scrollbackLines;
+function applyTerminalSettings (settings: TerminalSettings) {
+  terminalSettings = settings
+  for (const pane of terminals.values()) pane.terminal.options.scrollback = settings.scrollbackLines
 }
 
-function writeToTerminal(paneId: PaneId, data: string) {
-  const pane = terminals.get(paneId);
-  if (!pane) return;
-  pane.terminal.write(data);
-  pane.reportTimer ??= setTimeout(() => reportScrollback(paneId, pane), reportDelayMilliseconds);
+function writeToTerminal (paneId: PaneId, data: string) {
+  const pane = terminals.get(paneId)
+  if (!pane) return
+  pane.terminal.write(data)
+  pane.reportTimer ??= setTimeout(() => reportScrollback(paneId, pane), reportDelayMilliseconds)
 }
 
-function renderTabBar(view: SessionView) {
-  tabBar.hidden = view.tabs.length < 2;
+function renderTabBar (view: SessionView) {
+  tabBar.hidden = view.tabs.length < 2
   tabBar.replaceChildren(
     ...view.tabs.map((tab) => {
-      const element = document.createElement("div");
-      element.className = "tab";
-      element.classList.toggle("focused", tab.id === view.focusedTabId);
-      element.textContent = tab.title;
-      return element;
-    }),
-  );
+      const element = document.createElement('div')
+      element.className = 'tab'
+      element.classList.toggle('focused', tab.id === view.focusedTabId)
+      element.textContent = tab.title
+      return element
+    })
+  )
 }
 
 // Every Pane's terminal stays open, hidden but laid out, so switching Tabs keeps its scrollback and size.
-function render(view: SessionView) {
-  renderTabBar(view);
-  const panes = view.tabs.flatMap((tab) => tab.panes.map((rect) => ({ tab, rect })));
-  const paneIds = new Set(panes.map(({ rect }) => rect.paneId));
+function render (view: SessionView) {
+  renderTabBar(view)
+  const panes = view.tabs.flatMap((tab) => tab.panes.map((rect) => ({ tab, rect })))
+  const paneIds = new Set(panes.map(({ rect }) => rect.paneId))
   for (const [paneId, pane] of terminals) {
-    if (paneIds.has(paneId)) continue;
-    clearTimeout(pane.reportTimer);
-    pane.terminal.dispose();
-    pane.element.remove();
-    terminals.delete(paneId);
+    if (paneIds.has(paneId)) continue
+    clearTimeout(pane.reportTimer)
+    pane.terminal.dispose()
+    pane.element.remove()
+    terminals.delete(paneId)
   }
-  const focusedTab = view.tabs.find((tab) => tab.id === view.focusedTabId);
+  const focusedTab = view.tabs.find((tab) => tab.id === view.focusedTabId)
   for (const { tab, rect } of panes) {
-    const pane = terminals.get(rect.paneId) ?? openPane(rect);
-    terminals.set(rect.paneId, pane);
-    place(pane.element, rect);
-    pane.element.classList.toggle("hidden", tab !== focusedTab);
+    const pane = terminals.get(rect.paneId) ?? openPane(rect)
+    terminals.set(rect.paneId, pane)
+    place(pane.element, rect)
+    pane.element.classList.toggle('hidden', tab !== focusedTab)
   }
   // Splits, closed Panes, and the Tab bar appearing or disappearing all change the space the Panes have.
-  for (const pane of terminals.values()) pane.fit.fit();
+  for (const pane of terminals.values()) pane.fit.fit()
   if (focusedTab && focusedTab.focusedPaneId !== focusedPaneId) {
     // The find bar searches the focused Pane only.
-    closeFind();
-    focusedPaneId = focusedTab.focusedPaneId;
-    terminals.get(focusedPaneId)?.terminal.focus();
+    closeFind()
+    focusedPaneId = focusedTab.focusedPaneId
+    terminals.get(focusedPaneId)?.terminal.focus()
   }
 }
 
-const palette = document.getElementById("palette")!;
-const paletteInput = document.getElementById("palette-input") as HTMLInputElement;
-const paletteList = document.getElementById("palette-results")!;
-let paletteResults: PaletteResult[] = [];
-let selectedResult = 0;
+const palette = document.getElementById('palette')!
+const paletteInput = document.getElementById('palette-input') as HTMLInputElement
+const paletteList = document.getElementById('palette-results')!
+let paletteResults: PaletteResult[] = []
+let selectedResult = 0
 // Counts searches, so that results arriving after a newer search's are dropped.
-let searchCount = 0;
+let searchCount = 0
 // Settles once the latest search's results are shown, so Enter never chooses from a list typing has outdated.
-let latestSearch = Promise.resolve();
+let latestSearch = Promise.resolve()
 // Set while the palette asks for a name or title instead of searching.
-let prompt: PalettePrompt | undefined;
+let prompt: PalettePrompt | undefined
 // Set while the palette lists the Themes or the menu bar icons instead of searching, each selected one previewed.
-let picking: "theme" | "menuBarIcon" | undefined;
+let picking: 'theme' | 'menuBarIcon' | undefined
 // The choice the next results select, once: the one in effect when the palette started listing them.
-let choiceToSelect: string | undefined;
+let choiceToSelect: string | undefined
 
-const promptPlaceholders: Record<PalettePrompt["type"], string> = {
-  askSessionName: "Session name",
-  askTabTitle: "Tab title, or empty to follow the running program",
-};
-
-const resultKinds: Record<PaletteResult["type"], string> = {
-  session: "Session",
-  tab: "Tab",
-  pane: "Pane",
-  action: "Action",
-  theme: "Theme",
-  menuBarIcon: "Menu Bar Icon",
-};
-
-// What places a result: a Closed Session's mark, a Tab's Session, or a Pane's working directory and Session.
-function resultDetail(result: PaletteResult) {
-  if (result.type === "session") return result.closed ? "Closed" : "";
-  if (result.type === "tab") return result.sessionLabel;
-  if (result.type === "pane") return `${result.workingDirectory} · ${result.sessionLabel}`;
-  return "";
+const promptPlaceholders: Record<PalettePrompt['type'], string> = {
+  askSessionName: 'Session name',
+  askTabTitle: 'Tab title, or empty to follow the running program',
 }
 
-function renderPalette() {
+const resultKinds: Record<PaletteResult['type'], string> = {
+  session: 'Session',
+  tab: 'Tab',
+  pane: 'Pane',
+  action: 'Action',
+  theme: 'Theme',
+  menuBarIcon: 'Menu Bar Icon',
+}
+
+// What places a result: a Closed Session's mark, a Tab's Session, or a Pane's working directory and Session.
+function resultDetail (result: PaletteResult) {
+  if (result.type === 'session') return result.closed ? 'Closed' : ''
+  if (result.type === 'tab') return result.sessionLabel
+  if (result.type === 'pane') return `${result.workingDirectory} · ${result.sessionLabel}`
+  return ''
+}
+
+function renderPalette () {
   paletteList.replaceChildren(
     ...paletteResults.map((result, index) => {
-      const element = document.createElement("li");
-      element.className = "result";
-      element.classList.toggle("selected", index === selectedResult);
-      const label = document.createElement("span");
-      label.textContent = result.label;
-      const detail = document.createElement("span");
-      detail.className = "detail";
-      detail.textContent = resultDetail(result);
-      const kind = document.createElement("span");
-      kind.className = "kind";
-      kind.textContent = resultKinds[result.type];
-      element.append(label, detail, kind);
-      element.addEventListener("mousedown", () => chooseResult(index));
-      return element;
-    }),
-  );
-  paletteList.children[selectedResult]?.scrollIntoView({ block: "nearest" });
+      const element = document.createElement('li')
+      element.className = 'result'
+      element.classList.toggle('selected', index === selectedResult)
+      const label = document.createElement('span')
+      label.textContent = result.label
+      const detail = document.createElement('span')
+      detail.className = 'detail'
+      detail.textContent = resultDetail(result)
+      const kind = document.createElement('span')
+      kind.className = 'kind'
+      kind.textContent = resultKinds[result.type]
+      element.append(label, detail, kind)
+      element.addEventListener('mousedown', () => chooseResult(index))
+      return element
+    })
+  )
+  paletteList.children[selectedResult]?.scrollIntoView({ block: 'nearest' })
 }
 
 // The Theme's name or the menu bar icon a result is; absent for any other result.
-function choiceOf(result: PaletteResult) {
-  if (result.type === "theme") return result.name;
-  if (result.type === "menuBarIcon") return result.icon;
-  return undefined;
+function choiceOf (result: PaletteResult) {
+  if (result.type === 'theme') return result.name
+  if (result.type === 'menuBarIcon') return result.icon
+  return undefined
 }
 
 // Puts the selected Theme or menu bar icon in effect while the palette lists them.
-function previewSelectedChoice() {
-  const result = paletteResults[selectedResult];
-  if (picking === "theme" && result?.type === "theme") blind.previewTheme(result.name);
-  if (picking === "menuBarIcon" && result?.type === "menuBarIcon") blind.previewMenuBarIcon(result.icon);
+function previewSelectedChoice () {
+  const result = paletteResults[selectedResult]
+  if (picking === 'theme' && result?.type === 'theme') blind.previewTheme(result.name)
+  if (picking === 'menuBarIcon' && result?.type === 'menuBarIcon') blind.previewMenuBarIcon(result.icon)
 }
 
 const pickerSearches = {
   theme: blind.searchThemes,
   menuBarIcon: blind.searchMenuBarIcons,
-};
-
-function searchPalette() {
-  searchCount += 1;
-  const search = searchCount;
-  const searching = picking ? pickerSearches[picking] : blind.searchPalette;
-  latestSearch = searching(paletteInput.value).then((results) => {
-    if (search !== searchCount) return;
-    paletteResults = results;
-    selectedResult = Math.max(
-      0,
-      results.findIndex((result) => choiceToSelect !== undefined && choiceOf(result) === choiceToSelect),
-    );
-    choiceToSelect = undefined;
-    renderPalette();
-    previewSelectedChoice();
-  });
 }
 
-function openPalette() {
-  prompt = undefined;
-  picking = undefined;
-  palette.hidden = false;
-  paletteInput.placeholder = "";
-  paletteInput.value = "";
-  paletteInput.focus();
-  searchPalette();
+function searchPalette () {
+  searchCount += 1
+  const search = searchCount
+  const searching = picking ? pickerSearches[picking] : blind.searchPalette
+  latestSearch = searching(paletteInput.value).then((results) => {
+    if (search !== searchCount) return
+    paletteResults = results
+    selectedResult = Math.max(
+      0,
+      results.findIndex((result) => choiceToSelect !== undefined && choiceOf(result) === choiceToSelect)
+    )
+    choiceToSelect = undefined
+    renderPalette()
+    previewSelectedChoice()
+  })
+}
+
+function openPalette () {
+  prompt = undefined
+  picking = undefined
+  palette.hidden = false
+  paletteInput.placeholder = ''
+  paletteInput.value = ''
+  paletteInput.focus()
+  searchPalette()
 }
 
 // Offers the suggestion selected, so typing replaces it and Enter accepts it. A search still in flight is dropped.
-function openPrompt(asked: PalettePrompt) {
-  prompt = asked;
-  picking = undefined;
-  searchCount += 1;
-  paletteResults = [];
-  renderPalette();
-  palette.hidden = false;
-  paletteInput.placeholder = promptPlaceholders[asked.type];
-  paletteInput.value = asked.suggestion;
-  paletteInput.focus();
-  paletteInput.select();
+function openPrompt (asked: PalettePrompt) {
+  prompt = asked
+  picking = undefined
+  searchCount += 1
+  paletteResults = []
+  renderPalette()
+  palette.hidden = false
+  paletteInput.placeholder = promptPlaceholders[asked.type]
+  paletteInput.value = asked.suggestion
+  paletteInput.focus()
+  paletteInput.select()
 }
 
 const pickerPlaceholders = {
-  theme: "Theme",
-  menuBarIcon: "Menu bar icon",
-};
+  theme: 'Theme',
+  menuBarIcon: 'Menu bar icon',
+}
 
 // Lists the Themes or the menu bar icons with the one in effect selected. Choosing one keeps it; dismissing restores
 // the one from before.
-function openPicker(kind: NonNullable<typeof picking>, inEffect: string) {
-  prompt = undefined;
-  picking = kind;
-  choiceToSelect = inEffect;
-  palette.hidden = false;
-  paletteInput.placeholder = pickerPlaceholders[kind];
-  paletteInput.value = "";
-  paletteInput.focus();
-  searchPalette();
+function openPicker (kind: NonNullable<typeof picking>, inEffect: string) {
+  prompt = undefined
+  picking = kind
+  choiceToSelect = inEffect
+  palette.hidden = false
+  paletteInput.placeholder = pickerPlaceholders[kind]
+  paletteInput.value = ''
+  paletteInput.focus()
+  searchPalette()
 }
 
 // The focused Pane's terminal takes the keyboard back.
-function closePalette() {
-  if (palette.hidden) return;
-  palette.hidden = true;
-  prompt = undefined;
-  picking = undefined;
-  if (focusedPaneId) terminals.get(focusedPaneId)?.terminal.focus();
+function closePalette () {
+  if (palette.hidden) return
+  palette.hidden = true
+  prompt = undefined
+  picking = undefined
+  if (focusedPaneId) terminals.get(focusedPaneId)?.terminal.focus()
 }
 
 // Closing without a choice, by Escape or by clicking away. Choosing closes the palette first, so a blur that follows
 // isn't taken for one.
-function dismissPalette() {
-  if (palette.hidden) return;
-  closePalette();
-  blind.dismissPalette();
+function dismissPalette () {
+  if (palette.hidden) return
+  closePalette()
+  blind.dismissPalette()
 }
 
 // The typed text answers the prompt that was showing; `closePalette` clears it.
-function answerPrompt(shown: PalettePrompt) {
-  const answer = paletteInput.value;
-  closePalette();
-  blind.answerPalettePrompt(shown, answer);
+function answerPrompt (shown: PalettePrompt) {
+  const answer = paletteInput.value
+  closePalette()
+  blind.answerPalettePrompt(shown, answer)
 }
 
 // Does nothing once the palette has closed, e.g. by Escape while Enter waited for a search.
-function chooseResult(index: number) {
-  const result = paletteResults[index];
-  if (palette.hidden || !result) return;
-  closePalette();
-  blind.choosePaletteResult(result);
+function chooseResult (index: number) {
+  const result = paletteResults[index]
+  if (palette.hidden || !result) return
+  closePalette()
+  blind.choosePaletteResult(result)
 }
 
-function moveSelection(offset: number) {
-  const count = paletteResults.length;
-  if (count === 0) return;
-  selectedResult = (selectedResult + offset + count) % count;
-  renderPalette();
-  previewSelectedChoice();
+function moveSelection (offset: number) {
+  const count = paletteResults.length
+  if (count === 0) return
+  selectedResult = (selectedResult + offset + count) % count
+  renderPalette()
+  previewSelectedChoice()
 }
 
-paletteInput.addEventListener("input", () => {
-  if (!prompt) searchPalette();
-});
-paletteInput.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") dismissPalette();
-  else if (event.key === "Enter" && prompt) answerPrompt(prompt);
-  else if (prompt) return;
-  else if (event.key === "ArrowDown") moveSelection(1);
-  else if (event.key === "ArrowUp") moveSelection(-1);
-  else if (event.key === "Enter") void latestSearch.then(() => chooseResult(selectedResult));
-  else return;
-  event.preventDefault();
-});
+paletteInput.addEventListener('input', () => {
+  if (!prompt) searchPalette()
+})
+paletteInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') dismissPalette()
+  else if (event.key === 'Enter' && prompt) answerPrompt(prompt)
+  else if (prompt) return
+  else if (event.key === 'ArrowDown') moveSelection(1)
+  else if (event.key === 'ArrowUp') moveSelection(-1)
+  else if (event.key === 'Enter') latestSearch.then(() => chooseResult(selectedResult))
+  else return
+  event.preventDefault()
+})
 // Clicks inside the palette keep the input focused; clicking a Pane, or the app hiding, closes the palette.
-palette.addEventListener("mousedown", (event) => {
-  if (event.target !== paletteInput) event.preventDefault();
-});
-paletteInput.addEventListener("blur", dismissPalette);
+palette.addEventListener('mousedown', (event) => {
+  if (event.target !== paletteInput) event.preventDefault()
+})
+paletteInput.addEventListener('blur', dismissPalette)
 
-applyChromeColours(theme);
-blind.onTerminalSettings(applyTerminalSettings);
-blind.onTheme(applyTheme);
-blind.onOpenPalette(openPalette);
-blind.onPickTheme(() => openPicker("theme", theme.name));
-blind.onPickMenuBarIcon((icon) => openPicker("menuBarIcon", icon));
-blind.onPalettePrompt(openPrompt);
-blind.onPaneData(writeToTerminal);
-blind.onFlushScrollback(() => terminals.forEach((pane, paneId) => reportScrollback(paneId, pane)));
-blind.onSessionView(render);
-blind.onFindInPane(openFind);
-blind.onClearScrollback(clearScrollback);
-blind.onCopy(copySelection);
-blind.onPaste(paste);
-window.addEventListener("resize", () => {
-  for (const pane of terminals.values()) pane.fit.fit();
-});
+applyChromeColours(theme)
+blind.onTerminalSettings(applyTerminalSettings)
+blind.onTheme(applyTheme)
+blind.onOpenPalette(openPalette)
+blind.onPickTheme(() => openPicker('theme', theme.name))
+blind.onPickMenuBarIcon((icon) => openPicker('menuBarIcon', icon))
+blind.onPalettePrompt(openPrompt)
+blind.onPaneData(writeToTerminal)
+blind.onFlushScrollback(() => terminals.forEach((pane, paneId) => reportScrollback(paneId, pane)))
+blind.onSessionView(render)
+blind.onFindInPane(openFind)
+blind.onClearScrollback(clearScrollback)
+blind.onCopy(copySelection)
+blind.onPaste(paste)
+window.addEventListener('resize', () => {
+  for (const pane of terminals.values()) pane.fit.fit()
+})
 // Shown the first time once loaded; the main process asks for it on every later showing.
 if (standalone) {
-  document.body.classList.add("standalone");
-  openPalette();
+  document.body.classList.add('standalone')
+  openPalette()
 }

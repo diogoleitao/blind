@@ -1,24 +1,24 @@
-import { isObject, readJsonc } from "./jsonc";
-import { type BoundAction, defaultKeyBindings, parseShortcut, sameShortcut, type Shortcut } from "./key-bindings";
-import { builtInThemes, defaultTheme } from "./themes";
+import { isObject, readJsonc } from './jsonc'
+import { type BoundAction, defaultKeyBindings, parseShortcut, sameShortcut, type Shortcut } from './key-bindings'
+import { builtInThemes, defaultTheme } from './themes'
 
-const cycleOrders = ["alphabetical", "recent", "created"] as const;
+const cycleOrders = ['alphabetical', 'recent', 'created'] as const
 
 // The order Open Sessions are cycled through: by name, by most recent use, or by creation.
-export type CycleOrder = (typeof cycleOrders)[number];
+export type CycleOrder = (typeof cycleOrders)[number]
 
-const hotkeyBehaviours = ["new", "palette"] as const;
+const hotkeyBehaviours = ['new', 'palette'] as const
 
 // What the Hotkey shows with no Open Sessions: a new Session, or the Command Palette on its own.
-export type HotkeyWithNoOpenSessions = (typeof hotkeyBehaviours)[number];
+export type HotkeyWithNoOpenSessions = (typeof hotkeyBehaviours)[number]
 
-export const menuBarIcons = ["monochrome", "colour"] as const;
+export const menuBarIcons = ['monochrome', 'colour'] as const
 
 // The menu bar icon's look: one colour that follows the menu bar's, light or dark, or the icon's own colours.
-export type MenuBarIcon = (typeof menuBarIcons)[number];
+export type MenuBarIcon = (typeof menuBarIcons)[number]
 
 // What `unlimited` scrollback keeps: the terminal sets its buffer aside up front, so it can't be truly unbounded.
-export const unlimitedScrollbackLines = 1_000_000;
+export const unlimitedScrollbackLines = 1_000_000
 
 // What the config file sets, each setting at its default unless the file gives it a valid value.
 export interface Settings {
@@ -37,101 +37,101 @@ export interface Settings {
 
 export const defaultSettings: Settings = {
   scrollbackLines: 10_000,
-  cycleOrder: "alphabetical",
-  hotkeyWithNoOpenSessions: "new",
+  cycleOrder: 'alphabetical',
+  hotkeyWithNoOpenSessions: 'new',
   keyBindings: Object.fromEntries(
-    Object.entries(defaultKeyBindings).map(([action, shortcut]) => [action, shortcut && parseShortcut(shortcut)!]),
-  ) as Settings["keyBindings"],
+    Object.entries(defaultKeyBindings).map(([action, shortcut]) => [action, shortcut && parseShortcut(shortcut)!])
+  ) as Settings['keyBindings'],
   theme: defaultTheme.name,
-  menuBarIcon: "monochrome",
-};
+  menuBarIcon: 'monochrome',
+}
 
-const invalid = Symbol("invalid");
+const invalid = Symbol('invalid')
 
 // A setting's value read from the config file, or `invalid`. A setting made of entries rejects the invalid ones by
 // name and keeps the rest.
-type SettingParser<Value> = (value: unknown, rejectEntry: (entry: string) => void) => Value | typeof invalid;
+type SettingParser<Value> = (value: unknown, rejectEntry: (entry: string) => void) => Value | typeof invalid
 
-function oneOf<const Values extends readonly string[]>(values: Values): SettingParser<Values[number]> {
-  return (value) => (values.includes(value as string) ? (value as Values[number]) : invalid);
+function oneOf<const Values extends readonly string[]> (values: Values): SettingParser<Values[number]> {
+  return (value) => (values.includes(value as string) ? (value as Values[number]) : invalid)
 }
 
-type SettingParsers = { [Name in keyof Settings]-?: SettingParser<Settings[Name]> };
+type SettingParsers = { [Name in keyof Settings]-?: SettingParser<Settings[Name]> }
 
 // The theme setting takes the name of one of the Themes loaded.
 const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
-  shell: (value) => (typeof value === "string" && value.trim() !== "" ? value : invalid),
+  shell: (value) => (typeof value === 'string' && value.trim() !== '' ? value : invalid),
   scrollbackLines: (value) => {
-    if (value === "unlimited") return unlimitedScrollbackLines;
-    return Number.isInteger(value) && 0 <= (value as number) && (value as number) <= unlimitedScrollbackLines
+    if (value === 'unlimited') return unlimitedScrollbackLines
+    return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= unlimitedScrollbackLines
       ? (value as number)
-      : invalid;
+      : invalid
   },
   cycleOrder: oneOf(cycleOrders),
   hotkeyWithNoOpenSessions: oneOf(hotkeyBehaviours),
   keyBindings: parseKeyBindings,
   // Theme names are unique ignoring case, so the setting matches one ignoring case and takes its spelling.
   theme: (value) =>
-    themeNames.find((name) => typeof value === "string" && name.toLowerCase() === value.toLowerCase()) ?? invalid,
+    themeNames.find((name) => typeof value === 'string' && name.toLowerCase() === value.toLowerCase()) ?? invalid,
   menuBarIcon: oneOf(menuBarIcons),
-});
+})
 
 // The defaults with each configured action's shortcut, or null, in place. A configured shortcut is taken away from the
 // action bound to it by default; one already configured for another action is rejected.
-function parseKeyBindings(value: unknown, rejectEntry: (entry: string) => void) {
-  if (!isObject(value)) return invalid;
-  const configured: Partial<Settings["keyBindings"]> = {};
+function parseKeyBindings (value: unknown, rejectEntry: (entry: string) => void) {
+  if (!isObject(value)) return invalid
+  const configured: Partial<Settings['keyBindings']> = {}
   const isConfigured = (shortcut: Shortcut | null | undefined) =>
-    Object.values(configured).some((other) => other && shortcut && sameShortcut(other, shortcut));
+    Object.values(configured).some((other) => other && shortcut && sameShortcut(other, shortcut))
   for (const [action, text] of Object.entries(value)) {
-    const shortcut = typeof text === "string" ? parseShortcut(text) : text === null ? null : undefined;
+    const shortcut = typeof text === 'string' ? parseShortcut(text) : text === null ? null : undefined
     if (!Object.hasOwn(defaultKeyBindings, action) || shortcut === undefined || isConfigured(shortcut)) {
-      rejectEntry(`keyBindings.${action}`);
+      rejectEntry(`keyBindings.${action}`)
     } else {
-      configured[action as BoundAction] = shortcut;
+      configured[action as BoundAction] = shortcut
     }
   }
   const defaults = Object.entries(defaultSettings.keyBindings).map(([action, shortcut]) => [
     action,
     isConfigured(shortcut) ? null : shortcut,
-  ]);
-  return { ...Object.fromEntries(defaults), ...configured } as Settings["keyBindings"];
+  ])
+  return { ...Object.fromEntries(defaults), ...configured } as Settings['keyBindings']
 }
 
 // The JSON schema of the config file, which the file names in `$schema` so editors validate and autocomplete it.
 export const configSchema = {
-  $schema: "http://json-schema.org/draft-07/schema#",
-  title: "Blind settings",
-  type: "object",
+  $schema: 'http://json-schema.org/draft-07/schema#',
+  title: 'Blind settings',
+  type: 'object',
   properties: {
-    $schema: { type: "string" },
+    $schema: { type: 'string' },
     shell: {
-      type: "string",
+      type: 'string',
       minLength: 1,
       description: "The program each new Pane's Shell runs, as a login shell. Defaults to your login shell ($SHELL).",
     },
     scrollbackLines: {
-      description: `How many lines of each Pane's scrollback are kept and restored, up to ${unlimitedScrollbackLines.toLocaleString("en-GB")}; "unlimited" keeps that many.`,
+      description: `How many lines of each Pane's scrollback are kept and restored, up to ${unlimitedScrollbackLines.toLocaleString('en-GB')}; "unlimited" keeps that many.`,
       default: defaultSettings.scrollbackLines,
       oneOf: [
-        { type: "integer", minimum: 0, maximum: unlimitedScrollbackLines },
-        { const: "unlimited" },
+        { type: 'integer', minimum: 0, maximum: unlimitedScrollbackLines },
+        { const: 'unlimited' },
       ],
     },
     cycleOrder: {
-      description: "The order Open Sessions are cycled through and listed in: by name, by most recent use, or by creation.",
+      description: 'The order Open Sessions are cycled through and listed in: by name, by most recent use, or by creation.',
       enum: cycleOrders,
       default: defaultSettings.cycleOrder,
     },
     hotkeyWithNoOpenSessions: {
-      description: "What the Hotkey shows when there are no Open Sessions: a new Session, or the Command Palette on its own.",
+      description: 'What the Hotkey shows when there are no Open Sessions: a new Session, or the Command Palette on its own.',
       enum: hotkeyBehaviours,
       default: defaultSettings.hotkeyWithNoOpenSessions,
     },
     theme: {
       description:
         "The Theme's name: one built in, or one from a Theme file in the themes folder next to this file. The Command Palette's Change Theme sets it too.",
-      type: "string",
+      type: 'string',
       minLength: 1,
       default: defaultSettings.theme,
       examples: builtInThemes.map((theme) => theme.name),
@@ -145,28 +145,28 @@ export const configSchema = {
     keyBindings: {
       description:
         'Each action\'s shortcut, such as "Cmd+Shift+D": modifiers (Cmd, Shift, Alt or Option, Ctrl) and one key or key name (Left, Right, Up, Down, Enter, Tab, Space, Backspace, Delete, Escape, Home, End, PageUp, PageDown, Plus, F1 to F20), joined by "+". Cmd or Ctrl is required. null unbinds an action; a shortcut given here is taken away from the action it is bound to by default.',
-      type: "object",
+      type: 'object',
       additionalProperties: false,
       properties: Object.fromEntries(
         Object.entries(defaultKeyBindings).map(([action, shortcut]) => [
           action,
-          { type: ["string", "null"], default: shortcut },
-        ]),
+          { type: ['string', 'null'], default: shortcut },
+        ])
       ),
     },
   },
   additionalProperties: false,
-} as const;
+} as const
 
 // The file the schema is written to, next to the config file.
-export const configSchemaFileName = "config.schema.json";
+export const configSchemaFileName = 'config.schema.json'
 
 // What the config file starts as: nothing but the schema, which editors complete from.
 export const starterConfig = `{
   // Your editor suggests every setting and its default from the schema.
   "$schema": "./${configSchemaFileName}"
 }
-`;
+`
 
 export interface ParsedConfig {
   settings: Settings;
@@ -176,19 +176,19 @@ export interface ParsedConfig {
 
 // The settings in the config file's text, or the defaults without a file; undefined when the text isn't a JSON object,
 // comments allowed. Editors read `$schema`, so it's no setting. The theme setting names one of `themeNames`.
-export function parseConfig(text: string | undefined, themeNames: readonly string[]): ParsedConfig | undefined {
-  const settings = { ...defaultSettings };
-  const rejected: string[] = [];
-  const config = text === undefined ? {} : readJsonc(text);
-  if (config === undefined) return undefined;
-  const parsers = settingParsers(themeNames);
+export function parseConfig (text: string | undefined, themeNames: readonly string[]): ParsedConfig | undefined {
+  const settings = { ...defaultSettings }
+  const rejected: string[] = []
+  const config = text === undefined ? {} : readJsonc(text)
+  if (config === undefined) return undefined
+  const parsers = settingParsers(themeNames)
   for (const [name, value] of Object.entries(config)) {
-    if (name === "$schema") continue;
+    if (name === '$schema') continue
     const parsed = Object.hasOwn(parsers, name)
       ? parsers[name as keyof Settings](value, (entry) => rejected.push(entry))
-      : invalid;
-    if (parsed === invalid) rejected.push(name);
-    else Object.assign(settings, { [name]: parsed });
+      : invalid
+    if (parsed === invalid) rejected.push(name)
+    else Object.assign(settings, { [name]: parsed })
   }
-  return { settings, rejected };
+  return { settings, rejected }
 }
