@@ -38,6 +38,10 @@ A Session in the cycle of Sessions the user switches between. Only one Open Sess
 The one Open Session that is visible.
 _Avoid_: Active Session, front window
 
+**Current Tab**:
+The Tab of the Current Session that is visible.
+_Avoid_: Active Tab
+
 **Closed Session**:
 A Session that is saved but out of the cycle. Closing a Session's window makes it a Closed Session; it can be opened again. A Session with neither a name nor a Root directory, closed while the user has chosen to delete such Sessions, is deleted instead.
 _Avoid_: Detached, archived

@@ -13,6 +13,17 @@ const sessionSearchOrders = ['openFirst', 'cycle'] as const
 // together, each by the cycle order, or by how well they match once there's a search.
 export type SessionSearchOrder = (typeof sessionSearchOrders)[number]
 
+const tabSearchScopes = ['all', 'currentSession'] as const
+
+// Whose Tabs the Command Palette's `tt ` lists: every Open Session's, or the Current Session's alone.
+export type TabSearchScope = (typeof tabSearchScopes)[number]
+
+const paneSearchScopes = ['all', 'currentSession', 'currentTab'] as const
+
+// Whose Panes the Command Palette's `pp ` lists: every Open Session's, the Current Session's alone, or the Current
+// Tab's alone.
+export type PaneSearchScope = (typeof paneSearchScopes)[number]
+
 const hotkeyBehaviours = ['new', 'palette'] as const
 
 // What the Hotkey shows with no Open Sessions: a new Session, or the Command Palette on its own.
@@ -57,6 +68,8 @@ export interface Settings {
   scrollbackLines: number;
   cycleOrder: CycleOrder;
   sessionSearchOrder: SessionSearchOrder;
+  tabSearchScope: TabSearchScope;
+  paneSearchScope: PaneSearchScope;
   hotkeyWithNoOpenSessions: HotkeyWithNoOpenSessions;
   loginLaunch: LoginLaunch;
   hiddenStartWithNoOpenSessions: HiddenStartWithNoOpenSessions;
@@ -74,6 +87,8 @@ export const defaultSettings: Settings = {
   scrollbackLines: 10_000,
   cycleOrder: 'alphabetical',
   sessionSearchOrder: 'openFirst',
+  tabSearchScope: 'all',
+  paneSearchScope: 'all',
   hotkeyWithNoOpenSessions: 'new',
   loginLaunch: 'hidden',
   hiddenStartWithNoOpenSessions: 'hotkey',
@@ -110,6 +125,8 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
   },
   cycleOrder: oneOf(cycleOrders),
   sessionSearchOrder: oneOf(sessionSearchOrders),
+  tabSearchScope: oneOf(tabSearchScopes),
+  paneSearchScope: oneOf(paneSearchScopes),
   hotkeyWithNoOpenSessions: oneOf(hotkeyBehaviours),
   loginLaunch: oneOf(loginLaunches),
   hiddenStartWithNoOpenSessions: oneOf(hiddenStartBehaviours),
@@ -175,6 +192,18 @@ export const configSchema = {
         "The order the Command Palette lists Sessions in when the query starts with ss: openFirst lists the Open Sessions before the Closed ones, cycle lists them together; each by cycleOrder, or by how well they match once there's a search.",
       enum: sessionSearchOrders,
       default: defaultSettings.sessionSearchOrder,
+    },
+    tabSearchScope: {
+      description:
+        "Whose Tabs the Command Palette lists when the query starts with tt: all lists every Open Session's, currentSession the Current Session's alone. A query without a prefix lists every Open Session's either way.",
+      enum: tabSearchScopes,
+      default: defaultSettings.tabSearchScope,
+    },
+    paneSearchScope: {
+      description:
+        "Whose Panes the Command Palette lists when the query starts with pp: all lists every Open Session's, currentSession the Current Session's alone, currentTab the Current Tab's alone. A query without a prefix lists every Open Session's either way.",
+      enum: paneSearchScopes,
+      default: defaultSettings.paneSearchScope,
     },
     hotkeyWithNoOpenSessions: {
       description: 'What the Hotkey shows when there are no Open Sessions: a new Session, or the Command Palette on its own.',

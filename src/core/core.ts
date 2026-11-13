@@ -11,11 +11,13 @@ import {
   defaultSettings,
   type MenuBarIcon,
   menuBarIcons,
+  type PaneSearchScope,
   type ParsedConfig,
   parseConfig,
   type Settings,
   type StartDirectory,
   starterConfig,
+  type TabSearchScope,
 } from './config'
 import { fuzzyScore } from './fuzzy'
 import { setJsoncProperty } from './jsonc'
@@ -774,28 +776,35 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return sessionsInCycleOrder().filter((session) => session.status === 'open')
   }
 
-  function tabResults (): PaletteResult[] {
-    return openSessionsInCycleOrder().flatMap((session) =>
-      session.tabs.map((tab) => ({
-        type: 'tab' as const,
-        tabId: tab.id,
-        label: titleOf(tab),
-        sessionLabel: labelOf(session),
-      }))
-    )
+  // The Tabs a search scope covers, each with its Session, Session by Session in cycle order: every Open Session's, the
+  // Current Session's, or the Current Tab alone.
+  function tabsInScope (scope: TabSearchScope | PaneSearchScope) {
+    return openSessionsInCycleOrder().flatMap((session) => {
+      if (scope !== 'all' && session.id !== state.currentSessionId) return []
+      const current = focusedTab(session)
+      const tabs = scope === 'currentTab' ? (current ? [current] : []) : session.tabs
+      return tabs.map((tab) => ({ session, tab }))
+    })
   }
 
-  function paneResults (): PaletteResult[] {
-    return openSessionsInCycleOrder().flatMap((session) =>
-      session.tabs.flatMap((tab) =>
-        tab.panes.map((pane) => ({
-          type: 'pane' as const,
-          paneId: pane.id,
-          label: paneTitle(pane),
-          workingDirectory: displayDirectory(pane.workingDirectory),
-          sessionLabel: labelOf(session),
-        }))
-      )
+  function tabResults (tabs = tabsInScope('all')): PaletteResult[] {
+    return tabs.map(({ session, tab }) => ({
+      type: 'tab' as const,
+      tabId: tab.id,
+      label: titleOf(tab),
+      sessionLabel: labelOf(session),
+    }))
+  }
+
+  function paneResults (tabs = tabsInScope('all')): PaletteResult[] {
+    return tabs.flatMap(({ session, tab }) =>
+      tab.panes.map((pane) => ({
+        type: 'pane' as const,
+        paneId: pane.id,
+        label: paneTitle(pane),
+        workingDirectory: displayDirectory(pane.workingDirectory),
+        sessionLabel: labelOf(session),
+      }))
     )
   }
 
@@ -812,8 +821,8 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   // offered.
   const paletteScopes: Record<string, (search: string) => PaletteResult[]> = {
     'ss ': searchSessions,
-    'tt ': (search) => searchResults(tabResults(), search),
-    'pp ': (search) => searchResults(paneResults(), search),
+    'tt ': (search) => searchResults(tabResults(tabsInScope(settings.tabSearchScope)), search),
+    'pp ': (search) => searchResults(paneResults(tabsInScope(settings.paneSearchScope)), search),
   }
 
   // The results that match the query, in the order they're offered.

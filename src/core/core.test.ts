@@ -2874,6 +2874,64 @@ describe('the Command Palette', () => {
     ])
   })
 
+  describe('the Tab search scope setting', () => {
+    it('set to currentSession, narrows with `tt ` to the Tabs of the Current Session alone', () => {
+      const { core } = startWithPaletteSessions()
+      core.configChanged('{ "tabSearchScope": "currentSession" }')
+
+      expect(summarize(core.paletteResults('tt '))).toEqual(['tab me'])
+
+      core.focusNextSession()
+      core.focusNextSession()
+      expect(summarize(core.paletteResults('tt '))).toEqual(['tab web', 'tab vim'])
+      expect(summarize(core.paletteResults('tt v'))).toEqual(['tab vim'])
+      expect(summarize(core.paletteResults('me'))).toContain('tab me')
+    })
+
+    it('rejects anything else, currentTab included, keeping all', () => {
+      const { core, effects } = startCore(undefined, '{ "tabSearchScope": "currentTab" }')
+
+      expect(core.settings().tabSearchScope).toBe('all')
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['tabSearchScope'] }])
+    })
+  })
+
+  describe('the Pane search scope setting', () => {
+    it('set to currentSession, narrows with `pp ` to the Panes of the Current Session alone', () => {
+      const { core } = startWithPaletteSessions()
+      core.configChanged('{ "paneSearchScope": "currentSession" }')
+
+      expect(summarize(core.paletteResults('pp '))).toEqual(['pane me'])
+
+      core.focusNextSession()
+      core.focusNextSession()
+      expect(summarize(core.paletteResults('pp '))).toEqual(['pane web', 'pane src', 'pane vim'])
+      expect(summarize(core.paletteResults('pp vim'))).toEqual(['pane vim'])
+      expect(summarize(core.paletteResults('me'))).toContain('pane me')
+    })
+
+    it('set to currentTab, narrows with `pp ` to the Panes of the Current Tab alone', () => {
+      const { core, web } = startWithPaletteSessions()
+      core.configChanged('{ "paneSearchScope": "currentTab" }')
+      core.focusNextSession()
+      core.focusNextSession()
+
+      expect(summarize(core.paletteResults('pp '))).toEqual(['pane src', 'pane vim'])
+      expect(summarize(core.paletteResults('pp vim'))).toEqual(['pane vim'])
+
+      core.focusTab(web, 0)
+      expect(summarize(core.paletteResults('pp '))).toEqual(['pane web'])
+      expect(summarize(core.paletteResults('me'))).toContain('pane me')
+    })
+
+    it('rejects anything else, keeping all', () => {
+      const { core, effects } = startCore(undefined, '{ "paneSearchScope": "currentPane" }')
+
+      expect(core.settings().paneSearchScope).toBe('all')
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['paneSearchScope'] }])
+    })
+  })
+
   it('without a prefix, offers every Session, then every Tab and Pane of Open Sessions, then every app action', () => {
     const { core } = startWithPaletteSessions()
 
