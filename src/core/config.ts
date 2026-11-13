@@ -7,6 +7,12 @@ const cycleOrders = ['alphabetical', 'recent', 'created'] as const
 // The order Open Sessions are cycled through: by name, by most recent use, or by creation.
 export type CycleOrder = (typeof cycleOrders)[number]
 
+const sessionSearchOrders = ['openFirst', 'cycle'] as const
+
+// The order the Command Palette's `ss ` lists Sessions in: the Open ones before the Closed ones, or Open and Closed
+// together, each by the cycle order, or by how well they match once there's a search.
+export type SessionSearchOrder = (typeof sessionSearchOrders)[number]
+
 const hotkeyBehaviours = ['new', 'palette'] as const
 
 // What the Hotkey shows with no Open Sessions: a new Session, or the Command Palette on its own.
@@ -50,6 +56,7 @@ export interface Settings {
   // How many lines of each Pane's scrollback are kept, `unlimited` read as `unlimitedScrollbackLines`.
   scrollbackLines: number;
   cycleOrder: CycleOrder;
+  sessionSearchOrder: SessionSearchOrder;
   hotkeyWithNoOpenSessions: HotkeyWithNoOpenSessions;
   loginLaunch: LoginLaunch;
   hiddenStartWithNoOpenSessions: HiddenStartWithNoOpenSessions;
@@ -66,6 +73,7 @@ export interface Settings {
 export const defaultSettings: Settings = {
   scrollbackLines: 10_000,
   cycleOrder: 'alphabetical',
+  sessionSearchOrder: 'openFirst',
   hotkeyWithNoOpenSessions: 'new',
   loginLaunch: 'hidden',
   hiddenStartWithNoOpenSessions: 'hotkey',
@@ -101,6 +109,7 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
       : invalid
   },
   cycleOrder: oneOf(cycleOrders),
+  sessionSearchOrder: oneOf(sessionSearchOrders),
   hotkeyWithNoOpenSessions: oneOf(hotkeyBehaviours),
   loginLaunch: oneOf(loginLaunches),
   hiddenStartWithNoOpenSessions: oneOf(hiddenStartBehaviours),
@@ -160,6 +169,12 @@ export const configSchema = {
       description: 'The order Open Sessions are cycled through and listed in: by name, by most recent use, or by creation.',
       enum: cycleOrders,
       default: defaultSettings.cycleOrder,
+    },
+    sessionSearchOrder: {
+      description:
+        "The order the Command Palette lists Sessions in when the query starts with ss: openFirst lists the Open Sessions before the Closed ones, cycle lists them together; each by cycleOrder, or by how well they match once there's a search.",
+      enum: sessionSearchOrders,
+      default: defaultSettings.sessionSearchOrder,
     },
     hotkeyWithNoOpenSessions: {
       description: 'What the Hotkey shows when there are no Open Sessions: a new Session, or the Command Palette on its own.',

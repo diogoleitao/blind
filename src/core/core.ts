@@ -799,18 +799,28 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     )
   }
 
-  // The results each prefix narrows the Command Palette to.
-  const paletteScopes: Record<string, () => PaletteResult[]> = {
-    'ss ': sessionResults,
-    'tt ': tabResults,
-    'pp ': paneResults,
+  // The Sessions that match the search, best first, the Open ones before the Closed ones unless the sessionSearchOrder
+  // setting keeps them together.
+  function searchSessions (search: string) {
+    const found = searchResults(sessionResults(), search)
+    if (settings.sessionSearchOrder === 'cycle') return found
+    const isClosed = (result: PaletteResult) => result.type === 'session' && result.closed
+    return [...found.filter((result) => !isClosed(result)), ...found.filter(isClosed)]
   }
 
-  // The results a query's prefix narrows to, in the order they're offered, and the rest of the query to search them by.
-  function parsePaletteQuery (query: string) {
+  // What each prefix narrows the Command Palette to: the results that match the rest of the query, in the order they're
+  // offered.
+  const paletteScopes: Record<string, (search: string) => PaletteResult[]> = {
+    'ss ': searchSessions,
+    'tt ': (search) => searchResults(tabResults(), search),
+    'pp ': (search) => searchResults(paneResults(), search),
+  }
+
+  // The results that match the query, in the order they're offered.
+  function searchPalette (query: string) {
     const prefix = Object.keys(paletteScopes).find((candidate) => query.startsWith(candidate))
-    if (prefix) return { results: paletteScopes[prefix](), search: query.slice(prefix.length) }
-    return { results: [...sessionResults(), ...tabResults(), ...paneResults(), ...actionResults()], search: query }
+    if (prefix) return paletteScopes[prefix](query.slice(prefix.length))
+    return searchResults([...sessionResults(), ...tabResults(), ...paneResults(), ...actionResults()], query)
   }
 
   function reopenSession (sessionId: SessionId) {
@@ -1193,10 +1203,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
         actions: menuBarActions.map((action) => ({ action, label: paletteActionLabels[action] })),
       }
     },
-    paletteResults (query) {
-      const { results, search } = parsePaletteQuery(query)
-      return searchResults(results, search)
-    },
+    paletteResults: searchPalette,
     previewTheme: command((name) => {
       if (!findTheme(name)) return
       previewedTheme = name

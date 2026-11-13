@@ -2762,23 +2762,84 @@ describe('the Command Palette', () => {
     return { ...started, web, api, old, unnamed }
   }
 
-  it('narrows to every Session with `ss `, Open and Closed, in cycle order, marking the Closed ones', () => {
+  it('narrows to every Session with `ss `, the Open ones in cycle order and then the Closed ones, marking them', () => {
     const { core, web, api, old, unnamed } = startWithPaletteSessions()
 
     expect(core.paletteResults('ss ')).toEqual([
       { type: 'session', sessionId: api, label: 'api', closed: false },
-      { type: 'session', sessionId: old, label: 'old', closed: true },
       { type: 'session', sessionId: web, label: 'web', closed: false },
       { type: 'session', sessionId: unnamed, label: 'Session 1 (~)', closed: false },
+      { type: 'session', sessionId: old, label: 'old', closed: true },
     ])
 
     core.configChanged('{ "cycleOrder": "created" }')
     expect(summarize(core.paletteResults('ss '))).toEqual([
       'session web',
       'session api',
-      'session old',
       'session Session 1 (~)',
+      'session old',
     ])
+  })
+
+  it('searches with `ss ` the Open Sessions first, a Closed Session coming after any Open match however well it matches', () => {
+    const { core } = startWithPaletteSessions()
+
+    expect(summarize(core.paletteResults('ss o'))).toEqual(['session Session 1 (~)', 'session old'])
+  })
+
+  it('narrows with `ss ` to the Closed Sessions in cycle order too', () => {
+    const { core, web } = startWithPaletteSessions()
+    core.closeSession(web)
+
+    expect(summarize(core.paletteResults('ss '))).toEqual([
+      'session api',
+      'session Session 1 (~)',
+      'session old',
+      'session web',
+    ])
+
+    core.configChanged('{ "cycleOrder": "created" }')
+    expect(summarize(core.paletteResults('ss '))).toEqual([
+      'session api',
+      'session Session 1 (~)',
+      'session web',
+      'session old',
+    ])
+  })
+
+  it('searches with `ss ` the Open Sessions best match first, keeping cycle order on ties', () => {
+    const { core, web, api } = startWithPaletteSessions()
+    core.renameSession(api, 'docs')
+    core.renameSession(web, 'ops')
+
+    expect(summarize(core.paletteResults('ss o'))).toEqual([
+      'session ops',
+      'session docs',
+      'session Session 1 (~)',
+      'session old',
+    ])
+  })
+
+  describe('the Session search order setting', () => {
+    it('set to cycle, narrows with `ss ` to every Session in cycle order alone, Open and Closed together', () => {
+      const { core } = startWithPaletteSessions()
+      core.configChanged('{ "sessionSearchOrder": "cycle" }')
+
+      expect(summarize(core.paletteResults('ss '))).toEqual([
+        'session api',
+        'session old',
+        'session web',
+        'session Session 1 (~)',
+      ])
+      expect(summarize(core.paletteResults('ss o'))).toEqual(['session old', 'session Session 1 (~)'])
+    })
+
+    it('rejects anything else, keeping openFirst', () => {
+      const { core, effects } = startCore(undefined, '{ "sessionSearchOrder": "closedFirst" }')
+
+      expect(core.settings().sessionSearchOrder).toBe('openFirst')
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['sessionSearchOrder'] }])
+    })
   })
 
   it('narrows to the Tabs of Open Sessions with `tt `, by their titles, Session by Session in cycle order', () => {
