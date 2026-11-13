@@ -13,6 +13,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "install-app": "electron-vite build && iconutil -c icns build/icon.iconset -o build/icon.icns && electron-builder --mac && rm -rf /Applications/Blind.app && ditto dist/mac*/Blind.app /Applications/Blind.app",
+    "prepare": "git config core.hooksPath .githooks || true",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper && node node_modules/electron/install.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.core.json",
     "test": "vitest run",
