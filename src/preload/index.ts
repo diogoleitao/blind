@@ -5,8 +5,8 @@ const api: BlindApi = {
   onSessionView: (listener) => {
     ipcRenderer.on(channels.sessionView, (_event, view) => listener(view))
   },
-  onTerminalSettings: (listener) => {
-    ipcRenderer.on(channels.terminalSettings, (_event, settings) => listener(settings))
+  onWindowSettings: (listener) => {
+    ipcRenderer.on(channels.windowSettings, (_event, settings) => listener(settings))
   },
   focusPane: (paneId) => ipcRenderer.send(channels.focusPane, paneId),
   attachPane: (paneId, size) => ipcRenderer.invoke(channels.attachPane, paneId, size),

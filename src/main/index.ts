@@ -17,7 +17,7 @@ import {
 import type { MenuBarIcon } from '../core/config'
 import { createCore, type PaletteResult } from '../core/core'
 import type { PaneId, SessionId } from '../core/state'
-import { channels, type PalettePrompt, type SessionView, type TerminalSize } from '../shared/ipc'
+import { channels, type PalettePrompt, type SessionView, type TerminalSize, type WindowSettings } from '../shared/ipc'
 import { type ConfigRead, createConfigFile } from './config-file'
 import { fadeWindow } from './fade'
 import { createFileStateStore } from './file-state-store'
@@ -295,6 +295,7 @@ app.whenReady().then(() => {
     const session = core.state().sessions.find((candidate) => candidate.id === sessionId)
     if (!session) return undefined
     return {
+      sessionLabel: core.shortSessionLabel(sessionId) ?? '',
       tabs: session.tabs.map((tab) => ({
         id: tab.id,
         title: core.tabTitle(tab.id) ?? '',
@@ -312,10 +313,11 @@ app.whenReady().then(() => {
 
   core.onStateChange(() => windows.forEach((window, sessionId) => sendSessionView(sessionId, window)))
 
-  function sendTerminalSettings (window: BrowserWindow) {
-    if (!window.isDestroyed()) {
-      window.webContents.send(channels.terminalSettings, { scrollbackLines: core.settings().scrollbackLines })
-    }
+  function sendWindowSettings (window: BrowserWindow) {
+    if (window.isDestroyed()) return
+    const { scrollbackLines, sessionLabelPosition } = core.settings()
+    const settings: WindowSettings = { scrollbackLines, sessionLabelPosition }
+    window.webContents.send(channels.windowSettings, settings)
   }
 
   function sendTheme (window: BrowserWindow) {
@@ -388,7 +390,7 @@ app.whenReady().then(() => {
     window.setAlwaysOnTop(true, 'screen-saver')
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
     window.webContents.on('did-finish-load', () => {
-      sendTerminalSettings(window)
+      sendWindowSettings(window)
       sendTheme(window)
     })
     return window
@@ -439,7 +441,7 @@ app.whenReady().then(() => {
   applyConfig(configFile.read())
   configFile.watch((read) => {
     applyConfig(read)
-    allWindows().forEach(sendTerminalSettings)
+    allWindows().forEach(sendWindowSettings)
     // The cycle order setting may have changed.
     menuBarIcon.update()
   })

@@ -259,6 +259,8 @@ export interface Core {
   tabTitle(tabId: TabId): string | undefined;
   // The Session's name, or for an Unnamed Session `Session N (<dir>)` with the focused Pane's working directory.
   sessionLabel(sessionId: SessionId): string | undefined;
+  // The Session's name, or for an Unnamed Session `Session N` alone, as the Tab bar shows it.
+  shortSessionLabel(sessionId: SessionId): string | undefined;
   // Every Session, Open or Closed, in the order cycling follows: Unnamed Sessions after the named ones.
   sessionsInCycleOrder(): Session[];
   menuBar(): MenuBar;
@@ -741,11 +743,16 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return directory.startsWith(`${homeDirectory}/`) ? `~${directory.slice(homeDirectory.length)}` : directory
   }
 
+  // The Session's name, or an Unnamed Session's numbered placeholder label, e.g. `Session 1`.
+  function shortLabelOf (session: Session) {
+    return session.name ?? `Session ${session.labelNumber}`
+  }
+
   function labelOf (session: Session) {
     if (session.name !== undefined) return session.name
     const tab = focusedTab(session)
     const directory = tab ? focusedPane(tab).workingDirectory : homeDirectory
-    return `Session ${session.labelNumber} (${displayDirectory(directory)})`
+    return `${shortLabelOf(session)} (${displayDirectory(directory)})`
   }
 
   // The Pane's running program, or its working directory's folder name while the Shell is idle.
@@ -1198,6 +1205,10 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     sessionLabel (sessionId) {
       const session = findSession(sessionId)
       return session && labelOf(session)
+    },
+    shortSessionLabel (sessionId) {
+      const session = findSession(sessionId)
+      return session && shortLabelOf(session)
     },
     sessionsInCycleOrder,
     menuBar () {

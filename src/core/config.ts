@@ -52,6 +52,11 @@ const startDirectories = ['root', 'current', 'home'] as const
 // the current Pane's working directory; or the home directory.
 export type StartDirectory = (typeof startDirectories)[number]
 
+const sessionLabelPositions = ['belowTabs', 'aboveTabs'] as const
+
+// Where the Tab bar shows the Session's label: on a row below the Tabs, or above them.
+export type SessionLabelPosition = (typeof sessionLabelPositions)[number]
+
 export const menuBarIcons = ['monochrome', 'colour'] as const
 
 // The menu bar icon's look: one colour that follows the menu bar's, light or dark, or the icon's own colours.
@@ -76,6 +81,7 @@ export interface Settings {
   sessionsWithoutNameOrRootOnClose: SessionsWithoutNameOrRootOnClose;
   newTabDirectory: StartDirectory;
   splitPaneDirectory: StartDirectory;
+  sessionLabelPosition: SessionLabelPosition;
   // Each action's shortcut; null for an unbound action.
   keyBindings: Record<BoundAction, Shortcut | null>;
   // The name of the Theme in effect, built in or from a Theme file.
@@ -95,6 +101,7 @@ export const defaultSettings: Settings = {
   sessionsWithoutNameOrRootOnClose: 'keep',
   newTabDirectory: 'root',
   splitPaneDirectory: 'current',
+  sessionLabelPosition: 'belowTabs',
   keyBindings: Object.fromEntries(
     Object.entries(defaultKeyBindings).map(([action, shortcut]) => [action, shortcut && parseShortcut(shortcut)!])
   ) as Settings['keyBindings'],
@@ -133,6 +140,7 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
   sessionsWithoutNameOrRootOnClose: oneOf(sessionsWithoutNameOrRootOnCloseBehaviours),
   newTabDirectory: oneOf(startDirectories),
   splitPaneDirectory: oneOf(startDirectories),
+  sessionLabelPosition: oneOf(sessionLabelPositions),
   keyBindings: parseKeyBindings,
   // Theme names are unique ignoring case, so the setting matches one ignoring case and takes its spelling.
   theme: (value) =>
@@ -238,6 +246,11 @@ export const configSchema = {
         "Where the new Pane of a split starts: root is the Session's Root directory, or the split Pane's working directory without one; current is the split Pane's working directory; home is the home directory.",
       enum: startDirectories,
       default: defaultSettings.splitPaneDirectory,
+    },
+    sessionLabelPosition: {
+      description: "Where the Tab bar shows the Session's label: on a row below the Tabs, or above them.",
+      enum: sessionLabelPositions,
+      default: defaultSettings.sessionLabelPosition,
     },
     theme: {
       description:

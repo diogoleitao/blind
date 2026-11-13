@@ -1,4 +1,4 @@
-import type { MenuBarIcon } from '../core/config'
+import type { MenuBarIcon, SessionLabelPosition } from '../core/config'
 import type { Effect, PaletteResult } from '../core/core'
 import type { PaneRect } from '../core/layout'
 import type { PaneId, TabId } from '../core/state'
@@ -9,15 +9,17 @@ export interface TerminalSize {
   rows: number;
 }
 
-// What a Session's window draws: its Tabs, in order, each with where its Panes sit.
+// What a Session's window draws: the Session's label and its Tabs, in order, each with where its Panes sit.
 export interface SessionView {
+  sessionLabel: string;
   tabs: { id: TabId; title: string; panes: PaneRect[]; focusedPaneId: PaneId }[];
   focusedTabId?: TabId;
 }
 
-// The settings a window's terminals follow.
-export interface TerminalSettings {
+// The settings a window follows: its terminals' scrollback, and where its Tab bar shows the Session's label.
+export interface WindowSettings {
   scrollbackLines: number;
+  sessionLabelPosition: SessionLabelPosition;
 }
 
 // What the Command Palette asks for in place of a search: a Session's name or a Tab's title.
@@ -25,7 +27,7 @@ export type PalettePrompt = Extract<Effect, { type: 'askSessionName' | 'askTabTi
 
 export const channels = {
   sessionView: 'session:view',
-  terminalSettings: 'settings:terminal',
+  windowSettings: 'settings:window',
   focusPane: 'pane:focus',
   attachPane: 'pane:attach',
   writeToPane: 'pane:write',
@@ -61,7 +63,7 @@ export interface BlindApi {
   // Called once the page has loaded, and again whenever the Session changes.
   onSessionView(listener: (view: SessionView) => void): void;
   // Called once the page has loaded, before its Session view, and again whenever the config file changes them.
-  onTerminalSettings(listener: (settings: TerminalSettings) => void): void;
+  onWindowSettings(listener: (settings: WindowSettings) => void): void;
   focusPane(paneId: PaneId): void;
   attachPane(paneId: PaneId, size: TerminalSize): Promise<void>;
   writeToPane(paneId: PaneId, data: string): void;

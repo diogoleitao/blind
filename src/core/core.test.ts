@@ -244,6 +244,38 @@ describe("an Unnamed Session's label", () => {
   })
 })
 
+describe("the Tab bar's Session label", () => {
+  it("shows an Unnamed Session's numbered placeholder label without its working directory", () => {
+    const { core, shellHost } = startCore()
+    core.newSession()
+    const [first, second] = core.state().sessions
+
+    shellHost.changeWorkingDirectory(second.tabs[0].panes[0].id, '/Users/me/code/api')
+
+    expect(core.shortSessionLabel(first.id)).toBe('Session 1')
+    expect(core.shortSessionLabel(second.id)).toBe('Session 2')
+  })
+
+  it("shows a Session's name once it's renamed or named by setting its Root directory", () => {
+    const { core, shellHost } = startCore()
+    core.newSession()
+    const [first, second] = core.state().sessions
+
+    core.renameSession(first.id, 'api')
+    shellHost.changeWorkingDirectory(second.tabs[0].panes[0].id, '/Users/me/code/web')
+    core.setSessionRoot(second.id)
+
+    expect(core.shortSessionLabel(first.id)).toBe('api')
+    expect(core.shortSessionLabel(second.id)).toBe('web')
+  })
+
+  it("is absent for a Session that doesn't exist", () => {
+    const { core } = startCore()
+
+    expect(core.shortSessionLabel('missing')).toBeUndefined()
+  })
+})
+
 describe('cycling the Current Session', () => {
   function labelsInCycleOrder (core: ReturnType<typeof startCore>['core']) {
     return core.sessionsInCycleOrder().map((session) => core.sessionLabel(session.id))
@@ -1721,6 +1753,41 @@ describe('Themes', () => {
     })
   })
 
+  it("gives each built-in Theme an accent, for the Session's label and the focused Tab, and a text colour on it", () => {
+    const { core } = startCore()
+    const accents = ['Default', 'Catppuccin', 'Tokyo Night', 'Rosé Pine', 'Gruvbox'].map((name) => {
+      core.configChanged(JSON.stringify({ theme: name }))
+      const { accent, accentText } = core.theme().chrome
+      return { name, accent, accentText }
+    })
+
+    expect(accents).toEqual([
+      { name: 'Default', accent: '#ffffffd9', accentText: '#000000' },
+      { name: 'Catppuccin', accent: '#89b4fa', accentText: '#1e1e2e' },
+      { name: 'Tokyo Night', accent: '#7aa2f7', accentText: '#1a1b26' },
+      { name: 'Rosé Pine', accent: '#c4a7e7', accentText: '#191724' },
+      { name: 'Gruvbox', accent: '#d79921', accentText: '#282828' },
+    ])
+  })
+
+  it("rejects the focused Tab colours the accent replaced, taking the Default Theme's accent, telling the user", () => {
+    const { core, effects } = startCore()
+    const nord = {
+      name: 'Nord',
+      chrome: { focusedTabText: '#eceff4', focusedTabBackground: '#3b4252' },
+    }
+
+    core.themeFilesChanged([{ fileName: 'nord.jsonc', text: JSON.stringify(nord) }])
+    core.configChanged('{ "theme": "Nord" }')
+
+    expect(core.theme().chrome).toMatchObject({ accent: '#ffffffd9', accentText: '#000000' })
+    expect(core.theme().chrome).not.toHaveProperty('focusedTabText')
+    expect(effects[0]).toEqual({
+      type: 'themesRejected',
+      rejected: ['nord.jsonc: chrome.focusedTabText', 'nord.jsonc: chrome.focusedTabBackground'],
+    })
+  })
+
   it("skips a Theme file that isn't a JSON object or whose name is missing or taken, ignoring case, telling the user", () => {
     const { core, effects } = startCore()
 
@@ -2455,6 +2522,30 @@ describe('the new Tab directory setting', () => {
     core.newTab(sessionId)
 
     expect(shellHost.started.at(-1)?.workingDirectory).toBe('/Users/me')
+  })
+})
+
+describe('the Session label position setting', () => {
+  it("puts the Session's label below the Tabs by default", () => {
+    const { core } = startCore()
+
+    expect(core.settings().sessionLabelPosition).toBe('belowTabs')
+  })
+
+  it('set to aboveTabs, puts it above them, going back below once the config file is gone', () => {
+    const { core } = startCore(undefined, '{ "sessionLabelPosition": "aboveTabs" }')
+    expect(core.settings().sessionLabelPosition).toBe('aboveTabs')
+
+    core.configChanged(undefined)
+
+    expect(core.settings().sessionLabelPosition).toBe('belowTabs')
+  })
+
+  it('rejects anything else, keeping belowTabs, telling the user', () => {
+    const { core, effects } = startCore(undefined, '{ "sessionLabelPosition": "left" }')
+
+    expect(core.settings().sessionLabelPosition).toBe('belowTabs')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['sessionLabelPosition'] }])
   })
 })
 

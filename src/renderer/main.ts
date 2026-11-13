@@ -17,7 +17,7 @@ import { findLinks } from '../core/links'
 import type { PaneId } from '../core/state'
 import { terminalInput } from '../core/terminal-keys'
 import { type Colour, defaultTheme, type Theme } from '../core/themes'
-import type { BlindApi, PalettePrompt, SessionView, TerminalSettings } from '../shared/ipc'
+import type { BlindApi, PalettePrompt, SessionView, WindowSettings } from '../shared/ipc'
 
 declare global {
   interface Window {
@@ -43,10 +43,15 @@ const { blind } = window
 const standalone = location.hash === '#palette'
 const panesElement = document.getElementById('panes')!
 const tabBar = document.getElementById('tab-bar')!
+const tabsElement = document.getElementById('tabs')!
+const sessionLabelPill = document.querySelector('#session-label .pill')!
 const terminals = new Map<PaneId, PaneTerminal>()
 let focusedPaneId: PaneId | undefined
 // Both replaced by the main process's before any terminal opens.
-let terminalSettings: TerminalSettings = { scrollbackLines: defaultSettings.scrollbackLines }
+let windowSettings: WindowSettings = {
+  scrollbackLines: defaultSettings.scrollbackLines,
+  sessionLabelPosition: defaultSettings.sessionLabelPosition,
+}
 let theme: Theme = defaultTheme
 
 // The opacity of the window's background over its blur, as iTerm2's 25% transparency.
@@ -123,7 +128,7 @@ function openPane (rect: PaneRect): PaneTerminal {
   const terminal = new Terminal({
     allowTransparency: true,
     ...terminalOptions(theme),
-    scrollback: terminalSettings.scrollbackLines,
+    scrollback: windowSettings.scrollbackLines,
     macOptionIsMeta: false,
     // The search addon highlights matches with decorations, which xterm.js still counts as proposed API.
     allowProposedApi: true,
@@ -351,17 +356,19 @@ function reportScrollback (paneId: PaneId, pane: PaneTerminal) {
   clearTimeout(pane.reportTimer)
   pane.reportTimer = undefined
   const scrollback = pane.serialize.serialize({
-    scrollback: terminalSettings.scrollbackLines,
+    scrollback: windowSettings.scrollbackLines,
     excludeAltBuffer: true,
     excludeModes: true,
   })
   blind.reportScrollback(paneId, scrollback)
 }
 
-// Open terminals keep their scrollback up to the new number of lines from now on.
-function applyTerminalSettings (settings: TerminalSettings) {
-  terminalSettings = settings
+// Open terminals keep their scrollback up to the new number of lines from now on. The Session's label moves at once,
+// leaving the Tab bar's height, and so the Panes' space, as it was.
+function applyWindowSettings (settings: WindowSettings) {
+  windowSettings = settings
   for (const pane of terminals.values()) pane.terminal.options.scrollback = settings.scrollbackLines
+  tabBar.classList.toggle('label-above', settings.sessionLabelPosition === 'aboveTabs')
 }
 
 function writeToTerminal (paneId: PaneId, data: string) {
@@ -371,14 +378,24 @@ function writeToTerminal (paneId: PaneId, data: string) {
   pane.reportTimer ??= setTimeout(() => reportScrollback(paneId, pane), reportDelayMilliseconds)
 }
 
+// A pill holding the text, which it cuts short with an ellipsis when there's no room.
+function pill (text: string) {
+  const element = document.createElement('span')
+  element.className = 'pill'
+  element.textContent = text
+  return element
+}
+
+// Shown once the Session's view arrives, so the Command Palette on its own has none.
 function renderTabBar (view: SessionView) {
-  tabBar.hidden = view.tabs.length < 2
-  tabBar.replaceChildren(
+  tabBar.hidden = false
+  sessionLabelPill.textContent = view.sessionLabel
+  tabsElement.replaceChildren(
     ...view.tabs.map((tab) => {
       const element = document.createElement('div')
       element.className = 'tab'
       element.classList.toggle('focused', tab.id === view.focusedTabId)
-      element.textContent = tab.title
+      element.append(pill(tab.title))
       return element
     })
   )
@@ -611,7 +628,7 @@ palette.addEventListener('mousedown', (event) => {
 paletteInput.addEventListener('blur', dismissPalette)
 
 applyChromeColours(theme)
-blind.onTerminalSettings(applyTerminalSettings)
+blind.onWindowSettings(applyWindowSettings)
 blind.onTheme(applyTheme)
 blind.onOpenPalette(openPalette)
 blind.onPickTheme(() => openPicker('theme', theme.name))

@@ -45,27 +45,66 @@
       .pane .xterm .xterm-viewport {
         background-color: transparent;
       }
+      /* The Session's label on a row of its own, below the Tabs or, reversed, above them. */
       #tab-bar {
         display: flex;
+        flex-direction: column;
         border-top: 1px solid var(--divider);
         font: 12px system-ui, sans-serif;
         color: var(--tab-text);
       }
+      #tab-bar.label-above {
+        flex-direction: column-reverse;
+      }
       #tab-bar[hidden] {
         display: none;
+      }
+      #tabs {
+        display: flex;
+      }
+      .tab,
+      #session-label {
+        padding: 3px;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
       }
       .tab {
         flex: 1;
         min-width: 0;
-        padding: 5px 8px;
-        text-align: center;
-        white-space: nowrap;
+      }
+      #session-label {
+        padding: 3px 6px;
+        border-top: 1px solid var(--divider);
+      }
+      .label-above #session-label {
+        border-top: none;
+        border-bottom: 1px solid var(--divider);
+      }
+      /* Every pill has a border, clear where unused, so all of them keep the same height. */
+      .pill {
+        display: inline-block;
+        box-sizing: border-box;
+        max-width: 100%;
+        padding: 1px 8px;
+        border: 1px solid transparent;
+        border-radius: 999px;
         overflow: hidden;
         text-overflow: ellipsis;
+        vertical-align: middle;
       }
-      .tab.focused {
-        color: var(--focused-tab-text);
-        background: var(--focused-tab-background);
+      .tab .pill {
+        border-color: var(--divider);
+      }
+      .tab.focused .pill {
+        border-color: transparent;
+        color: var(--accent-text);
+        background: var(--accent);
+        font-weight: 600;
+      }
+      #session-label .pill {
+        border-color: var(--accent);
+        color: var(--accent);
       }
       #palette {
         position: fixed;
@@ -168,7 +207,10 @@
   </head>
   <body>
     <div id="panes"></div>
-    <div id="tab-bar" hidden></div>
+    <div id="tab-bar" hidden>
+      <div id="tabs"></div>
+      <div id="session-label"><span class="pill"></span></div>
+    </div>
     <div id="palette" hidden>
       <input id="palette-input" type="text" spellcheck="false" autocomplete="off" />
       <ul id="palette-results"></ul>

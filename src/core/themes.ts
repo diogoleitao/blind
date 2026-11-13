@@ -37,11 +37,13 @@ export interface TerminalColours {
 
 // The colours of the app's own chrome: the Tab bar, the Command Palette and the Pane dividers.
 export interface ChromeColours {
-  // Between Panes, and above the Tab bar.
+  // Between Panes, above the Tab bar, between its rows, and around the Tabs that aren't focused.
   divider: Colour;
   tabText: Colour;
-  focusedTabText: Colour;
-  focusedTabBackground: Colour;
+  // The outline and text of the Session's label, and the fill of the focused Tab.
+  accent: Colour;
+  // Text on the accent, as the focused Tab's is.
+  accentText: Colour;
   paletteBackground: Colour;
   paletteBorder: Colour;
   paletteText: Colour;
@@ -90,8 +92,8 @@ export const defaultTheme: Theme = {
   chrome: {
     divider: '#ffffff33',
     tabText: '#ffffff8c',
-    focusedTabText: '#ffffff',
-    focusedTabBackground: '#ffffff14',
+    accent: '#ffffffd9',
+    accentText: '#000000',
     paletteBackground: '#1e1e1ef7',
     paletteBorder: '#ffffff26',
     paletteText: '#ffffffd9',
@@ -133,8 +135,8 @@ const alternativeThemes: Theme[] = [
     chrome: {
       divider: '#45475a',
       tabText: '#7f849c',
-      focusedTabText: '#cdd6f4',
-      focusedTabBackground: '#313244',
+      accent: '#89b4fa',
+      accentText: '#1e1e2e',
       paletteBackground: '#181825f7',
       paletteBorder: '#45475a',
       paletteText: '#cdd6f4',
@@ -173,8 +175,8 @@ const alternativeThemes: Theme[] = [
     chrome: {
       divider: '#3b4261',
       tabText: '#565f89',
-      focusedTabText: '#c0caf5',
-      focusedTabBackground: '#292e42',
+      accent: '#7aa2f7',
+      accentText: '#1a1b26',
       paletteBackground: '#16161ef7',
       paletteBorder: '#3b4261',
       paletteText: '#c0caf5',
@@ -213,8 +215,8 @@ const alternativeThemes: Theme[] = [
     chrome: {
       divider: '#403d52',
       tabText: '#6e6a86',
-      focusedTabText: '#e0def4',
-      focusedTabBackground: '#26233a',
+      accent: '#c4a7e7',
+      accentText: '#191724',
       paletteBackground: '#1f1d2ef7',
       paletteBorder: '#403d52',
       paletteText: '#e0def4',
@@ -253,8 +255,8 @@ const alternativeThemes: Theme[] = [
     chrome: {
       divider: '#504945',
       tabText: '#a89984',
-      focusedTabText: '#ebdbb2',
-      focusedTabBackground: '#3c3836',
+      accent: '#d79921',
+      accentText: '#282828',
       paletteBackground: '#1d2021f7',
       paletteBorder: '#504945',
       paletteText: '#ebdbb2',

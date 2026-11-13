@@ -11,7 +11,7 @@ A persistent window of the app that holds one or more Tabs, typically one per re
 _Avoid_: Workspace, Project, Window
 
 **Unnamed Session**:
-A Session without a name. It is shown under a numbered placeholder label with its working directory, e.g. `Session 1 (~/some/dir)`, which is not its name.
+A Session without a name. It is shown under a numbered placeholder label, e.g. `Session 1`, which is not its name, followed by its working directory where there is room, e.g. `Session 1 (~/some/dir)`.
 _Avoid_: Untitled, default name
 
 **Tab**:
