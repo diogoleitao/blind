@@ -11,9 +11,11 @@ import {
 import '@xterm/xterm/css/xterm.css'
 import { defaultSettings } from '../core/config'
 import type { PaletteResult } from '../core/core'
+import type { KeyPress } from '../core/key-bindings'
 import type { PaneRect } from '../core/layout'
 import { findLinks } from '../core/links'
 import type { PaneId } from '../core/state'
+import { terminalInput } from '../core/terminal-keys'
 import { type Colour, defaultTheme, type Theme } from '../core/themes'
 import type { BlindApi, PalettePrompt, SessionView, TerminalSettings } from '../shared/ipc'
 
@@ -136,9 +138,9 @@ function openPane (rect: PaneRect): PaneTerminal {
   terminal.loadAddon(search)
   terminal.registerLinkProvider(linkProvider(paneId, terminal))
   terminal.attachCustomKeyEventHandler((event) => {
-    const jump = wordJump(event)
-    if (jump === undefined) return true
-    if (event.type === 'keydown') terminal.input(jump)
+    const input = terminalInput(keyPress(event))
+    if (input === undefined) return true
+    if (event.type === 'keydown') terminal.input(input)
     return false
   })
   search.onDidChangeResults(({ resultIndex, resultCount }) => {
@@ -153,13 +155,9 @@ function openPane (rect: PaneRect): PaneTerminal {
   return { element, terminal, fit, serialize, search }
 }
 
-// Option+Left and Option+Right move by word as iTerm2's Natural Text Editing has them, sending Esc b and Esc f, which
-// shells bind to moving back and forward a word. Absent for any other key.
-function wordJump ({ key, altKey, metaKey, ctrlKey, shiftKey }: KeyboardEvent) {
-  if (!altKey || metaKey || ctrlKey || shiftKey) return undefined
-  if (key === 'ArrowLeft') return '\x1bb'
-  if (key === 'ArrowRight') return '\x1bf'
-  return undefined
+// A browser key event as the `KeyPress` core decides on.
+function keyPress ({ key, code, metaKey, shiftKey, altKey, ctrlKey }: KeyboardEvent): KeyPress {
+  return { key, code, meta: metaKey, shift: shiftKey, alt: altKey, control: ctrlKey }
 }
 
 // A plain click on a link is left to selecting text.

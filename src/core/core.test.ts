@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCore, type Effect, type PaletteResult } from './core'
-import type { KeyPress } from './key-bindings'
-import { createControllableClock, createFakeShellHost } from './fakes'
+import { createControllableClock, createFakeShellHost, press } from './fakes'
 import { createInMemoryStateStore } from './in-memory-state-store'
 import type { StateStore } from './ports'
 import { idsIn, panesIn, type Session } from './state'
@@ -599,19 +598,6 @@ describe('the Hotkey', () => {
     expect(effects[0]).toEqual({ type: 'settingsRejected', settings: ['hotkeyWithNoOpenSessions'] })
   })
 })
-
-// A key pressed as the keyboard reports it: the key it produces, the physical key, and the modifiers held, e.g.
-// `press("}", "BracketRight", "meta", "shift")`.
-function press (key: string, code: string, ...modifiers: ('meta' | 'shift' | 'alt' | 'control')[]): KeyPress {
-  return {
-    key,
-    code,
-    meta: modifiers.includes('meta'),
-    shift: modifiers.includes('shift'),
-    alt: modifiers.includes('alt'),
-    control: modifiers.includes('control'),
-  }
-}
 
 describe('key bindings', () => {
   it("open the Command Palette over the Session's window with Cmd+K by default", () => {
