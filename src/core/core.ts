@@ -160,8 +160,9 @@ export interface CoreDependencies {
 }
 
 export interface Core {
-  // Started hidden, as the launch at login is, the app stays off screen until the Hotkey shows it.
-  start(options: { hidden: boolean }): void;
+  // The launch at login starts hidden or shown as the loginLaunch setting says; started hidden, the app stays off screen
+  // until the Hotkey shows it. Answers whether the app started shown.
+  start(options: { atLogin: boolean }): { shown: boolean };
   state(): CoreState;
   // With no Open Sessions, shows a new Session or the Command Palette on its own, as the setting says.
   hotkeyPressed(): void;
@@ -630,10 +631,10 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   }
 
   // Wraps a command so that it ends any run of cycle presses.
-  function command<Args extends unknown[]> (run: (...args: Args) => void) {
+  function command<Args extends unknown[], Result> (run: (...args: Args) => Result) {
     return (...args: Args) => {
       cycleStreak = undefined
-      run(...args)
+      return run(...args)
     }
   }
 
@@ -896,12 +897,15 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   }
 
   const core: Core = {
-    start: command(({ hidden }: { hidden: boolean }) => {
-      appShown = !hidden
+    start: command(({ atLogin }: { atLogin: boolean }) => {
+      appShown = !atLogin || settings.loginLaunch === 'shown'
       const saved = stateStore.load()
       if (saved) restore(saved)
-      // Started shown, the app needs a Session to show. Started hidden, it leaves that to the Hotkey.
-      if (appShown && state.currentSessionId === undefined) addSession()
+      // Started shown, the app needs a Session to show. Started hidden at login, it opens one for the Hotkey to show, or
+      // leaves that to the Hotkey, as the setting says.
+      const opensSession = appShown || settings.hiddenStartWithNoOpenSessions === 'new'
+      if (opensSession && state.currentSessionId === undefined) addSession()
+      return { shown: appShown }
     }),
     state: () => state,
     hotkeyPressed: command(() => {

@@ -8,16 +8,16 @@ import { idsIn, panesIn, type Session } from './state'
 import { defaultTheme } from './themes'
 
 // Passing the state store of an earlier core relaunches the app from what that core saved. A config file's text is read
-// before starting, as the app does. `hidden` starts the app hidden, as the launch at login does.
-function startCore (stateStore: StateStore = createInMemoryStateStore(), config?: string, hidden = false) {
+// before starting, as the app does. `atLogin` starts the app as the launch at login does.
+function startCore (stateStore: StateStore = createInMemoryStateStore(), config?: string, atLogin = false) {
   const shellHost = createFakeShellHost()
   const clock = createControllableClock(1_000)
   const core = createCore({ shellHost, stateStore, clock, homeDirectory: '/Users/me' })
   const effects: unknown[] = []
   core.onEffect((effect) => effects.push(effect))
   if (config !== undefined) core.configChanged(config)
-  core.start({ hidden })
-  return { core, shellHost, clock, effects, stateStore }
+  const { shown } = core.start({ atLogin })
+  return { core, shellHost, clock, effects, stateStore, shown }
 }
 
 // A Pane on the left, and on the right one on top of another, which is focused.
@@ -32,6 +32,12 @@ function startWithThreePanes () {
 }
 
 describe('starting', () => {
+  it('starts shown', () => {
+    const { shown } = startCore()
+
+    expect(shown).toBe(true)
+  })
+
   it('opens one Session with one Tab holding one Pane in the home directory', () => {
     const { core } = startCore()
 
@@ -60,36 +66,94 @@ describe('starting', () => {
   })
 })
 
-describe('starting hidden', () => {
-  // Starts the app hidden, as the launch at login does.
-  function startHidden (stateStore?: StateStore, config?: string) {
+describe('the launch at login', () => {
+  function startAtLogin (stateStore?: StateStore, config?: string) {
     return startCore(stateStore, config, true)
   }
 
-  it('shows the Current Session on the first Hotkey press', () => {
-    const before = startCore()
-    const sessionId = before.core.state().currentSessionId
+  describe('starting hidden, by default', () => {
+    it('stays hidden', () => {
+      const { shown } = startAtLogin()
 
-    const { core, effects } = startHidden(before.stateStore)
-    core.hotkeyPressed()
+      expect(shown).toBe(false)
+    })
 
-    expect(effects).toEqual([{ type: 'showApp', sessionId }])
+    it('shows the Current Session on the first Hotkey press', () => {
+      const before = startCore()
+      const sessionId = before.core.state().currentSessionId
+
+      const { core, effects } = startAtLogin(before.stateStore)
+      core.hotkeyPressed()
+
+      expect(effects).toEqual([{ type: 'showApp', sessionId }])
+    })
+
+    it('with no Open Sessions, opens none, so the first Hotkey press does what the setting says', () => {
+      const { core, effects } = startAtLogin(undefined, '{ "hotkeyWithNoOpenSessions": "palette" }')
+
+      expect(core.state().sessions).toEqual([])
+      core.hotkeyPressed()
+      expect(effects).toEqual([{ type: 'showPalette' }])
+    })
+
+    it('requests nothing on focus loss, since the app is already hidden', () => {
+      const { core, effects } = startAtLogin()
+
+      core.focusLost()
+
+      expect(effects).toEqual([])
+    })
+
+    it('with no Open Sessions and set to open a new one, opens it, which the first Hotkey press shows', () => {
+      const { core, effects, shown } = startAtLogin(
+        undefined,
+        '{ "hiddenStartWithNoOpenSessions": "new", "hotkeyWithNoOpenSessions": "palette" }'
+      )
+
+      expect(shown).toBe(false)
+      expect(core.state().sessions).toHaveLength(1)
+      const sessionId = core.state().sessions[0].id
+      expect(core.state().currentSessionId).toBe(sessionId)
+      core.hotkeyPressed()
+      expect(effects).toEqual([{ type: 'showApp', sessionId }])
+    })
+
+    it('with only Closed Sessions saved and set to open a new one, opens it alongside them', () => {
+      const before = startCore()
+      const closed = before.core.state().sessions[0].id
+      before.core.closeSession(closed)
+
+      const { core } = startAtLogin(before.stateStore, '{ "hiddenStartWithNoOpenSessions": "new" }')
+
+      const [saved, opened] = core.state().sessions
+      expect(saved).toMatchObject({ id: closed, status: 'closed' })
+      expect(opened.status).toBe('open')
+      expect(core.state().currentSessionId).toBe(opened.id)
+    })
   })
 
-  it('with no saved Sessions, opens none, so the first Hotkey press does what the setting says', () => {
-    const { core, effects } = startHidden(undefined, '{ "hotkeyWithNoOpenSessions": "palette" }')
+  describe('set to start shown', () => {
+    it('starts shown with a Session, as a launch by hand does', () => {
+      const { core, shown } = startAtLogin(undefined, '{ "loginLaunch": "shown" }')
+
+      expect(shown).toBe(true)
+      expect(core.state().sessions).toHaveLength(1)
+      expect(core.state().currentSessionId).toBe(core.state().sessions[0].id)
+    })
+  })
+
+  it('falls back to starting hidden for a loginLaunch setting naming no way to start, telling the user', () => {
+    const { shown, effects } = startAtLogin(undefined, '{ "loginLaunch": "minimised" }')
+
+    expect(shown).toBe(false)
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['loginLaunch'] }])
+  })
+
+  it('falls back to opening no Session for a hiddenStartWithNoOpenSessions setting naming no behaviour, telling the user', () => {
+    const { core, effects } = startAtLogin(undefined, '{ "hiddenStartWithNoOpenSessions": "palette" }')
 
     expect(core.state().sessions).toEqual([])
-    core.hotkeyPressed()
-    expect(effects).toEqual([{ type: 'showPalette' }])
-  })
-
-  it('requests nothing on focus loss, since the app is already hidden', () => {
-    const { core, effects } = startHidden()
-
-    core.focusLost()
-
-    expect(effects).toEqual([])
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['hiddenStartWithNoOpenSessions'] }])
   })
 })
 

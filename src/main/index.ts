@@ -436,10 +436,9 @@ app.whenReady().then(() => {
     // The cycle order setting may have changed.
     menuBarIcon.update()
   })
-  // The installed app opens at login, hidden until the Hotkey shows it.
+  // The installed app opens at login, hidden or shown as the loginLaunch setting says.
   if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: true })
-  const hidden = app.getLoginItemSettings().wasOpenedAtLogin
-  core.start({ hidden })
-  // Otherwise the app starts shown; showing now, not on ready-to-show, keeps the window in step with the core.
-  if (!hidden) showWindow(windowFor(core.state().currentSessionId!))
+  const { shown } = core.start({ atLogin: app.getLoginItemSettings().wasOpenedAtLogin })
+  // Showing now, not on ready-to-show, keeps the window in step with the core.
+  if (shown) showWindow(windowFor(core.state().currentSessionId!))
 })

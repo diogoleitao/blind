@@ -21,7 +21,7 @@ Terminal windows get buried under everything else, and each project's tabs and s
 - **Themes.** Five built-in Themes, plus your own `.jsonc` files in `~/.config/blind/themes/`. The picker previews each Theme as you move through the list.
 - **One config file.** `~/.config/blind/config.jsonc` comes with a schema for editor autocomplete, applies changes as you save, and rebinds any shortcut.
 - **Menu bar icon.** Lists your Open and Closed Sessions, so any of them is one click away.
-- **Out of the way.** blind is not in the Dock or `Cmd+Tab`, and starts hidden at login.
+- **Out of the way.** blind is not in the Dock or `Cmd+Tab`, and starts hidden at login unless `loginLaunch` says to start shown.
 
 ## Limitations
 
@@ -43,7 +43,7 @@ Builds `Blind.app` and copies it to `/Applications`, replacing any previous copy
 The installed app:
 
 - uses F12 as the Hotkey, so it can run alongside the development app
-- registers itself as a login item and starts hidden at login, until the Hotkey shows it
+- registers itself as a login item and starts hidden at login, until the Hotkey shows it. `loginLaunch` in the config file can start it shown instead, and `hiddenStartWithNoOpenSessions` can have a hidden launch at login with no Open Sessions open one for the first Hotkey press to show
 - is ad-hoc signed and not notarized. Built on this Mac, it opens without a Gatekeeper prompt. A copy downloaded from elsewhere would be blocked.
 
 The app icon is made from `build/icon.iconset`. The app registers itself as a login item each time it starts, so removing it from System Settings > General > Login Items lasts only until Blind is next opened.

@@ -12,6 +12,17 @@ const hotkeyBehaviours = ['new', 'palette'] as const
 // What the Hotkey shows with no Open Sessions: a new Session, or the Command Palette on its own.
 export type HotkeyWithNoOpenSessions = (typeof hotkeyBehaviours)[number]
 
+const loginLaunches = ['hidden', 'shown'] as const
+
+// How the launch at login starts: hidden until the Hotkey shows the app, or shown, as a launch by hand does.
+export type LoginLaunch = (typeof loginLaunches)[number]
+
+const hiddenStartBehaviours = ['new', 'hotkey'] as const
+
+// What a hidden launch at login with no Open Sessions opens: a new Session, which the first Hotkey press shows, or
+// nothing, leaving the first Hotkey press to hotkeyWithNoOpenSessions.
+export type HiddenStartWithNoOpenSessions = (typeof hiddenStartBehaviours)[number]
+
 export const menuBarIcons = ['monochrome', 'colour'] as const
 
 // The menu bar icon's look: one colour that follows the menu bar's, light or dark, or the icon's own colours.
@@ -28,6 +39,8 @@ export interface Settings {
   scrollbackLines: number;
   cycleOrder: CycleOrder;
   hotkeyWithNoOpenSessions: HotkeyWithNoOpenSessions;
+  loginLaunch: LoginLaunch;
+  hiddenStartWithNoOpenSessions: HiddenStartWithNoOpenSessions;
   // Each action's shortcut; null for an unbound action.
   keyBindings: Record<BoundAction, Shortcut | null>;
   // The name of the Theme in effect, built in or from a Theme file.
@@ -39,6 +52,8 @@ export const defaultSettings: Settings = {
   scrollbackLines: 10_000,
   cycleOrder: 'alphabetical',
   hotkeyWithNoOpenSessions: 'new',
+  loginLaunch: 'hidden',
+  hiddenStartWithNoOpenSessions: 'hotkey',
   keyBindings: Object.fromEntries(
     Object.entries(defaultKeyBindings).map(([action, shortcut]) => [action, shortcut && parseShortcut(shortcut)!])
   ) as Settings['keyBindings'],
@@ -69,6 +84,8 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
   },
   cycleOrder: oneOf(cycleOrders),
   hotkeyWithNoOpenSessions: oneOf(hotkeyBehaviours),
+  loginLaunch: oneOf(loginLaunches),
+  hiddenStartWithNoOpenSessions: oneOf(hiddenStartBehaviours),
   keyBindings: parseKeyBindings,
   // Theme names are unique ignoring case, so the setting matches one ignoring case and takes its spelling.
   theme: (value) =>
@@ -127,6 +144,17 @@ export const configSchema = {
       description: 'What the Hotkey shows when there are no Open Sessions: a new Session, or the Command Palette on its own.',
       enum: hotkeyBehaviours,
       default: defaultSettings.hotkeyWithNoOpenSessions,
+    },
+    loginLaunch: {
+      description: 'How the launch at login starts: hidden until the Hotkey shows the app, or shown, as a launch by hand does.',
+      enum: loginLaunches,
+      default: defaultSettings.loginLaunch,
+    },
+    hiddenStartWithNoOpenSessions: {
+      description:
+        'What a hidden launch at login with no Open Sessions opens: a new Session, which the first Hotkey press shows, or nothing, leaving the first Hotkey press to hotkeyWithNoOpenSessions.',
+      enum: hiddenStartBehaviours,
+      default: defaultSettings.hiddenStartWithNoOpenSessions,
     },
     theme: {
       description:
