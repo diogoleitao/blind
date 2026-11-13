@@ -2092,19 +2092,20 @@ describe('renaming a Session', () => {
   })
 })
 
-describe("a Session's Root directory", () => {
-  // The Session's Root directory set at ~/code/api, with its Pane moved on to ~/code/api/src.
-  function startWithRoot () {
-    const started = startCore()
-    const { core, shellHost } = started
-    const session = core.state().sessions[0]
-    const paneId = session.tabs[0].panes[0].id
-    shellHost.changeWorkingDirectory(paneId, '/Users/me/code/api')
-    chooseAction(core, 'Set Session Root')
-    shellHost.changeWorkingDirectory(paneId, '/Users/me/code/api/src')
-    return { ...started, sessionId: session.id }
-  }
+// The Session's Root directory set at ~/code/api, with its Pane moved on to ~/code/api/src. A config file's text is read
+// before starting, as `startCore` reads it.
+function startWithRoot (config?: string) {
+  const started = startCore(undefined, config)
+  const { core, shellHost } = started
+  const session = core.state().sessions[0]
+  const paneId = session.tabs[0].panes[0].id
+  shellHost.changeWorkingDirectory(paneId, '/Users/me/code/api')
+  chooseAction(core, 'Set Session Root')
+  shellHost.changeWorkingDirectory(paneId, '/Users/me/code/api/src')
+  return { ...started, sessionId: session.id }
+}
 
+describe("a Session's Root directory", () => {
   it("is set to the current Pane's working directory", () => {
     const { core } = startWithRoot()
 
@@ -2392,6 +2393,134 @@ describe('deleting a Session', () => {
     core.newSession()
 
     expect(core.sessionLabel(core.state().sessions[1].id)).toBe('Session 1 (~)')
+  })
+})
+
+describe('the new Tab directory setting', () => {
+  it('set to home, starts new Tabs at the home directory, even in a Session with a Root directory', () => {
+    const { core, shellHost, sessionId } = startWithRoot('{ "newTabDirectory": "home" }')
+
+    core.newTab(sessionId)
+
+    const tab = core.state().sessions[0].tabs[1]
+    expect(tab.panes[0].workingDirectory).toBe('/Users/me')
+    expect(shellHost.started.at(-1)).toEqual({ paneId: tab.panes[0].id, workingDirectory: '/Users/me' })
+  })
+
+  it("set to current, starts new Tabs in the current Pane's working directory, even in a Session with a Root directory", () => {
+    const { core, shellHost, sessionId } = startWithRoot('{ "newTabDirectory": "current" }')
+
+    core.newTab(sessionId)
+
+    expect(shellHost.started.at(-1)?.workingDirectory).toBe('/Users/me/code/api/src')
+  })
+
+  it('is root by default', () => {
+    const { core } = startCore()
+
+    expect(core.settings().newTabDirectory).toBe('root')
+  })
+
+  it('rejects anything else, keeping root', () => {
+    const { core, effects } = startCore(undefined, '{ "newTabDirectory": "/Users/me/code" }')
+
+    expect(core.settings().newTabDirectory).toBe('root')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['newTabDirectory'] }])
+  })
+
+  it('set to home, starts the fresh Tab of a Session reopened after closing through its last Tab at the home directory', () => {
+    const { core, shellHost, sessionId } = startWithRoot('{ "newTabDirectory": "home" }')
+    const paneId = core.state().sessions[0].tabs[0].panes[0].id
+    core.newSession()
+    shellHost.exit(paneId)
+
+    core.reopenSession(sessionId)
+
+    expect(shellHost.started.at(-1)?.workingDirectory).toBe('/Users/me')
+  })
+
+  it('set to current, starts the fresh Tab of a Session reopened after closing through its last Tab at its Root directory', () => {
+    const { core, shellHost, sessionId } = startWithRoot('{ "newTabDirectory": "current" }')
+    const paneId = core.state().sessions[0].tabs[0].panes[0].id
+    core.newSession()
+    shellHost.exit(paneId)
+
+    core.reopenSession(sessionId)
+
+    expect(shellHost.started.at(-1)?.workingDirectory).toBe('/Users/me/code/api')
+  })
+
+  it('set to current, starts the fresh Tab of a Session without a Root directory, reopened after closing through its last Tab, at the home directory', () => {
+    const { core, shellHost } = startCore(undefined, '{ "newTabDirectory": "current" }')
+    const closed = core.state().sessions[0]
+    shellHost.changeWorkingDirectory(closed.tabs[0].panes[0].id, '/Users/me/code/api')
+    core.newSession()
+    shellHost.exit(closed.tabs[0].panes[0].id)
+
+    core.reopenSession(closed.id)
+
+    expect(shellHost.started.at(-1)?.workingDirectory).toBe('/Users/me')
+  })
+
+  it('applies to the next Tab once changed', () => {
+    const { core, shellHost, sessionId } = startWithRoot()
+
+    core.configChanged('{ "newTabDirectory": "home" }')
+    core.newTab(sessionId)
+
+    expect(shellHost.started.at(-1)?.workingDirectory).toBe('/Users/me')
+  })
+})
+
+describe('the split Pane directory setting', () => {
+  it('set to root, starts the new Pane at the Root directory', () => {
+    const { core, shellHost, sessionId } = startWithRoot('{ "splitPaneDirectory": "root" }')
+
+    core.splitPane(sessionId, 'vertical')
+
+    const tab = core.state().sessions[0].tabs[0]
+    expect(tab.panes[1].workingDirectory).toBe('/Users/me/code/api')
+    expect(shellHost.started.at(-1)).toEqual({ paneId: tab.panes[1].id, workingDirectory: '/Users/me/code/api' })
+  })
+
+  it("set to root, starts the new Pane in the split Pane's working directory in a Session without a Root directory", () => {
+    const { core, shellHost } = startCore(undefined, '{ "splitPaneDirectory": "root" }')
+    const session = core.state().sessions[0]
+    shellHost.changeWorkingDirectory(session.tabs[0].panes[0].id, '/Users/me/code/api')
+
+    core.splitPane(session.id, 'vertical')
+
+    expect(shellHost.started.at(-1)?.workingDirectory).toBe('/Users/me/code/api')
+  })
+
+  it('set to home, starts the new Pane at the home directory', () => {
+    const { core, shellHost, sessionId } = startWithRoot('{ "splitPaneDirectory": "home" }')
+
+    core.splitPane(sessionId, 'vertical')
+
+    expect(shellHost.started.at(-1)?.workingDirectory).toBe('/Users/me')
+  })
+
+  it('is current by default', () => {
+    const { core } = startCore()
+
+    expect(core.settings().splitPaneDirectory).toBe('current')
+  })
+
+  it('rejects anything else, keeping current', () => {
+    const { core, effects } = startCore(undefined, '{ "splitPaneDirectory": "parent" }')
+
+    expect(core.settings().splitPaneDirectory).toBe('current')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['splitPaneDirectory'] }])
+  })
+
+  it('applies to the next split once changed', () => {
+    const { core, shellHost, sessionId } = startWithRoot()
+
+    core.configChanged('{ "splitPaneDirectory": "root" }')
+    core.splitPane(sessionId, 'vertical')
+
+    expect(shellHost.started.at(-1)?.workingDirectory).toBe('/Users/me/code/api')
   })
 })
 

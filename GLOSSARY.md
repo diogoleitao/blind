@@ -26,7 +26,7 @@ The process running inside a Pane.
 _Avoid_: Session
 
 **Root directory**:
-The optional directory a Session belongs to, always set explicitly, where its new Tabs start. A Session without one starts new Tabs in the current Pane's working directory. Setting one on an Unnamed Session names the Session after the last part of the directory's path.
+The optional directory a Session belongs to, always set explicitly. Its new Tabs start there unless the user has chosen otherwise, and the user can choose for new Panes to start there too. In a Session without one, those start in the working directory of the Pane they open from instead, or the home directory when there is no such Pane. Setting one on an Unnamed Session names the Session after the last part of the directory's path.
 _Avoid_: Project folder, home
 
 ### Continuity

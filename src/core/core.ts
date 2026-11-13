@@ -14,6 +14,7 @@ import {
   type ParsedConfig,
   parseConfig,
   type Settings,
+  type StartDirectory,
   starterConfig,
 } from './config'
 import { fuzzyScore } from './fuzzy'
@@ -201,7 +202,8 @@ export interface Core {
   // Opens an Unnamed Session with one Tab at the home directory and makes it the Current Session.
   newSession(): void;
   // Opens a Closed Session again as the Current Session, restoring it as Restore does. One closed through its last Tab
-  // gets a fresh Tab at its Root directory, or the home directory without one.
+  // gets a fresh Tab at the home directory when the newTabDirectory setting is home, and otherwise at its Root
+  // directory, or the home directory without one.
   reopenSession(sessionId: SessionId): void;
   // Shows the app with the Session chosen from the menu bar icon's menu as the Current Session, reopening a Closed
   // Session first.
@@ -224,8 +226,7 @@ export interface Core {
   // Both move the Current Session through the Open Sessions in cycle order, wrapping around.
   focusPreviousSession(): void;
   focusNextSession(): void;
-  // Opens a Tab after the others and focuses it, at the Session's Root directory, or without one, in the current Pane's
-  // working directory.
+  // Opens a Tab after the others and focuses it, in the directory the newTabDirectory setting picks.
   newTab(sessionId: SessionId): void;
   // Focuses the Tab at a zero-based position, if there is one.
   focusTab(sessionId: SessionId, position: number): void;
@@ -236,7 +237,8 @@ export interface Core {
   renameTab(tabId: TabId, title: string): void;
   // The Tab's title follows its focused Pane again.
   clearTabTitle(tabId: TabId): void;
-  // Splits the focused Pane in two, starting the new half's Shell in the same working directory, and focuses it.
+  // Splits the focused Pane in two, starting the new half's Shell in the directory the splitPaneDirectory setting picks,
+  // and focuses it.
   splitPane(sessionId: SessionId, direction: SplitDirection): void;
   // Closes the focused Pane and stops its Shell, following the same chain as the Shell exiting.
   closePane(sessionId: SessionId): void;
@@ -516,6 +518,14 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       session.status === 'open' ? restartShells(session) : session
     )
     setState({ ...saved.state, sessions })
+  }
+
+  // The directory a new Tab or Pane starts in, given its Session's Root directory and the working directory of the Pane
+  // it opens from.
+  function resolveStartDirectory (setting: StartDirectory, rootDirectory: string | undefined, currentDirectory: string) {
+    if (setting === 'home') return homeDirectory
+    if (setting === 'root') return rootDirectory ?? currentDirectory
+    return currentDirectory
   }
 
   function openTab (workingDirectory: string): Tab {
@@ -807,7 +817,9 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     if (findSession(sessionId)?.status !== 'closed') return
     updateSession(sessionId, (session) => {
       if (session.tabs.length > 0) return { ...restartShells(session), status: 'open' }
-      const tab = openTab(session.rootDirectory ?? homeDirectory)
+      // With no Pane to open from, a Tab that would start in its working directory starts at the Root directory or home.
+      const { rootDirectory } = session
+      const tab = openTab(resolveStartDirectory(settings.newTabDirectory, rootDirectory, rootDirectory ?? homeDirectory))
       return { ...session, status: 'open', tabs: [tab], focusedTabId: tab.id }
     })
     makeCurrent(sessionId)
@@ -1090,13 +1102,16 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       const session = findSession(sessionId)
       const current = session && focusedTab(session)
       if (!current) return
-      const tab = openTab(session.rootDirectory ?? focusedPane(current).workingDirectory)
+      const tab = openTab(
+        resolveStartDirectory(settings.newTabDirectory, session.rootDirectory, focusedPane(current).workingDirectory)
+      )
       updateSession(sessionId, (session) => ({ ...session, tabs: [...session.tabs, tab], focusedTabId: tab.id }))
     }),
     splitPane: command((sessionId, direction) => {
+      const rootDirectory = findSession(sessionId)?.rootDirectory
       updateFocusedTab(sessionId, (tab) => {
         const current = focusedPane(tab)
-        const pane = openPane(current.workingDirectory)
+        const pane = openPane(resolveStartDirectory(settings.splitPaneDirectory, rootDirectory, current.workingDirectory))
         return {
           ...tab,
           panes: tab.panes.flatMap((candidate) => (candidate === current ? [current, pane] : [candidate])),

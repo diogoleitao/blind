@@ -29,6 +29,12 @@ const sessionsWithoutNameOrRootOnCloseBehaviours = ['keep', 'delete'] as const
 // Quitting closes every Open Session, and delete also deletes such Closed Sessions then.
 export type SessionsWithoutNameOrRootOnClose = (typeof sessionsWithoutNameOrRootOnCloseBehaviours)[number]
 
+const startDirectories = ['root', 'current', 'home'] as const
+
+// Where a new Tab or Pane starts: the Session's Root directory, or the current Pane's working directory without one;
+// the current Pane's working directory; or the home directory.
+export type StartDirectory = (typeof startDirectories)[number]
+
 export const menuBarIcons = ['monochrome', 'colour'] as const
 
 // The menu bar icon's look: one colour that follows the menu bar's, light or dark, or the icon's own colours.
@@ -48,6 +54,8 @@ export interface Settings {
   loginLaunch: LoginLaunch;
   hiddenStartWithNoOpenSessions: HiddenStartWithNoOpenSessions;
   sessionsWithoutNameOrRootOnClose: SessionsWithoutNameOrRootOnClose;
+  newTabDirectory: StartDirectory;
+  splitPaneDirectory: StartDirectory;
   // Each action's shortcut; null for an unbound action.
   keyBindings: Record<BoundAction, Shortcut | null>;
   // The name of the Theme in effect, built in or from a Theme file.
@@ -62,6 +70,8 @@ export const defaultSettings: Settings = {
   loginLaunch: 'hidden',
   hiddenStartWithNoOpenSessions: 'hotkey',
   sessionsWithoutNameOrRootOnClose: 'keep',
+  newTabDirectory: 'root',
+  splitPaneDirectory: 'current',
   keyBindings: Object.fromEntries(
     Object.entries(defaultKeyBindings).map(([action, shortcut]) => [action, shortcut && parseShortcut(shortcut)!])
   ) as Settings['keyBindings'],
@@ -95,6 +105,8 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
   loginLaunch: oneOf(loginLaunches),
   hiddenStartWithNoOpenSessions: oneOf(hiddenStartBehaviours),
   sessionsWithoutNameOrRootOnClose: oneOf(sessionsWithoutNameOrRootOnCloseBehaviours),
+  newTabDirectory: oneOf(startDirectories),
+  splitPaneDirectory: oneOf(startDirectories),
   keyBindings: parseKeyBindings,
   // Theme names are unique ignoring case, so the setting matches one ignoring case and takes its spelling.
   theme: (value) =>
@@ -170,6 +182,18 @@ export const configSchema = {
         'What closing a Session with neither a name nor a Root directory does: keep it as a Closed Session, or delete it. Quitting closes every Open Session, and delete also deletes such Closed Sessions then.',
       enum: sessionsWithoutNameOrRootOnCloseBehaviours,
       default: defaultSettings.sessionsWithoutNameOrRootOnClose,
+    },
+    newTabDirectory: {
+      description:
+        "Where a new Tab starts: root is the Session's Root directory, or the current Pane's working directory without one; current is the current Pane's working directory; home is the home directory. A Session reopened with no Tabs starts its Tab at the home directory for home, and otherwise at its Root directory, or the home directory without one.",
+      enum: startDirectories,
+      default: defaultSettings.newTabDirectory,
+    },
+    splitPaneDirectory: {
+      description:
+        "Where the new Pane of a split starts: root is the Session's Root directory, or the split Pane's working directory without one; current is the split Pane's working directory; home is the home directory.",
+      enum: startDirectories,
+      default: defaultSettings.splitPaneDirectory,
     },
     theme: {
       description:
