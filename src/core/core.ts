@@ -211,7 +211,8 @@ export interface Core {
   // Gives the Session a name, freeing its label number. A name another Session holds gets the smallest free number from
   // 2, e.g. `api 2`, so names stay unique; a blank name changes nothing.
   renameSession(sessionId: SessionId, name: string): void;
-  // Makes the current Pane's working directory the Session's Root directory.
+  // Makes the current Pane's working directory the Session's Root directory. An Unnamed Session is named after the
+  // last segment of its path, as `renameSession` names it, even when it already had this Root directory.
   setSessionRoot(sessionId: SessionId): void;
   clearSessionRoot(sessionId: SessionId): void;
   // Makes an Open Session a Closed Session at once, stopping its Shells and keeping its Tabs and Panes for Restore.
@@ -653,6 +654,11 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return `${name} ${number}`
   }
 
+  // The Session given the name, kept unique, freeing its label number.
+  function withName ({ labelNumber: _freed, ...session }: Session, name: string): Session {
+    return { ...session, name: uniqueName(name, session.id) }
+  }
+
   function openSession (): Session {
     const now = clock.now()
     const tab = openTab(homeDirectory)
@@ -1043,17 +1049,17 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     renameSession: command((sessionId, name) => {
       const trimmed = name.trim()
       if (trimmed === '') return
-      updateSession(sessionId, ({ labelNumber: _freed, ...session }) => ({
-        ...session,
-        name: uniqueName(trimmed, sessionId),
-      }))
+      updateSession(sessionId, (session) => withName(session, trimmed))
     }),
     setSessionRoot: command((sessionId) => {
       updateSession(sessionId, (session) => {
         const tab = focusedTab(session)
         if (!tab) return session
         const rootDirectory = focusedPane(tab).workingDirectory
-        return rootDirectory === session.rootDirectory ? session : { ...session, rootDirectory }
+        if (session.name !== undefined) {
+          return rootDirectory === session.rootDirectory ? session : { ...session, rootDirectory }
+        }
+        return withName({ ...session, rootDirectory }, folderName(rootDirectory))
       })
     }),
     clearSessionRoot: command((sessionId) => {

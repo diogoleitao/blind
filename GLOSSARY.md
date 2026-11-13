@@ -7,11 +7,11 @@ A macOS terminal emulator organised around named Sessions that persist across ap
 ### Layout
 
 **Session**:
-A persistent window of the app that holds one or more Tabs, typically one per repository or project. Its name is optional, given explicitly, and unique.
+A persistent window of the app that holds one or more Tabs, typically one per repository or project. Its name is optional and unique, given explicitly or by setting a Root directory on the Session while it is unnamed.
 _Avoid_: Workspace, Project, Window
 
 **Unnamed Session**:
-A Session nobody has named yet. It is shown under a numbered placeholder label with its working directory, e.g. `Session 1 (~/some/dir)`, which is not its name.
+A Session without a name. It is shown under a numbered placeholder label with its working directory, e.g. `Session 1 (~/some/dir)`, which is not its name.
 _Avoid_: Untitled, default name
 
 **Tab**:
@@ -26,7 +26,7 @@ The process running inside a Pane.
 _Avoid_: Session
 
 **Root directory**:
-The optional directory a Session belongs to, always set explicitly, where its new Tabs start. A Session without one starts new Tabs in the current Pane's working directory.
+The optional directory a Session belongs to, always set explicitly, where its new Tabs start. A Session without one starts new Tabs in the current Pane's working directory. Setting one on an Unnamed Session names the Session after the last part of the directory's path.
 _Avoid_: Project folder, home
 
 ### Continuity

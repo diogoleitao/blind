@@ -2023,6 +2023,20 @@ describe('reopening a Closed Session', () => {
   })
 })
 
+// Sessions named `api` and `api 2`, and an Unnamed Session at ~/code/api, which is current.
+function startWithTakenNames () {
+  const started = startCore()
+  const { core, shellHost } = started
+  core.renameSession(core.state().sessions[0].id, 'api')
+  core.newSession()
+  core.renameSession(core.state().sessions[1].id, 'api 2')
+  core.newSession()
+  const unnamed = core.state().sessions[2]
+  shellHost.changeWorkingDirectory(unnamed.tabs[0].panes[0].id, '/Users/me/code/api')
+  started.effects.length = 0
+  return { ...started, unnamed: unnamed.id }
+}
+
 describe('renaming a Session', () => {
   it("asks for a name, suggesting the current Pane's folder name", () => {
     const { core, shellHost, effects } = startCore()
@@ -2033,20 +2047,6 @@ describe('renaming a Session', () => {
 
     expect(effects).toEqual([{ type: 'askSessionName', sessionId, suggestion: 'somewhere' }])
   })
-
-  // Sessions named `api` and `api 2`, and an Unnamed Session at ~/code/api, which is current.
-  function startWithTakenNames () {
-    const started = startCore()
-    const { core, shellHost } = started
-    core.renameSession(core.state().sessions[0].id, 'api')
-    core.newSession()
-    core.renameSession(core.state().sessions[1].id, 'api 2')
-    core.newSession()
-    const unnamed = core.state().sessions[2]
-    shellHost.changeWorkingDirectory(unnamed.tabs[0].panes[0].id, '/Users/me/code/api')
-    started.effects.length = 0
-    return { ...started, unnamed: unnamed.id }
-  }
 
   it('suggests the folder name with the next free number when other Sessions hold it', () => {
     const { core, effects, unnamed } = startWithTakenNames()
@@ -2137,6 +2137,113 @@ describe("a Session's Root directory", () => {
 
     expect(core.state().sessions[0].rootDirectory).toBeUndefined()
     expect(shellHost.started.at(-1)?.workingDirectory).toBe('/Users/me/code/api/src')
+  })
+
+  it("once set, names an Unnamed Session after the last segment of its path, freeing the Session's label number", () => {
+    const { core } = startWithRoot()
+
+    expect(core.state().sessions[0].name).toBe('api')
+    expect(core.state().sessions[0].labelNumber).toBeUndefined()
+  })
+
+  it('once set, gives a name another Session holds the number 2', () => {
+    const { core, shellHost } = startCore()
+    core.renameSession(core.state().sessions[0].id, 'api')
+    core.newSession()
+    shellHost.changeWorkingDirectory(core.state().sessions[1].tabs[0].panes[0].id, '/Users/me/code/api')
+
+    chooseAction(core, 'Set Session Root')
+
+    expect(core.state().sessions.map((session) => session.name)).toEqual(['api', 'api 2'])
+  })
+
+  it('once set, gives a name other Sessions hold the next free number, keeping names unique', () => {
+    const { core } = startWithTakenNames()
+
+    chooseAction(core, 'Set Session Root')
+
+    expect(core.state().sessions.map((session) => session.name)).toEqual(['api', 'api 2', 'api 3'])
+  })
+
+  it("can't be set on a Session without Tabs, which stays unnamed", () => {
+    const { core, shellHost } = startCore()
+    const closed = core.state().sessions[0]
+    core.newSession()
+    shellHost.exit(closed.tabs[0].panes[0].id)
+
+    core.setSessionRoot(closed.id)
+
+    expect(core.state().sessions[0].rootDirectory).toBeUndefined()
+    expect(core.state().sessions[0].name).toBeUndefined()
+  })
+
+  it('once set at the filesystem root, names an Unnamed Session `/`', () => {
+    const { core, shellHost } = startCore()
+    shellHost.changeWorkingDirectory(core.state().sessions[0].tabs[0].panes[0].id, '/')
+
+    chooseAction(core, 'Set Session Root')
+
+    expect(core.state().sessions[0].name).toBe('/')
+  })
+
+  it('once set, moves the Session it names among the named Sessions in cycle order', () => {
+    const { core, shellHost } = startCore()
+    core.renameSession(core.state().sessions[0].id, 'zed')
+    core.newSession()
+    shellHost.changeWorkingDirectory(core.state().sessions[1].tabs[0].panes[0].id, '/Users/me/code/api')
+
+    chooseAction(core, 'Set Session Root')
+
+    expect(core.sessionsInCycleOrder().map((session) => session.name)).toEqual(['api', 'zed'])
+  })
+
+  it('keeps the name it gave when cleared, or when set somewhere else', () => {
+    const { core, shellHost, sessionId } = startWithRoot()
+
+    chooseAction(core, 'Clear Session Root')
+    expect(core.sessionLabel(sessionId)).toBe('api')
+
+    shellHost.changeWorkingDirectory(core.state().sessions[0].tabs[0].panes[0].id, '/Users/me/code/web')
+    chooseAction(core, 'Set Session Root')
+    expect(core.sessionLabel(sessionId)).toBe('api')
+  })
+
+  it("once set, leaves a named Session's name alone, whether it had a Root directory or not", () => {
+    const { core, shellHost } = startCore()
+    const session = core.state().sessions[0]
+    const paneId = session.tabs[0].panes[0].id
+    core.renameSession(session.id, 'backend')
+    shellHost.changeWorkingDirectory(paneId, '/Users/me/code/api')
+
+    chooseAction(core, 'Set Session Root')
+    expect(core.state().sessions[0].name).toBe('backend')
+
+    shellHost.changeWorkingDirectory(paneId, '/Users/me/code/web')
+    chooseAction(core, 'Set Session Root')
+    expect(core.state().sessions[0].name).toBe('backend')
+  })
+
+  // Relaunched with an Unnamed Session at ~/code/api whose Root directory is ~/code/api, as saved before setting a Root
+  // directory named Sessions.
+  function relaunchWithUnnamedRoot () {
+    const before = startCore()
+    const paneId = before.core.state().sessions[0].tabs[0].panes[0].id
+    before.shellHost.changeWorkingDirectory(paneId, '/Users/me/code/api')
+    return relaunchWith(before.stateStore, (session) => ({ ...session, rootDirectory: '/Users/me/code/api' }))
+  }
+
+  it("isn't what names an Unnamed Session that already had it at relaunch", () => {
+    const { core } = relaunchWithUnnamedRoot()
+
+    expect(core.sessionLabel(core.state().sessions[0].id)).toBe('Session 1 (~/code/api)')
+  })
+
+  it('names an Unnamed Session that already had it when set again', () => {
+    const { core } = relaunchWithUnnamedRoot()
+
+    chooseAction(core, 'Set Session Root')
+
+    expect(core.state().sessions[0].name).toBe('api')
   })
 })
 
@@ -2453,12 +2560,19 @@ describe('the setting for closing Sessions with neither a name nor a Root direct
       expect(core.state().sessions[1].status).toBe('closed')
     })
 
-    it('deletes one whose Root directory was cleared', () => {
-      const { core, sessionId, other } = startDeleting()
-      chooseAction(core, 'Set Session Root')
+    // An Unnamed Session with a Root directory, as saved before setting a Root directory named Sessions.
+    it('deletes an Unnamed one whose Root directory was cleared', () => {
+      const before = startCore()
+      const other = before.core.state().sessions[0].id
+      before.core.newSession()
+      const unnamed = before.core.state().sessions[1].id
+      const { core } = relaunchWith(before.stateStore, (session) =>
+        session.id === unnamed ? { ...session, rootDirectory: '/Users/me/code/api' } : session
+      )
+      core.configChanged('{ "sessionsWithoutNameOrRootOnClose": "delete" }')
       chooseAction(core, 'Clear Session Root')
 
-      core.closeSession(sessionId)
+      core.closeSession(unnamed)
 
       expect(sessionIds(core)).toEqual([other])
     })
