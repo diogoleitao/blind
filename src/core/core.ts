@@ -47,8 +47,8 @@ export type Effect =
   | { type: 'hideApp' }
   // Makes the Session the visible one in place of the Session shown before, without a fade.
   | { type: 'showSession'; sessionId: SessionId }
-  // Asks the user whether to quit, answered with `quitConfirmed`.
-  | { type: 'confirmQuit' }
+  // Asks the user whether to quit, answered with `quitConfirmed`, telling how many Sessions quitting deletes, if any.
+  | { type: 'confirmQuit'; sessionsToDelete?: number }
   // Asks the user for the Session's name, offering `suggestion`, answered with `renameSession`.
   | { type: 'askSessionName'; sessionId: SessionId; suggestion: string }
   // Asks the user whether to delete the Session, answered with `deleteConfirmed`.
@@ -546,6 +546,8 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       const focusedPaneId = tab.focusedPaneId === paneId ? successorOf(tab.layout, paneId)! : tab.focusedPaneId
       return [{ ...tab, panes: tab.panes.filter((pane) => pane.id !== paneId), layout, focusedPaneId }]
     })
+    // Without its last Pane the Session holds no Shell left to stop.
+    if (tabs.length === 0 && deletesOnClose(session)) return deleteSession({ ...session, tabs })
     updateSession(session.id, (session) => {
       if (tabs.length === 0) return { ...session, status: 'closed', tabs, focusedTabId: undefined }
       if (tabs.some((tab) => tab.id === session.focusedTabId)) return { ...session, tabs }
@@ -566,16 +568,65 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return session.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id))
   }
 
+  // Whether closing the Session deletes it rather than making it a Closed Session, as the setting says for Sessions with
+  // neither a name nor a Root directory.
+  function deletesOnClose (session: Session) {
+    return (
+      settings.sessionsWithoutNameOrRootOnClose === 'delete' && session.name === undefined && session.rootDirectory === undefined
+    )
+  }
+
+  // Drops the Sessions from the state with their scrollback, answering whether the Current Session was among them. The
+  // Current Session goes with them, so no state names a Session that no longer exists.
+  function removeSessions (removed: Session[]) {
+    const sessionIds = removed.map((session) => session.id)
+    const paneIds = removed.flatMap(paneIdsOf)
+    scrollback = Object.fromEntries(Object.entries(scrollback).filter(([paneId]) => !paneIds.includes(paneId)))
+    const wasCurrent = state.currentSessionId !== undefined && sessionIds.includes(state.currentSessionId)
+    setState({
+      sessions: state.sessions.filter((session) => !sessionIds.includes(session.id)),
+      currentSessionId: wasCurrent ? undefined : state.currentSessionId,
+    })
+    return wasCurrent
+  }
+
+  // Removes the Session, Open or Closed, for good, with its scrollback, stopping its Shells.
+  function deleteSession (session: Session) {
+    const wasCurrent = removeSessions([session])
+    if (session.status !== 'open') return
+    for (const paneId of paneIdsOf(session)) shellHost.stop(paneId)
+    emit({ type: 'closeWindow', sessionId: session.id })
+    if (wasCurrent) replaceCurrentSession()
+  }
+
+  // Quitting closes every Open Session, so the ones closing deletes go, along with the Closed ones it would have deleted,
+  // e.g. those closed before the setting said so.
+  function sessionsDeletedOnQuit () {
+    return state.sessions.filter(deletesOnClose)
+  }
+
   // After the Current Session closes, the most recently used Open Session takes its place; with none left, the app
   // hides.
   function replaceCurrentSession () {
-    const open = state.sessions.filter((session) => session.status === 'open')
-    const next = open.toSorted((a, b) => b.lastUsedAt - a.lastUsedAt)[0]
+    const next = mostRecentlyUsedOpenSession()
     if (next) return makeCurrent(next.id)
     setState({ ...state, currentSessionId: undefined })
     if (!appShown) return
     appShown = false
     emit({ type: 'hideApp' })
+  }
+
+  // The Open Session used last; absent with no Open Session.
+  function mostRecentlyUsedOpenSession () {
+    const open = state.sessions.filter((session) => session.status === 'open')
+    return open.toSorted((a, b) => b.lastUsedAt - a.lastUsedAt)[0]
+  }
+
+  // Their windows and Shells go with the app, and a Current Session among them passes on to the most recently used Open
+  // Session left without being shown.
+  function deleteSessionsOnQuit () {
+    if (!removeSessions(sessionsDeletedOnQuit())) return
+    setState({ ...state, currentSessionId: mostRecentlyUsedOpenSession()?.id })
   }
 
   // With the Command Palette on its own, the only thing on screen, the app hides.
@@ -929,9 +980,13 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       appShown = false
       emit({ type: 'hideApp' })
     }),
-    quitRequested: command(() => emit({ type: 'confirmQuit' })),
+    quitRequested: command(() => {
+      const sessionsToDelete = sessionsDeletedOnQuit().length
+      emit(sessionsToDelete > 0 ? { type: 'confirmQuit', sessionsToDelete } : { type: 'confirmQuit' })
+    }),
     quitCancelled: command(hideWithNoCurrentSession),
     quitConfirmed: command(() => {
+      deleteSessionsOnQuit()
       stateStore.flush()
       emit({ type: 'quit' })
     }),
@@ -1011,6 +1066,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     closeSession: command((sessionId) => {
       const session = findSession(sessionId)
       if (session?.status !== 'open') return
+      if (deletesOnClose(session)) return deleteSession(session)
       updateSession(sessionId, (session) => ({ ...session, status: 'closed' }))
       for (const paneId of paneIdsOf(session)) shellHost.stop(paneId)
       closeWindow(sessionId)
@@ -1020,19 +1076,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     }),
     deleteConfirmed: command((sessionId) => {
       const session = findSession(sessionId)
-      if (!session) return
-      const paneIds = paneIdsOf(session)
-      scrollback = Object.fromEntries(Object.entries(scrollback).filter(([paneId]) => !paneIds.includes(paneId)))
-      // The Current Session goes with it, so no state names a Session that no longer exists.
-      const wasCurrent = sessionId === state.currentSessionId
-      setState({
-        sessions: state.sessions.filter((candidate) => candidate !== session),
-        currentSessionId: wasCurrent ? undefined : state.currentSessionId,
-      })
-      if (session.status !== 'open') return
-      for (const paneId of paneIds) shellHost.stop(paneId)
-      emit({ type: 'closeWindow', sessionId })
-      if (wasCurrent) replaceCurrentSession()
+      if (session) deleteSession(session)
     }),
     focusPreviousSession: () => focusSessionBy(-1),
     focusNextSession: () => focusSessionBy(1),

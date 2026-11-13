@@ -13,7 +13,7 @@ Terminal windows get buried under everything else, and each project's tabs and s
 - **Hotkey.** `F12` brings blind down over every app, including fullscreen ones, on every Space. The same key, or clicking away, hides it and gives focus back to the app you were in.
 - **Sessions.** One Session per project, each with its own name. `` Cmd+` `` cycles through them.
 - **Restore.** After a quit or an OS restart, every Session comes back with its Tabs, splits, working directories and scrollback, below a "Restored" marker. Shells start fresh.
-- **Closed Sessions.** Closing a Session's window keeps the Session. Reopen it from the Command Palette or the menu bar.
+- **Closed Sessions.** Closing a Session's window keeps the Session. Reopen it from the Command Palette or the menu bar. Set `sessionsWithoutNameOrRootOnClose` to `delete` to have closing or quitting delete Sessions with neither a name nor a Root directory instead.
 - **Tabs and Panes.** Splits nest without limit, and each Tab's title follows the program running in it, or its folder when the Shell is idle.
 - **Command Palette.** `Cmd+K` fuzzy-searches every Session, Tab and Pane, and every action. Start the query with `ss`, `tt` or `pp` to search only Sessions, Tabs or Panes.
 - **Clickable links.** `Cmd+click` opens URLs and file paths, including relative paths and `path:line:col`.

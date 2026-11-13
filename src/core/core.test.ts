@@ -2288,6 +2288,212 @@ describe('deleting a Session', () => {
   })
 })
 
+describe('the setting for closing Sessions with neither a name nor a Root directory', () => {
+  it('keeps them by default', () => {
+    const { core } = startCore()
+
+    expect(core.settings().sessionsWithoutNameOrRootOnClose).toBe('keep')
+  })
+
+  it('takes delete', () => {
+    const { core } = startCore(undefined, '{ "sessionsWithoutNameOrRootOnClose": "delete" }')
+
+    expect(core.settings().sessionsWithoutNameOrRootOnClose).toBe('delete')
+  })
+
+  it('rejects anything else, keeping them', () => {
+    const { core, effects } = startCore(undefined, '{ "sessionsWithoutNameOrRootOnClose": "archive" }')
+
+    expect(core.settings().sessionsWithoutNameOrRootOnClose).toBe('keep')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['sessionsWithoutNameOrRootOnClose'] }])
+  })
+
+  describe('set to delete', () => {
+    // An Unnamed Session split in two with scrollback, current, and a second Unnamed Session, created earlier.
+    function startDeleting (stateStore?: StateStore) {
+      const started = startCore(stateStore, '{ "sessionsWithoutNameOrRootOnClose": "delete" }')
+      const { core, clock } = started
+      const other = core.state().sessions[0].id
+      clock.advance(1_000)
+      core.newSession()
+      const session = core.state().sessions[1]
+      core.splitPane(session.id, 'vertical')
+      const paneIds = core.state().sessions[1].tabs[0].panes.map((pane) => pane.id)
+      core.scrollbackChanged(paneIds[0], '$ ls')
+      started.shellHost.stopped.length = 0
+      started.effects.length = 0
+      return { ...started, sessionId: session.id, other, paneIds }
+    }
+
+    function sessionIds (core: ReturnType<typeof startCore>['core']) {
+      return core.state().sessions.map((session) => session.id)
+    }
+
+    it('deletes one closed by Close Session, stopping its Shells and closing its window', () => {
+      const started = startDeleting()
+      const { core, shellHost, effects, sessionId, other, paneIds } = started
+
+      chooseAction(core, 'Close Session')
+
+      expect(sessionIds(core)).toEqual([other])
+      expect(core.state().currentSessionId).toBe(other)
+      expect(shellHost.stopped).toEqual(paneIds)
+      expect(effects).toEqual([
+        { type: 'closeWindow', sessionId },
+        { type: 'showSession', sessionId: other },
+      ])
+      const after = startCore(started.stateStore)
+      expect(sessionIds(after.core)).toEqual([other])
+      expect(after.core.scrollback(paneIds[0])).toBeUndefined()
+    })
+
+    it('deletes one whose last Pane is closed, stopping each Shell once', () => {
+      const started = startDeleting()
+      const { core, shellHost, effects, sessionId, other, paneIds } = started
+
+      core.closePane(sessionId)
+      core.closePane(sessionId)
+
+      expect(sessionIds(core)).toEqual([other])
+      expect(shellHost.stopped).toEqual([paneIds[1], paneIds[0]])
+      expect(effects).toEqual([
+        { type: 'closeWindow', sessionId },
+        { type: 'showSession', sessionId: other },
+      ])
+      expect(sessionIds(startCore(started.stateStore).core)).toEqual([other])
+    })
+
+    it("deletes one whose last Pane's Shell exits", () => {
+      const started = startDeleting()
+      const { core, shellHost, sessionId, other, paneIds } = started
+
+      for (const paneId of paneIds) shellHost.exit(paneId)
+
+      expect(sessionIds(core)).toEqual([other])
+      expect(started.effects).toContainEqual({ type: 'closeWindow', sessionId })
+      expect(sessionIds(startCore(started.stateStore).core)).toEqual([other])
+    })
+
+    // A restart or shutdown confirms the quit without asking, so this covers it too.
+    it('deletes Open and Closed ones on quitting, Closed ones from before it was set included', () => {
+      const before = startCore()
+      const { core } = before
+      core.newSession()
+      const closed = core.state().sessions[1].id
+      core.closeSession(closed)
+      core.newSession()
+      const named = core.state().sessions[2].id
+      core.renameSession(named, 'api')
+      core.newSession()
+      const rooted = core.state().sessions[3].id
+      chooseAction(core, 'Set Session Root')
+      core.configChanged('{ "sessionsWithoutNameOrRootOnClose": "delete" }')
+      before.effects.length = 0
+
+      core.quitConfirmed()
+
+      expect(before.effects).toEqual([{ type: 'quit' }])
+      const after = startCore(before.stateStore)
+      expect(sessionIds(after.core)).toEqual([named, rooted])
+      expect(after.core.state().currentSessionId).toBe(rooted)
+    })
+
+    it('on quitting, passes the Current Session on to the most recently used Open Session left', () => {
+      const before = startDeleting()
+      const { core, clock, other } = before
+      core.renameSession(other, 'api')
+      core.newSession()
+      const web = core.state().sessions[2].id
+      core.renameSession(web, 'web')
+      clock.advance(1_000)
+      core.newSession()
+      before.effects.length = 0
+
+      core.quitConfirmed()
+
+      expect(before.effects).toEqual([{ type: 'quit' }])
+      const after = startCore(before.stateStore)
+      expect(sessionIds(after.core)).toEqual([other, web])
+      expect(after.core.state().currentSessionId).toBe(web)
+    })
+
+    it('has the quit confirmation tell how many Sessions quitting deletes', () => {
+      const { core, effects } = startDeleting()
+
+      core.quitRequested()
+
+      expect(effects).toEqual([{ type: 'confirmQuit', sessionsToDelete: 2 }])
+    })
+
+    it('leaves the quit confirmation as usual when quitting deletes none', () => {
+      const { core, effects, sessionId, other } = startDeleting()
+      core.renameSession(sessionId, 'api')
+      core.renameSession(other, 'web')
+
+      core.quitRequested()
+
+      expect(effects).toEqual([{ type: 'confirmQuit' }])
+    })
+
+    it('makes a named one a Closed Session as usual', () => {
+      const { core, sessionId } = startDeleting()
+      core.renameSession(sessionId, 'api')
+
+      core.closeSession(sessionId)
+
+      expect(core.state().sessions[1].status).toBe('closed')
+    })
+
+    it('makes one with a Root directory a Closed Session as usual', () => {
+      const { core, sessionId } = startDeleting()
+      chooseAction(core, 'Set Session Root')
+
+      core.closeSession(sessionId)
+
+      expect(core.state().sessions[1].status).toBe('closed')
+    })
+
+    it('deletes one whose Root directory was cleared', () => {
+      const { core, sessionId, other } = startDeleting()
+      chooseAction(core, 'Set Session Root')
+      chooseAction(core, 'Clear Session Root')
+
+      core.closeSession(sessionId)
+
+      expect(sessionIds(core)).toEqual([other])
+    })
+
+    // Named, or given a Root directory.
+    const kept = [
+      (core: ReturnType<typeof startCore>['core'], sessionId: string) => core.renameSession(sessionId, 'api'),
+      (core: ReturnType<typeof startCore>['core']) => chooseAction(core, 'Set Session Root'),
+    ]
+
+    it('makes a kept one whose last Pane is closed a Closed Session as usual', () => {
+      for (const keep of kept) {
+        const { core, sessionId } = startDeleting()
+        keep(core, sessionId)
+
+        core.closePane(sessionId)
+        core.closePane(sessionId)
+
+        expect(core.state().sessions[1].status).toBe('closed')
+      }
+    })
+
+    it("makes a kept one whose last Pane's Shell exits a Closed Session as usual", () => {
+      for (const keep of kept) {
+        const { core, shellHost, sessionId, paneIds } = startDeleting()
+        keep(core, sessionId)
+
+        for (const paneId of paneIds) shellHost.exit(paneId)
+
+        expect(core.state().sessions[1].status).toBe('closed')
+      }
+    })
+  })
+})
+
 describe('the Command Palette', () => {
   // `web` with a Tab at ~/code/web and a second Tab split in two at ~/code/web/src, the right Pane running vim; `api`
   // at ~/code/api; `old`, closed through its last Tab; and an Unnamed Session at the home directory, which is current.

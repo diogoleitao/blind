@@ -39,11 +39,11 @@ The one Open Session that is visible.
 _Avoid_: Active Session, front window
 
 **Closed Session**:
-A Session that is saved but out of the cycle. Closing a Session's window makes it a Closed Session; it can be opened again.
+A Session that is saved but out of the cycle. Closing a Session's window makes it a Closed Session; it can be opened again. A Session with neither a name nor a Root directory, closed while the user has chosen to delete such Sessions, is deleted instead.
 _Avoid_: Detached, archived
 
 **Delete**:
-Permanently removing a Session, open or closed. Closing a window never deletes.
+Permanently removing a Session, open or closed. Closing a window never deletes a Session with a name or a Root directory; one with neither is deleted on closing when the user has chosen so.
 _Avoid_: Close (when the Session should go away)
 
 **Restore**:

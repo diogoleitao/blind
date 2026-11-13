@@ -137,7 +137,7 @@ app.whenReady().then(() => {
     if (effect.type === 'openPalette') windows.get(effect.sessionId)?.webContents.send(channels.openPalette)
     if (effect.type === 'hideApp') hideApp()
     if (effect.type === 'showSession') swapToWindow(effect.sessionId)
-    if (effect.type === 'confirmQuit') confirmQuit()
+    if (effect.type === 'confirmQuit') confirmQuit(effect.sessionsToDelete)
     if (effect.type === 'confirmDelete') confirmDelete(effect.sessionId)
     if (effect.type === 'askSessionName' || effect.type === 'askTabTitle') {
       windows.get(effect.sessionId)?.webContents.send(channels.promptPalette, effect)
@@ -229,13 +229,20 @@ app.whenReady().then(() => {
     return response
   }
 
-  async function confirmQuit () {
+  // Tells how many Sessions quitting deletes, if any.
+  async function confirmQuit (sessionsToDelete?: number) {
     if (quitInProgress) return
     quitInProgress = true
+    const deletionNote =
+      sessionsToDelete === undefined
+        ? ''
+        : sessionsToDelete === 1
+          ? ' 1 Session without a name or Root directory is deleted.'
+          : ` ${sessionsToDelete} Sessions without a name or Root directory are deleted.`
     const response = await ask({
       type: 'question',
       message: 'Quit Blind?',
-      detail: 'Every Shell stops. Sessions come back with fresh Shells the next time Blind starts.',
+      detail: `Every Shell stops. Sessions come back with fresh Shells the next time Blind starts.${deletionNote}`,
       buttons: ['Quit', 'Cancel'],
       defaultId: 0,
       cancelId: 1,

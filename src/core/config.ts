@@ -23,6 +23,12 @@ const hiddenStartBehaviours = ['new', 'hotkey'] as const
 // nothing, leaving the first Hotkey press to hotkeyWithNoOpenSessions.
 export type HiddenStartWithNoOpenSessions = (typeof hiddenStartBehaviours)[number]
 
+const sessionsWithoutNameOrRootOnCloseBehaviours = ['keep', 'delete'] as const
+
+// What closing a Session with neither a name nor a Root directory does: keep it as a Closed Session, or delete it.
+// Quitting closes every Open Session, and delete also deletes such Closed Sessions then.
+export type SessionsWithoutNameOrRootOnClose = (typeof sessionsWithoutNameOrRootOnCloseBehaviours)[number]
+
 export const menuBarIcons = ['monochrome', 'colour'] as const
 
 // The menu bar icon's look: one colour that follows the menu bar's, light or dark, or the icon's own colours.
@@ -41,6 +47,7 @@ export interface Settings {
   hotkeyWithNoOpenSessions: HotkeyWithNoOpenSessions;
   loginLaunch: LoginLaunch;
   hiddenStartWithNoOpenSessions: HiddenStartWithNoOpenSessions;
+  sessionsWithoutNameOrRootOnClose: SessionsWithoutNameOrRootOnClose;
   // Each action's shortcut; null for an unbound action.
   keyBindings: Record<BoundAction, Shortcut | null>;
   // The name of the Theme in effect, built in or from a Theme file.
@@ -54,6 +61,7 @@ export const defaultSettings: Settings = {
   hotkeyWithNoOpenSessions: 'new',
   loginLaunch: 'hidden',
   hiddenStartWithNoOpenSessions: 'hotkey',
+  sessionsWithoutNameOrRootOnClose: 'keep',
   keyBindings: Object.fromEntries(
     Object.entries(defaultKeyBindings).map(([action, shortcut]) => [action, shortcut && parseShortcut(shortcut)!])
   ) as Settings['keyBindings'],
@@ -86,6 +94,7 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
   hotkeyWithNoOpenSessions: oneOf(hotkeyBehaviours),
   loginLaunch: oneOf(loginLaunches),
   hiddenStartWithNoOpenSessions: oneOf(hiddenStartBehaviours),
+  sessionsWithoutNameOrRootOnClose: oneOf(sessionsWithoutNameOrRootOnCloseBehaviours),
   keyBindings: parseKeyBindings,
   // Theme names are unique ignoring case, so the setting matches one ignoring case and takes its spelling.
   theme: (value) =>
@@ -155,6 +164,12 @@ export const configSchema = {
         'What a hidden launch at login with no Open Sessions opens: a new Session, which the first Hotkey press shows, or nothing, leaving the first Hotkey press to hotkeyWithNoOpenSessions.',
       enum: hiddenStartBehaviours,
       default: defaultSettings.hiddenStartWithNoOpenSessions,
+    },
+    sessionsWithoutNameOrRootOnClose: {
+      description:
+        'What closing a Session with neither a name nor a Root directory does: keep it as a Closed Session, or delete it. Quitting closes every Open Session, and delete also deletes such Closed Sessions then.',
+      enum: sessionsWithoutNameOrRootOnCloseBehaviours,
+      default: defaultSettings.sessionsWithoutNameOrRootOnClose,
     },
     theme: {
       description:
