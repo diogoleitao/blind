@@ -460,6 +460,16 @@ const resultKinds: Record<PaletteResult['type'], string> = {
   menuBarIcon: 'Menu Bar Icon',
 }
 
+// Whether the result is the Current Session, Current Tab or Current Pane, which can be selected but not chosen.
+function isCurrent (result: PaletteResult) {
+  return 'current' in result && result.current
+}
+
+// What kind of result it is, e.g. `Tab`, or `Current Tab` for the Current Tab.
+function resultKind (result: PaletteResult) {
+  return isCurrent(result) ? `Current ${resultKinds[result.type]}` : resultKinds[result.type]
+}
+
 // What places a result: a Closed Session's mark, a Tab's Session, or a Pane's working directory and Session.
 function resultDetail (result: PaletteResult) {
   if (result.type === 'session') return result.closed ? 'Closed' : ''
@@ -474,6 +484,7 @@ function renderPalette () {
       const element = document.createElement('li')
       element.className = 'result'
       element.classList.toggle('selected', index === selectedResult)
+      element.classList.toggle('current', isCurrent(result))
       const label = document.createElement('span')
       label.textContent = result.label
       const detail = document.createElement('span')
@@ -481,7 +492,7 @@ function renderPalette () {
       detail.textContent = resultDetail(result)
       const kind = document.createElement('span')
       kind.className = 'kind'
-      kind.textContent = resultKinds[result.type]
+      kind.textContent = resultKind(result)
       element.append(label, detail, kind)
       element.addEventListener('mousedown', () => chooseResult(index))
       return element
@@ -592,10 +603,11 @@ function answerPrompt (shown: PalettePrompt) {
   blind.answerPalettePrompt(shown, answer)
 }
 
-// Does nothing once the palette has closed, e.g. by Escape while Enter waited for a search.
+// Does nothing once the palette has closed, e.g. by Escape while Enter waited for a search. Choosing where the user
+// already is does nothing either, and leaves the palette open.
 function chooseResult (index: number) {
   const result = paletteResults[index]
-  if (palette.hidden || !result) return
+  if (palette.hidden || !result || isCurrent(result)) return
   closePalette()
   blind.choosePaletteResult(result)
 }

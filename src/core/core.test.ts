@@ -2843,10 +2843,10 @@ describe('the Command Palette', () => {
     const { core, web, api, old, unnamed } = startWithPaletteSessions()
 
     expect(core.paletteResults('ss ')).toEqual([
-      { type: 'session', sessionId: api, label: 'api', closed: false },
-      { type: 'session', sessionId: web, label: 'web', closed: false },
-      { type: 'session', sessionId: unnamed, label: 'Session 1 (~)', closed: false },
-      { type: 'session', sessionId: old, label: 'old', closed: true },
+      { type: 'session', sessionId: api, label: 'api', closed: false, current: false },
+      { type: 'session', sessionId: web, label: 'web', closed: false, current: false },
+      { type: 'session', sessionId: unnamed, label: 'Session 1 (~)', closed: false, current: true },
+      { type: 'session', sessionId: old, label: 'old', closed: true, current: false },
     ])
 
     core.configChanged('{ "cycleOrder": "created" }')
@@ -2924,22 +2924,23 @@ describe('the Command Palette', () => {
     const [web, api, , unnamed] = core.state().sessions
 
     expect(core.paletteResults('tt ')).toEqual([
-      { type: 'tab', tabId: api.tabs[0].id, label: 'api', sessionLabel: 'api' },
-      { type: 'tab', tabId: web.tabs[0].id, label: 'web', sessionLabel: 'web' },
-      { type: 'tab', tabId: web.tabs[1].id, label: 'vim', sessionLabel: 'web' },
-      { type: 'tab', tabId: unnamed.tabs[0].id, label: 'me', sessionLabel: 'Session 1 (~)' },
+      { type: 'tab', tabId: api.tabs[0].id, label: 'api', sessionLabel: 'api', current: false },
+      { type: 'tab', tabId: web.tabs[0].id, label: 'web', sessionLabel: 'web', current: false },
+      { type: 'tab', tabId: web.tabs[1].id, label: 'vim', sessionLabel: 'web', current: false },
+      { type: 'tab', tabId: unnamed.tabs[0].id, label: 'me', sessionLabel: 'Session 1 (~)', current: true },
     ])
   })
 
   it('narrows to the Panes of Open Sessions with `pp `, by running program or folder name, with their directories', () => {
     const { core } = startWithPaletteSessions()
     const [web, api, , unnamed] = core.state().sessions
-    const pane = (id: string, label: string, workingDirectory: string, sessionLabel: string) => ({
+    const pane = (id: string, label: string, workingDirectory: string, sessionLabel: string, current = false) => ({
       type: 'pane',
       paneId: id,
       label,
       workingDirectory,
       sessionLabel,
+      current,
     })
 
     expect(core.paletteResults('pp ')).toEqual([
@@ -2947,8 +2948,75 @@ describe('the Command Palette', () => {
       pane(web.tabs[0].panes[0].id, 'web', '~/code/web', 'web'),
       pane(web.tabs[1].panes[0].id, 'src', '~/code/web/src', 'web'),
       pane(web.tabs[1].panes[1].id, 'vim', '~/code/web/src', 'web'),
-      pane(unnamed.tabs[0].panes[0].id, 'me', '~', 'Session 1 (~)'),
+      pane(unnamed.tabs[0].panes[0].id, 'me', '~', 'Session 1 (~)', true),
     ])
+  })
+
+  describe('disabling where the user already is', () => {
+    // The results marked as the Current Session, Current Tab or Current Pane, in the order they're offered.
+    function currentIn (results: PaletteResult[]) {
+      return summarize(results.filter((result) => 'current' in result && result.current))
+    }
+
+    it('marks the Current Session, Current Tab and Current Pane wherever they are listed, and nothing else', () => {
+      const { core } = startWithPaletteSessions()
+
+      expect(currentIn(core.paletteResults(''))).toEqual(['session Session 1 (~)', 'tab me', 'pane me'])
+      expect(currentIn(core.paletteResults('ss '))).toEqual(['session Session 1 (~)'])
+      expect(currentIn(core.paletteResults('tt '))).toEqual(['tab me'])
+      expect(currentIn(core.paletteResults('pp '))).toEqual(['pane me'])
+      expect(currentIn(core.paletteResults('ss me'))).toEqual([])
+    })
+
+    it('keeps a marked result where a search ranks it', () => {
+      const { core, web } = startWithPaletteSessions()
+      core.focusNextSession()
+      core.focusNextSession()
+      expect(core.state().currentSessionId).toBe(web)
+
+      expect(summarize(core.paletteResults('tt w'))).toEqual(['tab web', 'tab vim'])
+      expect(currentIn(core.paletteResults('tt w'))).toEqual(['tab vim'])
+
+      core.focusPreviousTab(web)
+      expect(summarize(core.paletteResults('tt w'))).toEqual(['tab web', 'tab vim'])
+      expect(currentIn(core.paletteResults('tt w'))).toEqual(['tab web'])
+    })
+
+    it("leaves the Current Session's other Tabs and the Current Tab's other Panes unmarked, under every scope", () => {
+      const { core, web } = startWithPaletteSessions()
+      core.focusNextSession()
+      core.focusNextSession()
+      expect(core.state().currentSessionId).toBe(web)
+
+      expect(currentIn(core.paletteResults('ss '))).toEqual(['session web'])
+      expect(currentIn(core.paletteResults('tt '))).toEqual(['tab vim'])
+      expect(currentIn(core.paletteResults('pp '))).toEqual(['pane vim'])
+
+      core.configChanged('{ "paneSearchScope": "currentSession" }')
+      expect(summarize(core.paletteResults('pp '))).toEqual(['pane web', 'pane src', 'pane vim'])
+      expect(currentIn(core.paletteResults('pp '))).toEqual(['pane vim'])
+
+      core.configChanged('{ "tabSearchScope": "currentSession", "paneSearchScope": "currentTab" }')
+      expect(summarize(core.paletteResults('tt '))).toEqual(['tab web', 'tab vim'])
+      expect(currentIn(core.paletteResults('tt '))).toEqual(['tab vim'])
+      expect(summarize(core.paletteResults('pp '))).toEqual(['pane src', 'pane vim'])
+      expect(currentIn(core.paletteResults('pp '))).toEqual(['pane vim'])
+    })
+
+    it('follows the Current Session, Current Tab and Current Pane as they change', () => {
+      const { core, web } = startWithPaletteSessions()
+      const [webSession] = core.state().sessions
+
+      core.focusNextSession()
+      expect(currentIn(core.paletteResults(''))).toEqual(['session api', 'tab api', 'pane api'])
+
+      core.focusNextSession()
+      core.focusPane(webSession.tabs[1].panes[0].id)
+      expect(currentIn(core.paletteResults(''))).toEqual(['session web', 'tab src', 'pane src'])
+
+      core.focusPreviousTab(web)
+      expect(currentIn(core.paletteResults(''))).toEqual(['session web', 'tab web', 'pane web'])
+    })
   })
 
   describe('the Tab search scope setting', () => {

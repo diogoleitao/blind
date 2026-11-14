@@ -121,11 +121,12 @@ const paletteActionLabels = {
 
 export type PaletteAction = keyof typeof paletteActionLabels
 
-// One entry the Command Palette offers.
+// One entry the Command Palette offers. `current` marks the Current Session, Current Tab or Current Pane, where the
+// user already is, which the Command Palette lists and lets the user select but not choose.
 export type PaletteResult =
-  | { type: 'session'; sessionId: SessionId; label: string; closed: boolean }
-  | { type: 'tab'; tabId: TabId; label: string; sessionLabel: string }
-  | { type: 'pane'; paneId: PaneId; label: string; workingDirectory: string; sessionLabel: string }
+  | { type: 'session'; sessionId: SessionId; label: string; closed: boolean; current: boolean }
+  | { type: 'tab'; tabId: TabId; label: string; sessionLabel: string; current: boolean }
+  | { type: 'pane'; paneId: PaneId; label: string; workingDirectory: string; sessionLabel: string; current: boolean }
   | { type: 'action'; action: PaletteAction; label: string }
   // A Theme, labelled with its name.
   | { type: 'theme'; name: string; label: string }
@@ -776,6 +777,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       sessionId: session.id,
       label: labelOf(session),
       closed: session.status === 'closed',
+      current: session.id === state.currentSessionId,
     }))
   }
 
@@ -794,12 +796,23 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     })
   }
 
+  // Whether the Tab is the Current Tab: the focused Tab of the Current Session.
+  function isCurrentTab (session: Session, tab: Tab) {
+    return session.id === state.currentSessionId && tab.id === session.focusedTabId
+  }
+
+  // Whether the Pane is the Current Pane: the focused Pane of the Current Tab.
+  function isCurrentPane (session: Session, tab: Tab, pane: Pane) {
+    return isCurrentTab(session, tab) && pane.id === tab.focusedPaneId
+  }
+
   function tabResults (tabs = tabsInScope('all')): PaletteResult[] {
     return tabs.map(({ session, tab }) => ({
       type: 'tab' as const,
       tabId: tab.id,
       label: titleOf(tab),
       sessionLabel: labelOf(session),
+      current: isCurrentTab(session, tab),
     }))
   }
 
@@ -811,6 +824,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
         label: paneTitle(pane),
         workingDirectory: displayDirectory(pane.workingDirectory),
         sessionLabel: labelOf(session),
+        current: isCurrentPane(session, tab, pane),
       }))
     )
   }

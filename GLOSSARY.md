@@ -42,6 +42,10 @@ _Avoid_: Active Session, front window
 The Tab of the Current Session that is visible.
 _Avoid_: Active Tab
 
+**Current Pane**:
+The Pane of the Current Tab that is focused.
+_Avoid_: Active Pane
+
 **Closed Session**:
 A Session that is saved but out of the cycle. Closing a Session's window makes it a Closed Session; it can be opened again. A Session with neither a name nor a Root directory, closed while the user has chosen to delete such Sessions, is deleted instead.
 _Avoid_: Detached, archived
