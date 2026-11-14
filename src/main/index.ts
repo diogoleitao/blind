@@ -316,8 +316,8 @@ app.whenReady().then(() => {
   // once it is first shown, and a window's blur is set again each time it shows.
   function applyBackgroundEffect (window: BrowserWindow) {
     if (window.isDestroyed() || !window.isVisible()) return
-    const { backgroundEffect, backgroundBlurRadius } = core.settings()
-    windowEffects.setBlurRadius(window, backgroundEffect === 'blur' ? backgroundBlurRadius : minimumBlurRadius)
+    const { effect, blurRadius } = core.settings().background
+    windowEffects.setBlurRadius(window, effect === 'blur' ? blurRadius : minimumBlurRadius)
   }
 
   // Says that windows can't blur, while blur is wanted: once per launch, and not again until Blind or macOS changes
@@ -327,7 +327,7 @@ app.whenReady().then(() => {
     if (!failure) return
     const versions = { app: app.getVersion(), os: process.getSystemVersion() }
     const check = {
-      backgroundEffect: core.settings().backgroundEffect,
+      backgroundEffect: core.settings().background.effect,
       warnedThisLaunch: blurWarnedThisLaunch,
       dismissedFor: blurWarningFile.dismissedFor(),
       versions,
@@ -338,7 +338,7 @@ app.whenReady().then(() => {
       type: 'warning',
       message: "Windows can't blur",
       detail:
-        "Blind blurs what's behind its windows through a private macOS function, which no longer works, so windows show it unblurred. Setting backgroundEffect to none in config.jsonc stops this message.",
+        "Blind blurs what's behind its windows through a private macOS function, which no longer works, so windows show it unblurred. Setting background.effect to none in config.jsonc stops this message.",
       buttons: ['Report on GitHub', 'OK'],
       defaultId: 1,
       cancelId: 1,
@@ -404,12 +404,10 @@ app.whenReady().then(() => {
 
   function sendWindowSettings (window: BrowserWindow) {
     if (window.isDestroyed()) return
-    const { scrollbackLines, panePadding, paneScrollBar, backgroundTransparency } = core.settings()
+    const { pane, background } = core.settings()
     const settings: WindowSettings = {
-      scrollbackLines,
-      panePadding,
-      paneScrollBar,
-      backgroundTransparency,
+      pane: { scrollbackLines: pane.scrollbackLines, padding: pane.padding, scrollBar: pane.scrollBar },
+      background: { transparency: background.transparency },
     }
     window.webContents.send(channels.windowSettings, settings)
   }
@@ -549,7 +547,7 @@ app.whenReady().then(() => {
     // The cycle order setting may have changed.
     menuBarIcon.update()
   })
-  // The installed app opens at login, hidden or shown as the loginLaunch setting says.
+  // The installed app opens at login, hidden or shown as the loginLaunch.start setting says.
   if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: true })
   const { shown } = core.start({ atLogin: app.getLoginItemSettings().wasOpenedAtLogin })
   // Showing now, not on ready-to-show, keeps the window in step with the core.

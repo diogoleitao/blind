@@ -31,31 +31,51 @@ export interface SettingsEditorDependencies {
   stderr(text: string): void;
 }
 
-// What the editor reads of a setting's schema.
+// What the editor reads of a setting's schema, or of a group's.
 interface SettingSchema {
   description?: string;
-  type?: string;
+  type?: string | readonly string[];
   enum?: readonly unknown[];
   minimum?: number;
   maximum?: number;
   const?: unknown;
   oneOf?: readonly SettingSchema[];
+  properties?: Record<string, SettingSchema>;
 }
 
-// Every setting the editor changes, in its order: all but keyBindings, whose shortcuts are edited in the file. Editors
-// read `$schema`, so it's no setting.
-export const editableSettings = Object.keys(configSchema.properties).filter(
-  (name) => name !== '$schema' && name !== 'keyBindings'
-) as Exclude<keyof Settings, 'keyBindings'>[]
+const topLevelSchemas = configSchema.properties as Record<string, SettingSchema>
 
-type EditableSetting = (typeof editableSettings)[number]
+// Every setting the editor changes, in its order: all but keyBindings, whose shortcuts are edited in the file. A setting
+// in a group goes by its group's name and its own, joined by a dot, such as `pane.scrollBar`. Editors read `$schema`, so
+// it's no setting.
+export const editableSettings = Object.entries(topLevelSchemas).flatMap(([name, schema]) => {
+  if (name === '$schema' || name === 'keyBindings') return []
+  return schema.properties ? Object.keys(schema.properties).map((key) => `${name}.${key}`) : [name]
+})
+
+// The setting's group and its name within it, or its name alone for one in no group.
+function pathOf (name: string): [group: string | undefined, key: string] {
+  const [first, key] = name.split('.')
+  return key === undefined ? [undefined, first] : [first, key]
+}
+
+function schemaOf (name: string): SettingSchema {
+  const [group, key] = pathOf(name)
+  return group === undefined ? topLevelSchemas[key] : topLevelSchemas[group].properties![key]
+}
+
+function settingIn (settings: Settings, name: string): unknown {
+  const [group, key] = pathOf(name)
+  if (group === undefined) return settings[key as keyof Settings]
+  return (settings[group as keyof Settings] as Record<string, unknown>)[key]
+}
 
 const unreadable = "config.jsonc couldn't be read as JSON with comments; fix it with blind settings open"
 
 // The values a setting is picked from with left and right, or undefined for one whose value is typed. The theme
 // setting's are the Themes there are.
-function choicesOf (name: EditableSetting, themeNames: readonly string[]): readonly unknown[] | undefined {
-  const schema: SettingSchema = configSchema.properties[name]
+function choicesOf (name: string, themeNames: readonly string[]): readonly unknown[] | undefined {
+  const schema = schemaOf(name)
   if (name === 'theme') return themeNames
   if (schema.enum) return schema.enum
   if (schema.type === 'boolean') return [true, false]
@@ -63,9 +83,9 @@ function choicesOf (name: EditableSetting, themeNames: readonly string[]): reado
 }
 
 // The value `typed` gives the setting, or why it can't take it. A whole number takes the schema's range, and the words
-// it allows besides, such as scrollbackLines' unlimited; anything else takes any text but none.
-function typedValue (name: EditableSetting, typed: string): { value: unknown } | { refusal: string } {
-  const schema: SettingSchema = configSchema.properties[name]
+// it allows besides, such as pane.scrollbackLines' unlimited; anything else takes any text but none.
+function typedValue (name: string, typed: string): { value: unknown } | { refusal: string } {
+  const schema = schemaOf(name)
   const range = [schema, ...(schema.oneOf ?? [])].find((part) => part.type === 'integer')
   const text = typed.trim()
   if (!range) return text === '' ? { refusal: `${name} can't be empty; remove it with blind settings open` } : { value: text }
@@ -121,13 +141,14 @@ export async function editSettings (deps: SettingsEditorDependencies): Promise<n
     rejected = parsed.rejected
   }
 
-  function write (name: EditableSetting, value: unknown) {
+  function write (name: string, value: unknown) {
     const current = readEditable(configFile)
     if (!('text' in current)) {
       refusal = current.problem ?? "Couldn't read config.jsonc"
       return
     }
-    const text = setJsoncProperty(current.text, name, value)
+    const [group, key] = pathOf(name)
+    const text = setJsoncProperty(current.text, group === undefined ? key : [group, key], value)
     if (configFile.write(text)) {
       show(text)
     } else {
@@ -141,7 +162,7 @@ export async function editSettings (deps: SettingsEditorDependencies): Promise<n
     const name = editableSettings[selected]
     const choices = choicesOf(name, themes)
     if (!choices) return
-    const index = choices.indexOf(settings[name])
+    const index = choices.indexOf(settingIn(settings, name))
     write(name, choices[(index + step + choices.length) % choices.length])
   }
 
@@ -170,39 +191,49 @@ export async function editSettings (deps: SettingsEditorDependencies): Promise<n
     else if (key === 'enter' && !choicesOf(editableSettings[selected], themes)) typing = ''
   }
 
-  function valueOf (name: EditableSetting) {
-    const value = settings[name]
+  function valueOf (name: string) {
+    const value = settingIn(settings, name)
     if (name === 'shell' && value === undefined) return 'login shell'
-    if (name === 'scrollbackLines' && value === unlimitedScrollbackLines) return 'unlimited'
+    if (name === 'pane.scrollbackLines' && value === unlimitedScrollbackLines) return 'unlimited'
     return String(value)
   }
 
   // Each setting's value as the editor opened, to tell what's changed since.
   const opening = new Map(editableSettings.map((name) => [name, valueOf(name)]))
 
-  function changed (name: EditableSetting) {
+  function changed (name: string) {
     return valueOf(name) !== opening.get(name)
   }
 
-  function shownValue (name: EditableSetting) {
-    const invalid = rejected.includes(name) ? '  (invalid in config.jsonc)' : ''
-    return `${valueOf(name)}${invalid}${changed(name) ? ' *' : ''}`
+  // A setting is invalid when the file gets it wrong, or gets its whole group wrong.
+  function shownValue (name: string) {
+    const [group] = pathOf(name)
+    const invalid = rejected.includes(name) || (group !== undefined && rejected.includes(group))
+    return `${valueOf(name)}${invalid ? '  (invalid in config.jsonc)' : ''}${changed(name) ? ' *' : ''}`
   }
 
-  // The settings, a changed one in bold and the Theme's yellow, as a font without a bold face shows bold as it shows
-  // the rest; then the selected one's description, then why a change wasn't made or the keys to press.
+  // A setting in a group by its name within it, indented under the group's heading.
+  function label (name: string) {
+    const [group, key] = pathOf(name)
+    return group === undefined ? key : `  ${key}`
+  }
+
+  // The settings, each group's under a heading of its name, which the selection passes over; a changed one in bold and
+  // the Theme's yellow, as a font without a bold face shows bold as it shows the rest. Then the selected one's
+  // description, then why a change wasn't made or the keys to press.
   function draw () {
-    const width = Math.max(...editableSettings.map((name) => name.length))
-    const rows = editableSettings.map((name, index) => {
+    const width = Math.max(...editableSettings.map((name) => label(name).length))
+    const rows = editableSettings.flatMap((name, index) => {
+      const [group] = pathOf(name)
+      const heading = group !== undefined && group !== pathOf(editableSettings[index - 1] ?? '')[0] ? [`  ${group}`] : []
       const value = index === selected && typing !== undefined ? `${typing}▏` : shownValue(name)
-      const row = `${index === selected ? '›' : ' '} ${name.padEnd(width)}  ${value}`
-      return changed(name) ? `\x1b[1;33m${row}\x1b[22;39m` : row
+      const row = `${index === selected ? '›' : ' '} ${label(name).padEnd(width)}  ${value}`
+      return [...heading, changed(name) ? `\x1b[1;33m${row}\x1b[22;39m` : row]
     })
-    const description: SettingSchema = configSchema.properties[editableSettings[selected]]
     const keys = typing === undefined
       ? '↑↓ move  ←→ change  enter type a value  q quit'
       : 'enter save  escape leave as it was'
-    terminal.draw([...rows, '', description.description ?? '', '', refusal ?? keys])
+    terminal.draw([...rows, '', schemaOf(editableSettings[selected]).description ?? '', '', refusal ?? keys])
   }
 
   // Quitting goes first, so Ctrl+C quits even while a value's being typed.

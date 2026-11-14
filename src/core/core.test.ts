@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProgramState } from './attention'
+import { defaultSettings } from './config'
 import { createCore, type Effect, type PaletteResult } from './core'
 import { createControllableClock, createFakeShellHost, press } from './fakes'
 import { createInMemoryStateStore } from './in-memory-state-store'
@@ -106,7 +107,7 @@ describe('the launch at login', () => {
     })
 
     it('with no Open Sessions and set to open a new one, opens it, which the first Hotkey press shows', () => {
-      const { core, effects, shown } = startAtLogin(undefined, '{ "hiddenStartWithNoOpenSessions": "new" }')
+      const { core, effects, shown } = startAtLogin(undefined, '{ "loginLaunch": { "withNoOpenSessions": "new" } }')
 
       expect(shown).toBe(false)
       expect(core.state().sessions).toHaveLength(1)
@@ -121,7 +122,7 @@ describe('the launch at login', () => {
       const closed = before.core.state().sessions[0].id
       before.core.closeSession(closed)
 
-      const { core } = startAtLogin(before.stateStore, '{ "hiddenStartWithNoOpenSessions": "new" }')
+      const { core } = startAtLogin(before.stateStore, '{ "loginLaunch": { "withNoOpenSessions": "new" } }')
 
       const [saved, opened] = core.state().sessions
       expect(saved).toMatchObject({ id: closed, status: 'closed' })
@@ -132,7 +133,7 @@ describe('the launch at login', () => {
 
   describe('set to start shown', () => {
     it('starts shown with a Session, as a launch by hand does', () => {
-      const { core, shown } = startAtLogin(undefined, '{ "loginLaunch": "shown" }')
+      const { core, shown } = startAtLogin(undefined, '{ "loginLaunch": { "start": "shown" } }')
 
       expect(shown).toBe(true)
       expect(core.state().sessions).toHaveLength(1)
@@ -140,18 +141,18 @@ describe('the launch at login', () => {
     })
   })
 
-  it('falls back to starting hidden for a loginLaunch setting naming no way to start, telling the user', () => {
-    const { shown, effects } = startAtLogin(undefined, '{ "loginLaunch": "minimised" }')
+  it('falls back to starting hidden for a loginLaunch.start setting naming no way to start, telling the user', () => {
+    const { shown, effects } = startAtLogin(undefined, '{ "loginLaunch": { "start": "minimised" } }')
 
     expect(shown).toBe(false)
-    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['loginLaunch'] }])
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['loginLaunch.start'] }])
   })
 
-  it('falls back to opening no Session for a hiddenStartWithNoOpenSessions setting naming no behaviour, telling the user', () => {
-    const { core, effects } = startAtLogin(undefined, '{ "hiddenStartWithNoOpenSessions": "palette" }')
+  it('falls back to opening no Session for a loginLaunch.withNoOpenSessions setting naming no behaviour, telling the user', () => {
+    const { core, effects } = startAtLogin(undefined, '{ "loginLaunch": { "withNoOpenSessions": "palette" } }')
 
     expect(core.state().sessions).toEqual([])
-    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['hiddenStartWithNoOpenSessions'] }])
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['loginLaunch.withNoOpenSessions'] }])
   })
 })
 
@@ -332,14 +333,14 @@ describe('cycling the Current Session', () => {
   it('sorts by creation, oldest first, with Unnamed Sessions last, in the created order', () => {
     const { core } = startWithFiveSessions()
 
-    core.configChanged('{ "cycleOrder": "created" }')
+    core.configChanged('{ "session": { "cycleOrder": "created" } }')
 
     expect(labelsInCycleOrder(core)).toEqual(['zed', 'api', 'web', 'Session 2 (~)', 'Session 1 (~)'])
   })
 
   it('goes back to alphabetical once the config file is gone', () => {
     const { core } = startWithFiveSessions()
-    core.configChanged('{ "cycleOrder": "created" }')
+    core.configChanged('{ "session": { "cycleOrder": "created" } }')
 
     core.configChanged(undefined)
 
@@ -360,7 +361,7 @@ describe('cycling the Current Session', () => {
     core.focusPreviousSession()
     core.newTab(core.state().currentSessionId!)
     clock.advance(1_000)
-    core.configChanged('{ "cycleOrder": "recent" }')
+    core.configChanged('{ "session": { "cycleOrder": "recent" } }')
     return started
   }
 
@@ -1472,7 +1473,7 @@ describe('the config file', () => {
 
     core.configChanged(`{
       // How Sessions are cycled.
-      "cycleOrder": /* by creation */ "created",
+      "session": { "cycleOrder": /* by creation */ "created" },
       "shell": "/opt/homebrew/bin/fish // not a comment",
     }`)
 
@@ -1483,22 +1484,61 @@ describe('the config file', () => {
   it('falls back to the default for an invalid value, telling the user which settings were rejected', () => {
     const { core, effects } = startWithTwoSessions()
 
-    core.configChanged('{ "cycleOrder": "random", "colour": "blue" }')
+    core.configChanged('{ "session": { "cycleOrder": "random" }, "colour": "blue" }')
 
     expect(names(core)).toEqual(['a', 'b'])
-    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['cycleOrder', 'colour'] }])
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['session.cycleOrder', 'colour'] }])
+  })
+
+  it('takes a group setting only some of its settings, the rest at their defaults', () => {
+    const { core, effects } = startWithTwoSessions()
+
+    core.configChanged('{ "pane": { "scrollBar": "visible" } }')
+
+    expect(core.settings().pane).toEqual({ ...defaultSettings.pane, scrollBar: 'visible' })
+    expect(core.settings().session).toEqual(defaultSettings.session)
+    expect(effects).toEqual([])
+  })
+
+  it('rejects a group that is no object by its name, keeping its settings at their defaults', () => {
+    const { core, effects } = startWithTwoSessions()
+
+    core.configChanged('{ "pane": "x", "session": { "cycleOrder": "created" } }')
+
+    expect(core.settings().pane).toEqual(defaultSettings.pane)
+    expect(names(core)).toEqual(['b', 'a'])
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['pane'] }])
+  })
+
+  it("rejects a group's invalid and unknown settings by dotted name, keeping the group's others", () => {
+    const { core, effects } = startWithTwoSessions()
+
+    core.configChanged('{ "pane": { "scrollBar": 3, "padding": "none", "foo": 1 } }')
+
+    expect(core.settings().pane).toEqual({ ...defaultSettings.pane, padding: 'none' })
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['pane.scrollBar', 'pane.foo'] }])
+  })
+
+  it('rejects a setting by its name from before settings were grouped', () => {
+    const { core, effects } = startWithTwoSessions()
+
+    core.configChanged('{ "paneScrollBar": "visible", "loginLaunch": "shown" }')
+
+    expect(core.settings().pane.scrollBar).toBe('none')
+    expect(core.settings().loginLaunch).toEqual(defaultSettings.loginLaunch)
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['paneScrollBar', 'loginLaunch'] }])
   })
 
   // A save caught halfway through an edit mustn't reset every setting, e.g. shrinking unlimited scrollback.
   it("keeps the settings from before for a file that isn't a JSON object, telling the user", () => {
-    for (const config of ['{ "cycleOrder": "created" ', '["created"]', 'null']) {
+    for (const config of ['{ "session": { "cycleOrder": "created" } ', '["created"]', 'null']) {
       const { core, effects } = startWithTwoSessions()
-      core.configChanged('{ "cycleOrder": "created", "scrollbackLines": "unlimited" }')
+      core.configChanged('{ "session": { "cycleOrder": "created" }, "pane": { "scrollbackLines": "unlimited" } }')
 
       core.configChanged(config)
 
       expect(names(core)).toEqual(['b', 'a'])
-      expect(core.settings().scrollbackLines).toBe(1_000_000)
+      expect(core.settings().pane.scrollbackLines).toBe(1_000_000)
       expect(effects).toEqual([{ type: 'configUnreadable' }])
     }
   })
@@ -1506,13 +1546,13 @@ describe('the config file', () => {
   it("starts with every default when the file can't be read at launch, telling the user", () => {
     const { core, effects } = startCore(undefined, '{ broken')
 
-    expect(core.settings().cycleOrder).toBe('alphabetical')
+    expect(core.settings().session.cycleOrder).toBe('alphabetical')
     expect(effects).toEqual([{ type: 'configUnreadable' }])
   })
 
   it("keeps the settings from before when the file exists but can't be opened, telling the user", () => {
     const { core, effects } = startWithTwoSessions()
-    core.configChanged('{ "cycleOrder": "created" }')
+    core.configChanged('{ "session": { "cycleOrder": "created" } }')
 
     core.configUnreadable()
 
@@ -1571,100 +1611,100 @@ describe('the scrollback lines setting', () => {
   it("caps each Pane's scrollback at the configured number of lines from the next report on", () => {
     const { core } = startCore()
 
-    core.configChanged('{ "scrollbackLines": 3 }')
+    core.configChanged('{ "pane": { "scrollbackLines": 3 }}')
 
     expect(reportLines(core, 5)).toEqual(['line 3', 'line 4', 'line 5'])
-    expect(core.settings().scrollbackLines).toBe(3)
+    expect(core.settings().pane.scrollbackLines).toBe(3)
   })
 
   it('keeps up to 1,000,000 lines when unlimited', () => {
-    const { core } = startCore(undefined, '{ "scrollbackLines": "unlimited" }')
+    const { core } = startCore(undefined, '{ "pane": { "scrollbackLines": "unlimited" } }')
 
     expect(reportLines(core, 10_005)).toHaveLength(10_005)
-    expect(core.settings().scrollbackLines).toBe(1_000_000)
+    expect(core.settings().pane.scrollbackLines).toBe(1_000_000)
   })
 
   it('rejects anything but a whole number from 0 to 1,000,000 or unlimited, keeping 10,000 lines', () => {
     for (const lines of ['-1', '2.5', '"lots"', '1000001']) {
-      const { core, effects } = startCore(undefined, `{ "scrollbackLines": ${lines} }`)
+      const { core, effects } = startCore(undefined, `{ "pane": { "scrollbackLines": ${lines} } }`)
 
       expect(reportLines(core, 10_005)).toHaveLength(10_000)
-      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['scrollbackLines'] }])
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['pane.scrollbackLines'] }])
     }
   })
 })
 
 describe('the Pane padding setting', () => {
   it('pads Panes by default, and can leave them unpadded', () => {
-    const { core, effects } = startCore(undefined, '{ "panePadding": "wide" }')
-    expect(core.settings().panePadding).toBe('padded')
-    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['panePadding'] }])
+    const { core, effects } = startCore(undefined, '{ "pane": { "padding": "wide" } }')
+    expect(core.settings().pane.padding).toBe('padded')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['pane.padding'] }])
 
-    core.configChanged('{ "panePadding": "none" }')
+    core.configChanged('{ "pane": { "padding": "none" } }')
 
-    expect(core.settings().panePadding).toBe('none')
+    expect(core.settings().pane.padding).toBe('none')
   })
 })
 
 describe('the Pane scroll bar setting', () => {
   it('hides the scroll bar by default, and can show it', () => {
-    const { core, effects } = startCore(undefined, '{ "paneScrollBar": "auto" }')
-    expect(core.settings().paneScrollBar).toBe('none')
-    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['paneScrollBar'] }])
+    const { core, effects } = startCore(undefined, '{ "pane": { "scrollBar": "auto" } }')
+    expect(core.settings().pane.scrollBar).toBe('none')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['pane.scrollBar'] }])
 
-    core.configChanged('{ "paneScrollBar": "visible" }')
+    core.configChanged('{ "pane": { "scrollBar": "visible" } }')
 
-    expect(core.settings().paneScrollBar).toBe('visible')
+    expect(core.settings().pane.scrollBar).toBe('visible')
   })
 })
 
 describe('the background settings', () => {
   it('shows the background 25% transparent by default, and as transparent as configured', () => {
     const { core } = startCore()
-    expect(core.settings().backgroundTransparency).toBe(25)
+    expect(core.settings().background.transparency).toBe(25)
 
-    core.configChanged('{ "backgroundTransparency": 60 }')
+    core.configChanged('{ "background": { "transparency": 60 } }')
 
-    expect(core.settings().backgroundTransparency).toBe(60)
+    expect(core.settings().background.transparency).toBe(60)
   })
 
   it('rejects a transparency that is not a whole number from 0 to 100, keeping 25', () => {
     for (const transparency of ['-1', '101', '12.5', '"half"']) {
-      const { core, effects } = startCore(undefined, `{ "backgroundTransparency": ${transparency} }`)
+      const { core, effects } = startCore(undefined, `{ "background": { "transparency": ${transparency} } }`)
 
-      expect(core.settings().backgroundTransparency).toBe(25)
-      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['backgroundTransparency'] }])
+      expect(core.settings().background.transparency).toBe(25)
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['background.transparency'] }])
     }
   })
 
   it('blurs what is behind the background by default, and can show it unblurred', () => {
-    const { core, effects } = startCore(undefined, '{ "backgroundEffect": "frosted" }')
-    expect(core.settings().backgroundEffect).toBe('blur')
-    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['backgroundEffect'] }])
+    const { core, effects } = startCore(undefined, '{ "background": { "effect": "frosted" } }')
+    expect(core.settings().background.effect).toBe('blur')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['background.effect'] }])
 
-    core.configChanged('{ "backgroundEffect": "none" }')
+    core.configChanged('{ "background": { "effect": "none" } }')
 
-    expect(core.settings().backgroundEffect).toBe('none')
+    expect(core.settings().background.effect).toBe('none')
   })
 
   it('blurs at a radius of 15 by default, and at any whole radius from 1 to 64', () => {
     const { core } = startCore()
-    expect(core.settings().backgroundBlurRadius).toBe(15)
+    expect(core.settings().background.blurRadius).toBe(15)
 
     for (const radius of [1, 64]) {
-      core.configChanged(`{ "backgroundBlurRadius": ${radius} }`)
+      core.configChanged(`{ "background": { "blurRadius": ${radius} } }`)
 
-      expect(core.settings().backgroundBlurRadius).toBe(radius)
+      expect(core.settings().background.blurRadius).toBe(radius)
     }
   })
 
   // A radius of 0 is reported to stop macOS blurring the window for good.
   it('rejects a blur radius of 0, or anything else outside 1 to 64, keeping 15', () => {
     for (const radius of ['0', '65', '7.5', '"soft"']) {
-      const { core, effects } = startCore(undefined, `{ "backgroundBlurRadius": ${radius} }`)
+      const { core, effects } = startCore(undefined, `{ "background": { "blurRadius": ${radius} } }`)
 
-      expect(core.settings().backgroundBlurRadius).toBe(15)
-      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['backgroundBlurRadius'] }])
+      expect(core.settings().background.blurRadius).toBe(15)
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['background.blurRadius'] }])
     }
   })
 })
@@ -1725,11 +1765,11 @@ describe('Themes', () => {
     const { core, effects } = startCore(undefined, '{ "theme": "Gruvbox" }')
     effects.length = 0
 
-    core.configChanged('{ "theme": "Dracula", "cycleOrder": "random" }')
+    core.configChanged('{ "theme": "Dracula", "session": { "cycleOrder": "random" } }')
 
     expect(core.theme().name).toBe('Default')
     expect(effects).toEqual([
-      { type: 'settingsRejected', settings: ['theme', 'cycleOrder'] },
+      { type: 'settingsRejected', settings: ['theme', 'session.cycleOrder'] },
       { type: 'applyTheme', theme: expect.objectContaining({ name: 'Default' }) },
     ])
   })
@@ -1894,7 +1934,7 @@ describe('Themes', () => {
   })
 
   it('applies the Theme the setting names once its file appears, and falls back once it goes, telling the user', () => {
-    const { core, effects } = startCore(undefined, '{ "theme": "Dracula", "scrollbackLines": 5 }')
+    const { core, effects } = startCore(undefined, '{ "theme": "Dracula", "pane": { "scrollbackLines": 5 }}')
     const dracula = { fileName: 'dracula.jsonc', text: '{ "name": "Dracula" }' }
     effects.length = 0
 
@@ -1904,7 +1944,7 @@ describe('Themes', () => {
     core.themeFilesChanged([])
 
     expect(core.theme().name).toBe('Default')
-    expect(core.settings().scrollbackLines).toBe(5)
+    expect(core.settings().pane.scrollbackLines).toBe(5)
     expect(effects).toEqual([
       { type: 'applyTheme', theme: expect.objectContaining({ name: 'Dracula' }) },
       { type: 'settingsRejected', settings: ['theme'] },
@@ -1961,7 +2001,7 @@ describe('Themes', () => {
       `{
   // Mine.
   "theme": /* was */ "Catppuccin",
-  "cycleOrder": "created",
+  "session": { "cycleOrder": "created" },
 }
 `
     )
@@ -1972,7 +2012,7 @@ describe('Themes', () => {
     const written = `{
   // Mine.
   "theme": /* was */ "Gruvbox",
-  "cycleOrder": "created",
+  "session": { "cycleOrder": "created" },
 }
 `
     core.configChanged(written)
@@ -1986,7 +2026,7 @@ describe('Themes', () => {
   })
 
   it("choosing a Theme adds the theme setting to a config file without it, or writes a file with it when there's none", () => {
-    const { core, effects } = startCore(undefined, '{\n  // Mine.\n    "cycleOrder": "created" // by creation\n}\n')
+    const { core, effects } = startCore(undefined, '{\n  // Mine.\n    "session": { "cycleOrder": "created" } // by creation\n}\n')
     const writes = () => (effects as Effect[]).flatMap((effect) => (effect.type === 'writeConfig' ? [effect.text] : []))
 
     chooseTheme(core, 'Gruvbox')
@@ -1996,7 +2036,7 @@ describe('Themes', () => {
     chooseTheme(core, 'Catppuccin')
 
     expect(writes()).toEqual([
-      '{\n  // Mine.\n    "cycleOrder": "created", // by creation\n    "theme": "Gruvbox"\n}\n',
+      '{\n  // Mine.\n    "session": { "cycleOrder": "created" }, // by creation\n    "theme": "Gruvbox"\n}\n',
       `{
   // Your editor suggests every setting and its default from the schema.
   "$schema": "./config.schema.json",
@@ -2018,7 +2058,7 @@ describe('Themes', () => {
 
   // A save caught halfway through an edit mustn't be written over with the settings from before it.
   it("choosing a Theme while the config file can't be read applies it without writing the file, telling the user", () => {
-    const { core, effects } = startCore(undefined, '{ "cycleOrder": "created" }')
+    const { core, effects } = startCore(undefined, '{ "session": { "cycleOrder": "created" } }')
 
     core.configChanged('{ "cycleOrder": ')
     effects.length = 0
@@ -2525,7 +2565,7 @@ describe('deleting a Session', () => {
 
 describe('the new Tab directory setting', () => {
   it('set to home, starts new Tabs at the home directory, even in a Session with a Root directory', () => {
-    const { core, shellHost, sessionId } = startWithRoot('{ "newTabDirectory": "home" }')
+    const { core, shellHost, sessionId } = startWithRoot('{ "tab": { "startDirectory": "home" } }')
 
     core.newTab(sessionId)
 
@@ -2535,7 +2575,7 @@ describe('the new Tab directory setting', () => {
   })
 
   it("set to current, starts new Tabs in the current Pane's working directory, even in a Session with a Root directory", () => {
-    const { core, shellHost, sessionId } = startWithRoot('{ "newTabDirectory": "current" }')
+    const { core, shellHost, sessionId } = startWithRoot('{ "tab": { "startDirectory": "current" } }')
 
     core.newTab(sessionId)
 
@@ -2545,18 +2585,18 @@ describe('the new Tab directory setting', () => {
   it('is root by default', () => {
     const { core } = startCore()
 
-    expect(core.settings().newTabDirectory).toBe('root')
+    expect(core.settings().tab.startDirectory).toBe('root')
   })
 
   it('rejects anything else, keeping root', () => {
-    const { core, effects } = startCore(undefined, '{ "newTabDirectory": "/Users/me/code" }')
+    const { core, effects } = startCore(undefined, '{ "tab": { "startDirectory": "/Users/me/code" } }')
 
-    expect(core.settings().newTabDirectory).toBe('root')
-    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['newTabDirectory'] }])
+    expect(core.settings().tab.startDirectory).toBe('root')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['tab.startDirectory'] }])
   })
 
   it('set to home, starts the fresh Tab of a Session reopened after closing through its last Tab at the home directory', () => {
-    const { core, shellHost, sessionId } = startWithRoot('{ "newTabDirectory": "home" }')
+    const { core, shellHost, sessionId } = startWithRoot('{ "tab": { "startDirectory": "home" } }')
     const paneId = core.state().sessions[0].tabs[0].panes[0].id
     core.newSession()
     shellHost.exit(paneId)
@@ -2567,7 +2607,7 @@ describe('the new Tab directory setting', () => {
   })
 
   it('set to current, starts the fresh Tab of a Session reopened after closing through its last Tab at its Root directory', () => {
-    const { core, shellHost, sessionId } = startWithRoot('{ "newTabDirectory": "current" }')
+    const { core, shellHost, sessionId } = startWithRoot('{ "tab": { "startDirectory": "current" } }')
     const paneId = core.state().sessions[0].tabs[0].panes[0].id
     core.newSession()
     shellHost.exit(paneId)
@@ -2578,7 +2618,7 @@ describe('the new Tab directory setting', () => {
   })
 
   it('set to current, starts the fresh Tab of a Session without a Root directory, reopened after closing through its last Tab, at the home directory', () => {
-    const { core, shellHost } = startCore(undefined, '{ "newTabDirectory": "current" }')
+    const { core, shellHost } = startCore(undefined, '{ "tab": { "startDirectory": "current" } }')
     const closed = core.state().sessions[0]
     shellHost.changeWorkingDirectory(closed.tabs[0].panes[0].id, '/Users/me/code/api')
     core.newSession()
@@ -2592,7 +2632,7 @@ describe('the new Tab directory setting', () => {
   it('applies to the next Tab once changed', () => {
     const { core, shellHost, sessionId } = startWithRoot()
 
-    core.configChanged('{ "newTabDirectory": "home" }')
+    core.configChanged('{ "tab": { "startDirectory": "home" } }')
     core.newTab(sessionId)
 
     expect(shellHost.started.at(-1)?.workingDirectory).toBe('/Users/me')
@@ -2601,7 +2641,7 @@ describe('the new Tab directory setting', () => {
 
 describe('the split Pane directory setting', () => {
   it('set to root, starts the new Pane at the Root directory', () => {
-    const { core, shellHost, sessionId } = startWithRoot('{ "splitPaneDirectory": "root" }')
+    const { core, shellHost, sessionId } = startWithRoot('{ "pane": { "startDirectory": "root" } }')
 
     core.splitPane(sessionId, 'vertical')
 
@@ -2611,7 +2651,7 @@ describe('the split Pane directory setting', () => {
   })
 
   it("set to root, starts the new Pane in the split Pane's working directory in a Session without a Root directory", () => {
-    const { core, shellHost } = startCore(undefined, '{ "splitPaneDirectory": "root" }')
+    const { core, shellHost } = startCore(undefined, '{ "pane": { "startDirectory": "root" } }')
     const session = core.state().sessions[0]
     shellHost.changeWorkingDirectory(session.tabs[0].panes[0].id, '/Users/me/code/api')
 
@@ -2621,7 +2661,7 @@ describe('the split Pane directory setting', () => {
   })
 
   it('set to home, starts the new Pane at the home directory', () => {
-    const { core, shellHost, sessionId } = startWithRoot('{ "splitPaneDirectory": "home" }')
+    const { core, shellHost, sessionId } = startWithRoot('{ "pane": { "startDirectory": "home" } }')
 
     core.splitPane(sessionId, 'vertical')
 
@@ -2631,20 +2671,20 @@ describe('the split Pane directory setting', () => {
   it('is current by default', () => {
     const { core } = startCore()
 
-    expect(core.settings().splitPaneDirectory).toBe('current')
+    expect(core.settings().pane.startDirectory).toBe('current')
   })
 
   it('rejects anything else, keeping current', () => {
-    const { core, effects } = startCore(undefined, '{ "splitPaneDirectory": "parent" }')
+    const { core, effects } = startCore(undefined, '{ "pane": { "startDirectory": "parent" } }')
 
-    expect(core.settings().splitPaneDirectory).toBe('current')
-    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['splitPaneDirectory'] }])
+    expect(core.settings().pane.startDirectory).toBe('current')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['pane.startDirectory'] }])
   })
 
   it('applies to the next split once changed', () => {
     const { core, shellHost, sessionId } = startWithRoot()
 
-    core.configChanged('{ "splitPaneDirectory": "root" }')
+    core.configChanged('{ "pane": { "startDirectory": "root" } }')
     core.splitPane(sessionId, 'vertical')
 
     expect(shellHost.started.at(-1)?.workingDirectory).toBe('/Users/me/code/api')
@@ -2655,26 +2695,26 @@ describe('the setting for closing Sessions with neither a name nor a Root direct
   it('keeps them by default', () => {
     const { core } = startCore()
 
-    expect(core.settings().sessionsWithoutNameOrRootOnClose).toBe('keep')
+    expect(core.settings().session.withoutNameOrRootOnClose).toBe('keep')
   })
 
   it('takes delete', () => {
-    const { core } = startCore(undefined, '{ "sessionsWithoutNameOrRootOnClose": "delete" }')
+    const { core } = startCore(undefined, '{ "session": { "withoutNameOrRootOnClose": "delete" } }')
 
-    expect(core.settings().sessionsWithoutNameOrRootOnClose).toBe('delete')
+    expect(core.settings().session.withoutNameOrRootOnClose).toBe('delete')
   })
 
   it('rejects anything else, keeping them', () => {
-    const { core, effects } = startCore(undefined, '{ "sessionsWithoutNameOrRootOnClose": "archive" }')
+    const { core, effects } = startCore(undefined, '{ "session": { "withoutNameOrRootOnClose": "archive" } }')
 
-    expect(core.settings().sessionsWithoutNameOrRootOnClose).toBe('keep')
-    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['sessionsWithoutNameOrRootOnClose'] }])
+    expect(core.settings().session.withoutNameOrRootOnClose).toBe('keep')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['session.withoutNameOrRootOnClose'] }])
   })
 
   describe('set to delete', () => {
     // An Unnamed Session split in two with scrollback, current, and a second Unnamed Session, created earlier.
     function startDeleting (stateStore?: StateStore) {
-      const started = startCore(stateStore, '{ "sessionsWithoutNameOrRootOnClose": "delete" }')
+      const started = startCore(stateStore, '{ "session": { "withoutNameOrRootOnClose": "delete" } }')
       const { core, clock } = started
       const other = core.state().sessions[0].id
       clock.advance(1_000)
@@ -2750,7 +2790,7 @@ describe('the setting for closing Sessions with neither a name nor a Root direct
       core.newSession()
       const rooted = core.state().sessions[3].id
       chooseAction(core, 'Set Session Root')
-      core.configChanged('{ "sessionsWithoutNameOrRootOnClose": "delete" }')
+      core.configChanged('{ "session": { "withoutNameOrRootOnClose": "delete" } }')
       before.effects.length = 0
 
       core.quitConfirmed()
@@ -2833,7 +2873,7 @@ describe('the setting for closing Sessions with neither a name nor a Root direct
       const { core } = relaunchWith(before.stateStore, (session) =>
         session.id === unnamed ? { ...session, rootDirectory: '/Users/me/code/api' } : session
       )
-      core.configChanged('{ "sessionsWithoutNameOrRootOnClose": "delete" }')
+      core.configChanged('{ "session": { "withoutNameOrRootOnClose": "delete" } }')
       chooseAction(core, 'Clear Session Root')
 
       core.closeSession(unnamed)
@@ -2907,7 +2947,7 @@ describe('the Command Palette', () => {
       { type: 'session', sessionId: old, label: 'old', closed: true, current: false, activity: false },
     ])
 
-    core.configChanged('{ "cycleOrder": "created" }')
+    core.configChanged('{ "session": { "cycleOrder": "created" } }')
     expect(summarize(core.paletteResults('ss '))).toEqual([
       'session web',
       'session api',
@@ -2933,7 +2973,7 @@ describe('the Command Palette', () => {
       'session web',
     ])
 
-    core.configChanged('{ "cycleOrder": "created" }')
+    core.configChanged('{ "session": { "cycleOrder": "created" } }')
     expect(summarize(core.paletteResults('ss '))).toEqual([
       'session api',
       'session Session 1 (~)',
@@ -2958,7 +2998,7 @@ describe('the Command Palette', () => {
   describe('the Session search order setting', () => {
     it('set to cycle, narrows with `ss ` to every Session in cycle order alone, Open and Closed together', () => {
       const { core } = startWithPaletteSessions()
-      core.configChanged('{ "sessionSearchOrder": "cycle" }')
+      core.configChanged('{ "commandPalette": { "sessionSearchOrder": "cycle" } }')
 
       expect(summarize(core.paletteResults('ss '))).toEqual([
         'session api',
@@ -2970,10 +3010,10 @@ describe('the Command Palette', () => {
     })
 
     it('rejects anything else, keeping openFirst', () => {
-      const { core, effects } = startCore(undefined, '{ "sessionSearchOrder": "closedFirst" }')
+      const { core, effects } = startCore(undefined, '{ "commandPalette": { "sessionSearchOrder": "closedFirst" } }')
 
-      expect(core.settings().sessionSearchOrder).toBe('openFirst')
-      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['sessionSearchOrder'] }])
+      expect(core.settings().commandPalette.sessionSearchOrder).toBe('openFirst')
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['commandPalette.sessionSearchOrder'] }])
     })
   })
 
@@ -3058,11 +3098,11 @@ describe('the Command Palette', () => {
       expect(currentIn(core.paletteResults('tt '))).toEqual(['tab vim'])
       expect(currentIn(core.paletteResults('pp '))).toEqual(['pane vim'])
 
-      core.configChanged('{ "paneSearchScope": "currentSession" }')
+      core.configChanged('{ "commandPalette": { "paneSearchScope": "currentSession" } }')
       expect(summarize(core.paletteResults('pp '))).toEqual(['pane web', 'pane src', 'pane vim'])
       expect(currentIn(core.paletteResults('pp '))).toEqual(['pane vim'])
 
-      core.configChanged('{ "tabSearchScope": "currentSession", "paneSearchScope": "currentTab" }')
+      core.configChanged('{ "commandPalette": { "tabSearchScope": "currentSession", "paneSearchScope": "currentTab" } }')
       expect(summarize(core.paletteResults('tt '))).toEqual(['tab web', 'tab vim'])
       expect(currentIn(core.paletteResults('tt '))).toEqual(['tab vim'])
       expect(summarize(core.paletteResults('pp '))).toEqual(['pane src', 'pane vim'])
@@ -3089,23 +3129,23 @@ describe('the Command Palette', () => {
     it('lists the Tabs and Panes flat by default', () => {
       const { core } = startCore()
 
-      expect(core.settings().paletteNesting).toBe('flat')
+      expect(core.settings().commandPalette.nesting).toBe('flat')
     })
 
     it('set to nested, nests them, going back to flat once the config file is gone', () => {
-      const { core } = startCore(undefined, '{ "paletteNesting": "nested" }')
-      expect(core.settings().paletteNesting).toBe('nested')
+      const { core } = startCore(undefined, '{ "commandPalette": { "nesting": "nested" } }')
+      expect(core.settings().commandPalette.nesting).toBe('nested')
 
       core.configChanged(undefined)
 
-      expect(core.settings().paletteNesting).toBe('flat')
+      expect(core.settings().commandPalette.nesting).toBe('flat')
     })
 
     it('rejects anything else, keeping flat, telling the user', () => {
-      const { core, effects } = startCore(undefined, '{ "paletteNesting": "tree" }')
+      const { core, effects } = startCore(undefined, '{ "commandPalette": { "nesting": "tree" } }')
 
-      expect(core.settings().paletteNesting).toBe('flat')
-      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['paletteNesting'] }])
+      expect(core.settings().commandPalette.nesting).toBe('flat')
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['commandPalette.nesting'] }])
     })
 
     it("set to nested, offers each Session with an Open Session's Tabs and their Panes under it, then every app action", () => {
@@ -3114,7 +3154,7 @@ describe('the Command Palette', () => {
         .filter((result) => result.startsWith('action '))
         .map((result) => `0 ${result}`)
 
-      core.configChanged('{ "paletteNesting": "nested" }')
+      core.configChanged('{ "commandPalette": { "nesting": "nested" } }')
 
       expect(outline(core.paletteResults(''))).toEqual([
         '0 session api',
@@ -3130,7 +3170,7 @@ describe('the Command Palette', () => {
     })
 
     it('set to nested, follows a Tab with two Panes by its Panes, and a Tab with one Pane by none', () => {
-      const { core } = startCore(undefined, '{ "paletteNesting": "nested" }')
+      const { core } = startCore(undefined, '{ "commandPalette": { "nesting": "nested" } }')
       const sessionId = core.state().sessions[0].id
       core.renameSession(sessionId, 'a')
       core.splitPane(sessionId, 'vertical')
@@ -3147,7 +3187,7 @@ describe('the Command Palette', () => {
     it("set to nested, leaves out a Session's only Tab, its Panes in its place under the Session", () => {
       const { core, left, topRight, bottomRight } = startWithThreePanes()
 
-      core.configChanged('{ "paletteNesting": "nested" }')
+      core.configChanged('{ "commandPalette": { "nesting": "nested" } }')
 
       const results = core.paletteResults('')
       expect(outline(results.slice(0, 4))).toEqual([
@@ -3169,14 +3209,14 @@ describe('the Command Palette', () => {
       const queries = ['w', 'ss ', 'tt ', 'pp ', 'pp src']
       const flat = queries.map((query) => core.paletteResults(query))
 
-      core.configChanged('{ "paletteNesting": "nested" }')
+      core.configChanged('{ "commandPalette": { "nesting": "nested" } }')
 
       expect(queries.map((query) => core.paletteResults(query))).toEqual(flat)
       expect(outline(core.paletteResults('tt '))).toEqual(['- tab api', '- tab web', '- tab vim', '- tab me'])
     })
 
     it('set to nested, marks the Current Tab and Current Pane among the nested results', () => {
-      const { core } = startCore(undefined, '{ "paletteNesting": "nested" }')
+      const { core } = startCore(undefined, '{ "commandPalette": { "nesting": "nested" } }')
       const web = core.state().sessions[0].id
       core.renameSession(web, 'web')
       core.newTab(web)
@@ -3191,7 +3231,7 @@ describe('the Command Palette', () => {
 
     it('set to nested, choosing a nested Tab or Pane in another Session makes it current, as choosing it flat does', () => {
       const { core, effects, web } = startWithPaletteSessions()
-      core.configChanged('{ "paletteNesting": "nested" }')
+      core.configChanged('{ "commandPalette": { "nesting": "nested" } }')
       const nested = (type: string, label: string) =>
         core.paletteResults('').find((result) => result.type === type && result.label === label && 'level' in result)!
 
@@ -3210,7 +3250,7 @@ describe('the Command Palette', () => {
   describe('the Tab search scope setting', () => {
     it('set to currentSession, narrows with `tt ` to the Tabs of the Current Session alone', () => {
       const { core } = startWithPaletteSessions()
-      core.configChanged('{ "tabSearchScope": "currentSession" }')
+      core.configChanged('{ "commandPalette": { "tabSearchScope": "currentSession" } }')
 
       expect(summarize(core.paletteResults('tt '))).toEqual(['tab me'])
 
@@ -3222,17 +3262,17 @@ describe('the Command Palette', () => {
     })
 
     it('rejects anything else, currentTab included, keeping all', () => {
-      const { core, effects } = startCore(undefined, '{ "tabSearchScope": "currentTab" }')
+      const { core, effects } = startCore(undefined, '{ "commandPalette": { "tabSearchScope": "currentTab" } }')
 
-      expect(core.settings().tabSearchScope).toBe('all')
-      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['tabSearchScope'] }])
+      expect(core.settings().commandPalette.tabSearchScope).toBe('all')
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['commandPalette.tabSearchScope'] }])
     })
   })
 
   describe('the Pane search scope setting', () => {
     it('set to currentSession, narrows with `pp ` to the Panes of the Current Session alone', () => {
       const { core } = startWithPaletteSessions()
-      core.configChanged('{ "paneSearchScope": "currentSession" }')
+      core.configChanged('{ "commandPalette": { "paneSearchScope": "currentSession" } }')
 
       expect(summarize(core.paletteResults('pp '))).toEqual(['pane me'])
 
@@ -3245,7 +3285,7 @@ describe('the Command Palette', () => {
 
     it('set to currentTab, narrows with `pp ` to the Panes of the Current Tab alone', () => {
       const { core, web } = startWithPaletteSessions()
-      core.configChanged('{ "paneSearchScope": "currentTab" }')
+      core.configChanged('{ "commandPalette": { "paneSearchScope": "currentTab" } }')
       core.focusNextSession()
       core.focusNextSession()
 
@@ -3258,10 +3298,10 @@ describe('the Command Palette', () => {
     })
 
     it('rejects anything else, keeping all', () => {
-      const { core, effects } = startCore(undefined, '{ "paneSearchScope": "currentPane" }')
+      const { core, effects } = startCore(undefined, '{ "commandPalette": { "paneSearchScope": "currentPane" } }')
 
-      expect(core.settings().paneSearchScope).toBe('all')
-      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['paneSearchScope'] }])
+      expect(core.settings().commandPalette.paneSearchScope).toBe('all')
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['commandPalette.paneSearchScope'] }])
     })
   })
 
@@ -3573,7 +3613,7 @@ describe('the menu bar icon', () => {
     expect(core.menuBarIcon()).toBe('monochrome')
 
     core.configChanged('{ "menuBarIcon": "colour" }')
-    core.configChanged('{ "menuBarIcon": "colour", "cycleOrder": "created" }')
+    core.configChanged('{ "menuBarIcon": "colour", "session": { "cycleOrder": "created" } }')
 
     expect(core.menuBarIcon()).toBe('colour')
     expect(effects).toEqual([{ type: 'applyMenuBarIcon', icon: 'colour' }])
@@ -3620,12 +3660,12 @@ describe('the menu bar icon', () => {
   })
 
   it("choosing an icon keeps it, setting it in the config file with the file's comments and other settings kept", () => {
-    const { core, effects } = startCore(undefined, '{\n  // Mine.\n  "cycleOrder": "created"\n}\n')
+    const { core, effects } = startCore(undefined, '{\n  // Mine.\n  "session": { "cycleOrder": "created" }\n}\n')
     effects.length = 0
 
     core.previewMenuBarIcon('colour')
     core.choosePaletteResult(core.menuBarIconResults('col')[0])
-    const written = '{\n  // Mine.\n  "cycleOrder": "created",\n  "menuBarIcon": "colour"\n}\n'
+    const written = '{\n  // Mine.\n  "session": { "cycleOrder": "created" },\n  "menuBarIcon": "colour"\n}\n'
     core.configChanged(written)
     core.paletteDismissed()
 
@@ -3786,7 +3826,7 @@ describe('Activity', () => {
     expect(withActivity(core.paletteResults('pp '))).toEqual([left])
     expect(core.paletteResults('pp ').some((result) => result.type === 'pane' && result.paneId === topRight)).toBe(true)
 
-    core.configChanged('{ "paletteNesting": "nested" }')
+    core.configChanged('{ "commandPalette": { "nesting": "nested" } }')
     expect(withActivity(core.paletteResults(''))).toEqual([sessionId, left])
   })
 

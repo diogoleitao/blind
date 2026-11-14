@@ -204,8 +204,8 @@ export interface CoreDependencies {
 }
 
 export interface Core {
-  // The launch at login starts hidden or shown as the loginLaunch setting says; started hidden, the app stays off screen
-  // until the Hotkey shows it. Answers whether the app started shown.
+  // The Login Launch starts hidden or shown as the loginLaunch.start setting says; started hidden, the app stays off
+  // screen until the Hotkey shows it. Answers whether the app started shown.
   start(options: { atLogin: boolean }): { shown: boolean };
   state(): CoreState;
   // With no Open Sessions, opens a new Session and shows it.
@@ -244,7 +244,7 @@ export interface Core {
   // Opens an Unnamed Session with one Tab at the home directory and makes it the Current Session.
   newSession(): void;
   // Opens a Closed Session again as the Current Session, restoring it as Restore does. One closed through its last Tab
-  // gets a fresh Tab at the home directory when the newTabDirectory setting is home, and otherwise at its Root
+  // gets a fresh Tab at the home directory when the tab.startDirectory setting is home, and otherwise at its Root
   // directory, or the home directory without one.
   reopenSession(sessionId: SessionId): void;
   // Shows the app with the Session chosen from the menu bar icon's menu as the Current Session, reopening a Closed
@@ -268,7 +268,7 @@ export interface Core {
   // Both move the Current Session through the Open Sessions in cycle order, wrapping around.
   focusPreviousSession(): void;
   focusNextSession(): void;
-  // Opens a Tab after the others and focuses it, in the directory the newTabDirectory setting picks.
+  // Opens a Tab after the others and focuses it, in the directory the tab.startDirectory setting picks.
   newTab(sessionId: SessionId): void;
   // Focuses the Tab at a zero-based position, if there is one.
   focusTab(sessionId: SessionId, position: number): void;
@@ -279,8 +279,8 @@ export interface Core {
   renameTab(tabId: TabId, title: string): void;
   // The Tab's title follows its focused Pane again.
   clearTabTitle(tabId: TabId): void;
-  // Splits the focused Pane in two, starting the new half's Shell in the directory the splitPaneDirectory setting picks,
-  // and focuses it.
+  // Splits the focused Pane in two, starting the new half's Shell in the directory the pane.startDirectory setting
+  // picks, and focuses it.
   splitPane(sessionId: SessionId, direction: SplitDirection): void;
   // Closes the focused Pane and stops its Shell, following the same chain as the Shell exiting.
   closePane(sessionId: SessionId): void;
@@ -680,7 +680,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   // neither a name nor a Root directory.
   function deletesOnClose (session: Session) {
     return (
-      settings.sessionsWithoutNameOrRootOnClose === 'delete' && session.name === undefined && session.rootDirectory === undefined
+      settings.session.withoutNameOrRootOnClose === 'delete' && session.name === undefined && session.rootDirectory === undefined
     )
   }
 
@@ -783,8 +783,8 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   // Sessions go by label number.
   function compareInCycleOrder (a: Session, b: Session) {
     if ((a.name === undefined) !== (b.name === undefined)) return a.name === undefined ? 1 : -1
-    if (settings.cycleOrder === 'recent') return b.lastUsedAt - a.lastUsedAt
-    if (settings.cycleOrder === 'created') return a.createdAt - b.createdAt
+    if (settings.session.cycleOrder === 'recent') return b.lastUsedAt - a.lastUsedAt
+    if (settings.session.cycleOrder === 'created') return a.createdAt - b.createdAt
     if (a.name !== undefined) return a.name.localeCompare(b.name!, undefined, { numeric: true })
     return a.labelNumber! - b.labelNumber!
   }
@@ -935,11 +935,11 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     )
   }
 
-  // The Sessions that match the search, best first, the Open ones before the Closed ones unless the sessionSearchOrder
-  // setting keeps them together.
+  // The Sessions that match the search, best first, the Open ones before the Closed ones unless the
+  // commandPalette.sessionSearchOrder setting keeps them together.
   function searchSessions (search: string) {
     const found = searchResults(sessionResults(), search)
-    if (settings.sessionSearchOrder === 'cycle') return found
+    if (settings.commandPalette.sessionSearchOrder === 'cycle') return found
     const isClosed = (result: PaletteResult) => result.type === 'session' && result.closed
     return [...found.filter((result) => !isClosed(result)), ...found.filter(isClosed)]
   }
@@ -948,8 +948,8 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   // offered.
   const paletteScopes: Record<string, (search: string) => PaletteResult[]> = {
     'ss ': searchSessions,
-    'tt ': (search) => searchResults(tabResults(tabsInScope(settings.tabSearchScope)), search),
-    'pp ': (search) => searchResults(paneResults(tabsInScope(settings.paneSearchScope)), search),
+    'tt ': (search) => searchResults(tabResults(tabsInScope(settings.commandPalette.tabSearchScope)), search),
+    'pp ': (search) => searchResults(paneResults(tabsInScope(settings.commandPalette.paneSearchScope)), search),
   }
 
   // Every Session, each Open Session followed by its Tabs and each Tab by its Panes, then every app action, each at its
@@ -979,7 +979,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
 
   // The results that match the query, in the order they're offered.
   function searchPalette (query: string) {
-    if (query === '' && settings.paletteNesting === 'nested') return nestedResults()
+    if (query === '' && settings.commandPalette.nesting === 'nested') return nestedResults()
     const prefix = Object.keys(paletteScopes).find((candidate) => query.startsWith(candidate))
     if (prefix) return paletteScopes[prefix](query.slice(prefix.length))
     return searchResults([...sessionResults(), ...tabResults(), ...paneResults(), ...actionResults()], query)
@@ -991,7 +991,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       if (session.tabs.length > 0) return { ...restartShells(session), status: 'open' }
       // With no Pane to open from, a Tab that would start in its working directory starts at the Root directory or home.
       const { rootDirectory } = session
-      const tab = openTab(resolveStartDirectory(settings.newTabDirectory, rootDirectory, rootDirectory ?? homeDirectory))
+      const tab = openTab(resolveStartDirectory(settings.tab.startDirectory, rootDirectory, rootDirectory ?? homeDirectory))
       return { ...session, status: 'open', tabs: [tab], focusedTabId: tab.id }
     })
     makeCurrent(sessionId)
@@ -1137,12 +1137,12 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
 
   const core: Core = {
     start: command(({ atLogin }: { atLogin: boolean }) => {
-      appShown = !atLogin || settings.loginLaunch === 'shown'
+      appShown = !atLogin || settings.loginLaunch.start === 'shown'
       const saved = stateStore.load()
       if (saved) restore(saved)
       // Started shown, the app needs a Session to show. Started hidden at login, it opens one for the Hotkey to show, or
       // leaves that to the Hotkey, as the setting says.
-      const opensSession = appShown || settings.hiddenStartWithNoOpenSessions === 'new'
+      const opensSession = appShown || settings.loginLaunch.withNoOpenSessions === 'new'
       if (opensSession && state.currentSessionId === undefined) addSession()
       return { shown: appShown }
     }),
@@ -1266,7 +1266,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       const current = session && focusedTab(session)
       if (!current) return
       const tab = openTab(
-        resolveStartDirectory(settings.newTabDirectory, session.rootDirectory, focusedPane(current).workingDirectory)
+        resolveStartDirectory(settings.tab.startDirectory, session.rootDirectory, focusedPane(current).workingDirectory)
       )
       updateSession(sessionId, (session) => ({ ...session, tabs: [...session.tabs, tab], focusedTabId: tab.id }))
     }),
@@ -1274,7 +1274,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       const rootDirectory = findSession(sessionId)?.rootDirectory
       updateFocusedTab(sessionId, (tab) => {
         const current = focusedPane(tab)
-        const pane = openPane(resolveStartDirectory(settings.splitPaneDirectory, rootDirectory, current.workingDirectory))
+        const pane = openPane(resolveStartDirectory(settings.pane.startDirectory, rootDirectory, current.workingDirectory))
         return {
           ...tab,
           panes: tab.panes.flatMap((candidate) => (candidate === current ? [current, pane] : [candidate])),
@@ -1395,7 +1395,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     },
     scrollbackChanged (paneId, reported) {
       if (!findSessionWithPane(paneId)) return
-      const text = capScrollback(reported, settings.scrollbackLines)
+      const text = capScrollback(reported, settings.pane.scrollbackLines)
       scrollback = { ...scrollback, [paneId]: { text, savedAt: clock.now() } }
       save()
     },

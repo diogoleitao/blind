@@ -10,7 +10,7 @@ export type CursorStyle = (typeof cursorStyles)[number]
 // The terminal's colours, the 16 ANSI colours named as xterm.js names them.
 export interface TerminalColours {
   foreground: Colour;
-  // Shown as transparent as the backgroundTransparency setting says.
+  // Shown as transparent as the background.transparency setting says.
   background: Colour;
   cursor: Colour;
   // The character under a block cursor.
@@ -388,7 +388,7 @@ export const themeSchema = {
       },
     },
     terminal: colourGroupSchema(
-      "The terminal's colours. The background is as transparent as the backgroundTransparency setting says.",
+      "The terminal's colours. The background is as transparent as the background.transparency setting says.",
       defaultTheme.terminal
     ),
     chrome: colourGroupSchema(

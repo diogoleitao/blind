@@ -1,5 +1,5 @@
 import type { ProgramStatusReport } from '../core/attention'
-import type { MenuBarIcon, PanePadding, PaneScrollBar } from '../core/config'
+import type { MenuBarIcon, Settings } from '../core/config'
 import type { Effect, PaletteResult } from '../core/core'
 import type { PaneRect } from '../core/layout'
 import type { PaneId, TabId } from '../core/state'
@@ -22,10 +22,8 @@ export interface SessionView {
 // The settings a window follows: its terminals' scrollback, whether its Panes are padded and show a scroll bar, and how
 // transparent its background is.
 export interface WindowSettings {
-  scrollbackLines: number;
-  panePadding: PanePadding;
-  paneScrollBar: PaneScrollBar;
-  backgroundTransparency: number;
+  pane: Pick<Settings['pane'], 'scrollbackLines' | 'padding' | 'scrollBar'>;
+  background: Pick<Settings['background'], 'transparency'>;
 }
 
 // What the Command Palette asks for in place of a search: a Session's name or a Tab's title.

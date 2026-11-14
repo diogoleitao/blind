@@ -35,3 +35,45 @@ describe('creating the config file if missing', () => {
     expect(configFile.createIfMissing()).toBe(false)
   })
 })
+
+describe('the schema written next to the config file', () => {
+  function writtenSchema () {
+    createConfigFile(directory).writeSchema()
+    return JSON.parse(readFileSync(join(directory, 'config.schema.json'), 'utf8'))
+  }
+
+  it('groups the settings by glossary term, in glossary order, each group closed to other settings', () => {
+    const schema = writtenSchema()
+    const groups = Object.entries(schema.properties as Record<string, { type?: string; properties?: object; additionalProperties?: boolean }>)
+      .filter(([, property]) => property.type === 'object' && property.properties)
+    expect(Object.keys(schema.properties)).toEqual([
+      '$schema', 'session', 'tab', 'pane', 'shell', 'loginLaunch', 'sessionBanner', 'commandPalette', 'theme',
+      'background', 'menuBarIcon', 'keyBindings',
+    ])
+    expect(schema.additionalProperties).toBe(false)
+    expect(Object.fromEntries(groups.map(([name, group]) => [name, Object.keys(group.properties!)]))).toMatchObject({
+      session: ['cycleOrder', 'withoutNameOrRootOnClose'],
+      tab: ['startDirectory'],
+      pane: ['scrollbackLines', 'startDirectory', 'padding', 'scrollBar'],
+      loginLaunch: ['start', 'withNoOpenSessions'],
+      commandPalette: ['sessionSearchOrder', 'tabSearchScope', 'paneSearchScope', 'nesting'],
+      background: ['transparency', 'effect', 'blurRadius'],
+    })
+    for (const [, group] of groups) expect(group.additionalProperties).toBe(false)
+  })
+
+  it('gives grouped settings the defaults they had before they were grouped', () => {
+    const { properties } = writtenSchema()
+    const defaults = (group: string) =>
+      Object.fromEntries(Object.entries(properties[group].properties as Record<string, { default: unknown }>)
+        .map(([name, setting]) => [name, setting.default]))
+    expect(defaults('session')).toEqual({ cycleOrder: 'alphabetical', withoutNameOrRootOnClose: 'keep' })
+    expect(defaults('tab')).toEqual({ startDirectory: 'root' })
+    expect(defaults('pane')).toEqual({ scrollbackLines: 10_000, startDirectory: 'current', padding: 'padded', scrollBar: 'none' })
+    expect(defaults('loginLaunch')).toEqual({ start: 'hidden', withNoOpenSessions: 'hotkey' })
+    expect(defaults('commandPalette')).toEqual({
+      sessionSearchOrder: 'openFirst', tabSearchScope: 'all', paneSearchScope: 'all', nesting: 'flat',
+    })
+    expect(defaults('background')).toEqual({ transparency: 25, effect: 'blur', blurRadius: 15 })
+  })
+})

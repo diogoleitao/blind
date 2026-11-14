@@ -30,16 +30,16 @@ const paletteNestings = ['flat', 'nested'] as const
 // each Open Session's Tabs under it and each Tab's Panes under the Tab.
 export type PaletteNesting = (typeof paletteNestings)[number]
 
-const loginLaunches = ['hidden', 'shown'] as const
+const loginLaunchStarts = ['hidden', 'shown'] as const
 
-// How the launch at login starts: hidden until the Hotkey shows the app, or shown, as a launch by hand does.
-export type LoginLaunch = (typeof loginLaunches)[number]
+// How the Login Launch starts: hidden until the Hotkey shows the app, or shown, as a launch by hand does.
+export type LoginLaunchStart = (typeof loginLaunchStarts)[number]
 
-const hiddenStartBehaviours = ['new', 'hotkey'] as const
+const loginLaunchesWithNoOpenSessions = ['new', 'hotkey'] as const
 
-// What a hidden launch at login with no Open Sessions opens: a new Session, which the first Hotkey press shows, or
+// What a hidden Login Launch with no Open Sessions opens: a new Session, which the first Hotkey press shows, or
 // nothing, leaving it to the first Hotkey press, which opens a new Session.
-export type HiddenStartWithNoOpenSessions = (typeof hiddenStartBehaviours)[number]
+export type LoginLaunchWithNoOpenSessions = (typeof loginLaunchesWithNoOpenSessions)[number]
 
 const sessionsWithoutNameOrRootOnCloseBehaviours = ['keep', 'delete'] as const
 
@@ -81,68 +81,115 @@ export const maximumBlurRadius = 64
 // What `unlimited` scrollback keeps: the terminal sets its buffer aside up front, so it can't be truly unbounded.
 export const unlimitedScrollbackLines = 1_000_000
 
-// What the config file sets, each setting at its default unless the file gives it a valid value.
+// What the config file sets, each setting at its default unless the file gives it a valid value. Settings are grouped by
+// the glossary term they act on, one level deep, and a setting that is a term's whole choice, such as which Theme, goes
+// by the term's name as a plain value; see docs/adr/0004-settings-grouped-by-glossary-term.md.
 export interface Settings {
+  session: {
+    cycleOrder: CycleOrder;
+    withoutNameOrRootOnClose: SessionsWithoutNameOrRootOnClose;
+  };
+  tab: {
+    startDirectory: StartDirectory;
+  };
+  pane: {
+    // How many lines of each Pane's scrollback are kept, `unlimited` read as `unlimitedScrollbackLines`.
+    scrollbackLines: number;
+    // Where the new Pane of a split starts.
+    startDirectory: StartDirectory;
+    padding: PanePadding;
+    scrollBar: PaneScrollBar;
+  };
   // The program each new Pane's Shell runs; absent for the user's login shell.
   shell?: string;
-  // How many lines of each Pane's scrollback are kept, `unlimited` read as `unlimitedScrollbackLines`.
-  scrollbackLines: number;
-  cycleOrder: CycleOrder;
-  sessionSearchOrder: SessionSearchOrder;
-  tabSearchScope: TabSearchScope;
-  paneSearchScope: PaneSearchScope;
-  paletteNesting: PaletteNesting;
-  loginLaunch: LoginLaunch;
-  hiddenStartWithNoOpenSessions: HiddenStartWithNoOpenSessions;
-  sessionsWithoutNameOrRootOnClose: SessionsWithoutNameOrRootOnClose;
-  newTabDirectory: StartDirectory;
-  splitPaneDirectory: StartDirectory;
-  panePadding: PanePadding;
-  paneScrollBar: PaneScrollBar;
+  loginLaunch: {
+    start: LoginLaunchStart;
+    withNoOpenSessions: LoginLaunchWithNoOpenSessions;
+  };
   // Whether cycling Open Sessions shows the Session Banner.
   sessionBanner: boolean;
-  // Each action's shortcut; null for an unbound action.
-  keyBindings: Record<BoundAction, Shortcut | null>;
+  commandPalette: {
+    sessionSearchOrder: SessionSearchOrder;
+    tabSearchScope: TabSearchScope;
+    paneSearchScope: PaneSearchScope;
+    nesting: PaletteNesting;
+  };
   // The name of the Theme in effect, built in or from a Theme file.
   theme: string;
+  background: {
+    // How transparent a Session window's background is, in percent: 0 is opaque.
+    transparency: number;
+    effect: BackgroundEffect;
+    // How strongly `blur` blurs, from `minimumBlurRadius` to `maximumBlurRadius`.
+    blurRadius: number;
+  };
   menuBarIcon: MenuBarIcon;
-  // How transparent a Session window's background is, in percent: 0 is opaque.
-  backgroundTransparency: number;
-  backgroundEffect: BackgroundEffect;
-  // How strongly `blur` blurs, from `minimumBlurRadius` to `maximumBlurRadius`.
-  backgroundBlurRadius: number;
+  // Each action's shortcut; null for an unbound action.
+  keyBindings: Record<BoundAction, Shortcut | null>;
 }
 
 export const defaultSettings: Settings = {
-  scrollbackLines: 10_000,
-  cycleOrder: 'alphabetical',
-  sessionSearchOrder: 'openFirst',
-  tabSearchScope: 'all',
-  paneSearchScope: 'all',
-  paletteNesting: 'flat',
-  loginLaunch: 'hidden',
-  hiddenStartWithNoOpenSessions: 'hotkey',
-  sessionsWithoutNameOrRootOnClose: 'keep',
-  newTabDirectory: 'root',
-  splitPaneDirectory: 'current',
-  panePadding: 'padded',
-  paneScrollBar: 'none',
+  session: {
+    cycleOrder: 'alphabetical',
+    withoutNameOrRootOnClose: 'keep',
+  },
+  tab: {
+    startDirectory: 'root',
+  },
+  pane: {
+    scrollbackLines: 10_000,
+    startDirectory: 'current',
+    padding: 'padded',
+    scrollBar: 'none',
+  },
+  loginLaunch: {
+    start: 'hidden',
+    withNoOpenSessions: 'hotkey',
+  },
   sessionBanner: true,
+  commandPalette: {
+    sessionSearchOrder: 'openFirst',
+    tabSearchScope: 'all',
+    paneSearchScope: 'all',
+    nesting: 'flat',
+  },
+  theme: defaultTheme.name,
+  background: {
+    transparency: 25,
+    effect: 'blur',
+    blurRadius: 15,
+  },
+  menuBarIcon: 'monochrome',
   keyBindings: Object.fromEntries(
     Object.entries(defaultKeyBindings).map(([action, shortcut]) => [action, shortcut && parseShortcut(shortcut)!])
   ) as Settings['keyBindings'],
-  theme: defaultTheme.name,
-  menuBarIcon: 'monochrome',
-  backgroundTransparency: 25,
-  backgroundEffect: 'blur',
-  backgroundBlurRadius: 15,
 }
 
 const invalid = Symbol('invalid')
 
 // A setting's value read from the config file, or `invalid`. A setting made of entries rejects the invalid ones by
-// name and keeps the rest.
+// their names within it and keeps the rest.
 type SettingParser<Value> = (value: unknown, rejectEntry: (entry: string) => void) => Value | typeof invalid
+
+type SettingParsers<Group> = { [Name in keyof Group]-?: SettingParser<Group[Name]> }
+
+// A group of settings, each at its default unless the group gives it a valid value. A setting the group gets wrong, or
+// that doesn't exist, is rejected by name, and the rest are kept; one rejecting entries of its own rejects them by
+// their names within it, after its own name and a dot.
+function groupOf<Group extends object> (defaults: Group, parsers: SettingParsers<Group>): SettingParser<Group> {
+  return (value, rejectEntry) => {
+    if (!isObject(value)) return invalid
+    const group = { ...defaults }
+    for (const [name, entry] of Object.entries(value)) {
+      const parsed = Object.hasOwn(parsers, name)
+        ? parsers[name as keyof Group](entry, (inner) => rejectEntry(`${name}.${inner}`))
+        : invalid
+      if (parsed === invalid) rejectEntry(name)
+      else Object.assign(group, { [name]: parsed })
+    }
+    return group
+  }
+}
 
 function oneOf<const Values extends readonly string[]> (values: Values): SettingParser<Values[number]> {
   return (value) => (values.includes(value as string) ? (value as Values[number]) : invalid)
@@ -153,38 +200,48 @@ function wholeNumberFrom (minimum: number, maximum: number): SettingParser<numbe
     Number.isInteger(value) && (value as number) >= minimum && (value as number) <= maximum ? (value as number) : invalid
 }
 
-type SettingParsers = { [Name in keyof Settings]-?: SettingParser<Settings[Name]> }
-
 // The theme setting takes the name of one of the Themes loaded.
-const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
+const settingParsers = (themeNames: readonly string[]): SettingParsers<Settings> => ({
+  session: groupOf(defaultSettings.session, {
+    cycleOrder: oneOf(cycleOrders),
+    withoutNameOrRootOnClose: oneOf(sessionsWithoutNameOrRootOnCloseBehaviours),
+  }),
+  tab: groupOf(defaultSettings.tab, {
+    startDirectory: oneOf(startDirectories),
+  }),
+  pane: groupOf(defaultSettings.pane, {
+    scrollbackLines: (value) => {
+      if (value === 'unlimited') return unlimitedScrollbackLines
+      return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= unlimitedScrollbackLines
+        ? (value as number)
+        : invalid
+    },
+    startDirectory: oneOf(startDirectories),
+    padding: oneOf(panePaddings),
+    scrollBar: oneOf(paneScrollBars),
+  }),
   shell: (value) => (typeof value === 'string' && value.trim() !== '' ? value : invalid),
-  scrollbackLines: (value) => {
-    if (value === 'unlimited') return unlimitedScrollbackLines
-    return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= unlimitedScrollbackLines
-      ? (value as number)
-      : invalid
-  },
-  cycleOrder: oneOf(cycleOrders),
-  sessionSearchOrder: oneOf(sessionSearchOrders),
-  tabSearchScope: oneOf(tabSearchScopes),
-  paneSearchScope: oneOf(paneSearchScopes),
-  paletteNesting: oneOf(paletteNestings),
-  loginLaunch: oneOf(loginLaunches),
-  hiddenStartWithNoOpenSessions: oneOf(hiddenStartBehaviours),
-  sessionsWithoutNameOrRootOnClose: oneOf(sessionsWithoutNameOrRootOnCloseBehaviours),
-  newTabDirectory: oneOf(startDirectories),
-  splitPaneDirectory: oneOf(startDirectories),
-  panePadding: oneOf(panePaddings),
-  paneScrollBar: oneOf(paneScrollBars),
+  loginLaunch: groupOf(defaultSettings.loginLaunch, {
+    start: oneOf(loginLaunchStarts),
+    withNoOpenSessions: oneOf(loginLaunchesWithNoOpenSessions),
+  }),
   sessionBanner: (value) => (typeof value === 'boolean' ? value : invalid),
-  keyBindings: parseKeyBindings,
+  commandPalette: groupOf(defaultSettings.commandPalette, {
+    sessionSearchOrder: oneOf(sessionSearchOrders),
+    tabSearchScope: oneOf(tabSearchScopes),
+    paneSearchScope: oneOf(paneSearchScopes),
+    nesting: oneOf(paletteNestings),
+  }),
   // Theme names are unique ignoring case, so the setting matches one ignoring case and takes its spelling.
   theme: (value) =>
     themeNames.find((name) => typeof value === 'string' && name.toLowerCase() === value.toLowerCase()) ?? invalid,
+  background: groupOf(defaultSettings.background, {
+    transparency: wholeNumberFrom(0, 100),
+    effect: oneOf(backgroundEffects),
+    blurRadius: wholeNumberFrom(minimumBlurRadius, maximumBlurRadius),
+  }),
   menuBarIcon: oneOf(menuBarIcons),
-  backgroundTransparency: wholeNumberFrom(0, 100),
-  backgroundEffect: oneOf(backgroundEffects),
-  backgroundBlurRadius: wholeNumberFrom(minimumBlurRadius, maximumBlurRadius),
+  keyBindings: parseKeyBindings,
 })
 
 // The defaults with each configured action's shortcut, or null, in place. A configured shortcut is taken away from the
@@ -197,7 +254,7 @@ function parseKeyBindings (value: unknown, rejectEntry: (entry: string) => void)
   for (const [action, text] of Object.entries(value)) {
     const shortcut = typeof text === 'string' ? parseShortcut(text) : text === null ? null : undefined
     if (!Object.hasOwn(defaultKeyBindings, action) || shortcut === undefined || isConfigured(shortcut)) {
-      rejectEntry(`keyBindings.${action}`)
+      rejectEntry(action)
     } else {
       configured[action as BoundAction] = shortcut
     }
@@ -216,93 +273,130 @@ export const configSchema = {
   type: 'object',
   properties: {
     $schema: { type: 'string' },
+    session: {
+      description: 'How Open Sessions are cycled through, and what closing a Session keeps.',
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        cycleOrder: {
+          description:
+            'The order Open Sessions are cycled through and listed in: by name, by most recent use, or by creation.',
+          enum: cycleOrders,
+          default: defaultSettings.session.cycleOrder,
+        },
+        withoutNameOrRootOnClose: {
+          description:
+            'What closing a Session with neither a name nor a Root directory does: keep it as a Closed Session, or delete it. Quitting closes every Open Session, and delete also deletes such Closed Sessions then.',
+          enum: sessionsWithoutNameOrRootOnCloseBehaviours,
+          default: defaultSettings.session.withoutNameOrRootOnClose,
+        },
+      },
+    },
+    tab: {
+      description: 'Where new Tabs start.',
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        startDirectory: {
+          description:
+            "Where a new Tab starts: root is the Session's Root directory, or the current Pane's working directory without one; current is the current Pane's working directory; home is the home directory. A Session reopened with no Tabs starts its Tab at the home directory for home, and otherwise at its Root directory, or the home directory without one.",
+          enum: startDirectories,
+          default: defaultSettings.tab.startDirectory,
+        },
+      },
+    },
+    pane: {
+      description: "Each Pane's scrollback and look, and where a split's new Pane starts.",
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        scrollbackLines: {
+          description: `How many lines of each Pane's scrollback are kept and restored, up to ${unlimitedScrollbackLines.toLocaleString('en-GB')}; "unlimited" keeps that many.`,
+          default: defaultSettings.pane.scrollbackLines,
+          oneOf: [
+            { type: 'integer', minimum: 0, maximum: unlimitedScrollbackLines },
+            { const: 'unlimited' },
+          ],
+        },
+        startDirectory: {
+          description:
+            "Where the new Pane of a split starts: root is the Session's Root directory, or the split Pane's working directory without one; current is the split Pane's working directory; home is the home directory.",
+          enum: startDirectories,
+          default: defaultSettings.pane.startDirectory,
+        },
+        padding: {
+          description:
+            'Whether each Pane keeps its text off its edges and the dividers next to it: padded leaves 7px at its sides and 5px at its top and bottom; none lets the text run up to them.',
+          enum: panePaddings,
+          default: defaultSettings.pane.padding,
+        },
+        scrollBar: {
+          description:
+            "Whether each Pane shows a scroll bar: none hides it, and the terminal takes its room; visible shows a thin bar in the Theme's colours at the Pane's right edge. Scrolling works either way.",
+          enum: paneScrollBars,
+          default: defaultSettings.pane.scrollBar,
+        },
+      },
+    },
     shell: {
       type: 'string',
       minLength: 1,
       description: "The program each new Pane's Shell runs, as a login shell. Defaults to your login shell ($SHELL).",
     },
-    scrollbackLines: {
-      description: `How many lines of each Pane's scrollback are kept and restored, up to ${unlimitedScrollbackLines.toLocaleString('en-GB')}; "unlimited" keeps that many.`,
-      default: defaultSettings.scrollbackLines,
-      oneOf: [
-        { type: 'integer', minimum: 0, maximum: unlimitedScrollbackLines },
-        { const: 'unlimited' },
-      ],
-    },
-    cycleOrder: {
-      description: 'The order Open Sessions are cycled through and listed in: by name, by most recent use, or by creation.',
-      enum: cycleOrders,
-      default: defaultSettings.cycleOrder,
-    },
-    sessionSearchOrder: {
-      description:
-        "The order the Command Palette lists Sessions in when the query starts with ss: openFirst lists the Open Sessions before the Closed ones, cycle lists them together; each by cycleOrder, or by how well they match once there's a search.",
-      enum: sessionSearchOrders,
-      default: defaultSettings.sessionSearchOrder,
-    },
-    tabSearchScope: {
-      description:
-        "Whose Tabs the Command Palette lists when the query starts with tt: all lists every Open Session's, currentSession the Current Session's alone. A query without a prefix lists every Open Session's either way.",
-      enum: tabSearchScopes,
-      default: defaultSettings.tabSearchScope,
-    },
-    paneSearchScope: {
-      description:
-        "Whose Panes the Command Palette lists when the query starts with pp: all lists every Open Session's, currentSession the Current Session's alone, currentTab the Current Tab's alone. A query without a prefix lists every Open Session's either way.",
-      enum: paneSearchScopes,
-      default: defaultSettings.paneSearchScope,
-    },
-    paletteNesting: {
-      description:
-        "How the Command Palette lists Tabs and Panes when nothing is typed: flat lists every Tab, then every Pane, after the Sessions; nested lists each Open Session's Tabs under it and each Tab's Panes under the Tab, leaving out a Session's only Tab and a Tab's only Pane. Searching, and the ss, tt and pp prefixes, list them flat either way.",
-      enum: paletteNestings,
-      default: defaultSettings.paletteNesting,
-    },
     loginLaunch: {
-      description: 'How the launch at login starts: hidden until the Hotkey shows the app, or shown, as a launch by hand does.',
-      enum: loginLaunches,
-      default: defaultSettings.loginLaunch,
-    },
-    hiddenStartWithNoOpenSessions: {
-      description:
-        'What a hidden launch at login with no Open Sessions opens: a new Session, which the first Hotkey press shows, or nothing, leaving it to the first Hotkey press, which opens a new Session.',
-      enum: hiddenStartBehaviours,
-      default: defaultSettings.hiddenStartWithNoOpenSessions,
-    },
-    sessionsWithoutNameOrRootOnClose: {
-      description:
-        'What closing a Session with neither a name nor a Root directory does: keep it as a Closed Session, or delete it. Quitting closes every Open Session, and delete also deletes such Closed Sessions then.',
-      enum: sessionsWithoutNameOrRootOnCloseBehaviours,
-      default: defaultSettings.sessionsWithoutNameOrRootOnClose,
-    },
-    newTabDirectory: {
-      description:
-        "Where a new Tab starts: root is the Session's Root directory, or the current Pane's working directory without one; current is the current Pane's working directory; home is the home directory. A Session reopened with no Tabs starts its Tab at the home directory for home, and otherwise at its Root directory, or the home directory without one.",
-      enum: startDirectories,
-      default: defaultSettings.newTabDirectory,
-    },
-    splitPaneDirectory: {
-      description:
-        "Where the new Pane of a split starts: root is the Session's Root directory, or the split Pane's working directory without one; current is the split Pane's working directory; home is the home directory.",
-      enum: startDirectories,
-      default: defaultSettings.splitPaneDirectory,
-    },
-    panePadding: {
-      description:
-        'Whether each Pane keeps its text off its edges and the dividers next to it: padded leaves 7px at its sides and 5px at its top and bottom; none lets the text run up to them.',
-      enum: panePaddings,
-      default: defaultSettings.panePadding,
-    },
-    paneScrollBar: {
-      description:
-        "Whether each Pane shows a scroll bar: none hides it, and the terminal takes its room; visible shows a thin bar in the Theme's colours at the Pane's right edge. Scrolling works either way.",
-      enum: paneScrollBars,
-      default: defaultSettings.paneScrollBar,
+      description: 'How Blind starts on its own when you log in to macOS.',
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        start: {
+          description:
+            'How the Login Launch starts: hidden until the Hotkey shows the app, or shown, as a launch by hand does.',
+          enum: loginLaunchStarts,
+          default: defaultSettings.loginLaunch.start,
+        },
+        withNoOpenSessions: {
+          description:
+            'What a hidden Login Launch with no Open Sessions opens: a new Session, which the first Hotkey press shows, or nothing, leaving it to the first Hotkey press, which opens a new Session.',
+          enum: loginLaunchesWithNoOpenSessions,
+          default: defaultSettings.loginLaunch.withNoOpenSessions,
+        },
+      },
     },
     sessionBanner: {
       description: 'Whether cycling Open Sessions shows the Session Banner, naming the Session in the middle of its window.',
       type: 'boolean',
       default: defaultSettings.sessionBanner,
+    },
+    commandPalette: {
+      description: 'What the Command Palette lists, and in what order.',
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        sessionSearchOrder: {
+          description:
+            "The order the Command Palette lists Sessions in when the query starts with ss: openFirst lists the Open Sessions before the Closed ones, cycle lists them together; each by session.cycleOrder, or by how well they match once there's a search.",
+          enum: sessionSearchOrders,
+          default: defaultSettings.commandPalette.sessionSearchOrder,
+        },
+        tabSearchScope: {
+          description:
+            "Whose Tabs the Command Palette lists when the query starts with tt: all lists every Open Session's, currentSession the Current Session's alone. A query without a prefix lists every Open Session's either way.",
+          enum: tabSearchScopes,
+          default: defaultSettings.commandPalette.tabSearchScope,
+        },
+        paneSearchScope: {
+          description:
+            "Whose Panes the Command Palette lists when the query starts with pp: all lists every Open Session's, currentSession the Current Session's alone, currentTab the Current Tab's alone. A query without a prefix lists every Open Session's either way.",
+          enum: paneSearchScopes,
+          default: defaultSettings.commandPalette.paneSearchScope,
+        },
+        nesting: {
+          description:
+            "How the Command Palette lists Tabs and Panes when nothing is typed: flat lists every Tab, then every Pane, after the Sessions; nested lists each Open Session's Tabs under it and each Tab's Panes under the Tab, leaving out a Session's only Tab and a Tab's only Pane. Searching, and the ss, tt and pp prefixes, list them flat either way.",
+          enum: paletteNestings,
+          default: defaultSettings.commandPalette.nesting,
+        },
+      },
     },
     theme: {
       description:
@@ -312,32 +406,39 @@ export const configSchema = {
       default: defaultSettings.theme,
       examples: builtInThemes.map((theme) => theme.name),
     },
+    background: {
+      description: "What a Session's window shows behind its terminal.",
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        transparency: {
+          description:
+            "How transparent a Session window's background, the Theme's terminal background, is, in percent: 0 is opaque, 100 shows only what background.effect makes of what's behind the window. The Command Palette and the Session Banner keep their own colours.",
+          type: 'integer',
+          minimum: 0,
+          maximum: 100,
+          default: defaultSettings.background.transparency,
+        },
+        effect: {
+          description:
+            "What a Session window shows through its background: blur blurs what's behind the window, by background.blurRadius; none shows it as good as unblurred, at the lightest blur macOS allows without turning blur off for good.",
+          enum: backgroundEffects,
+          default: defaultSettings.background.effect,
+        },
+        blurRadius: {
+          description: `How strongly background.effect blur blurs, from ${minimumBlurRadius} to ${maximumBlurRadius}. Ignored when background.effect is none.`,
+          type: 'integer',
+          minimum: minimumBlurRadius,
+          maximum: maximumBlurRadius,
+          default: defaultSettings.background.blurRadius,
+        },
+      },
+    },
     menuBarIcon: {
       description:
-        "The menu bar icon: monochrome follows the menu bar's colour, light or dark; colour keeps the icon's own colours. The Command Palette's Change Menu Bar Icon sets it too.",
+        "The Menu Bar Icon: monochrome follows the menu bar's colour, light or dark; colour keeps the icon's own colours. The Command Palette's Change Menu Bar Icon sets it too.",
       enum: menuBarIcons,
       default: defaultSettings.menuBarIcon,
-    },
-    backgroundTransparency: {
-      description:
-        "How transparent a Session window's background, the Theme's terminal background, is, in percent: 0 is opaque, 100 shows only what backgroundEffect makes of what's behind the window. The Command Palette and the Session Banner keep their own colours.",
-      type: 'integer',
-      minimum: 0,
-      maximum: 100,
-      default: defaultSettings.backgroundTransparency,
-    },
-    backgroundEffect: {
-      description:
-        "What a Session window shows through its background: blur blurs what's behind the window, by backgroundBlurRadius; none shows it as good as unblurred, at the lightest blur macOS allows without turning blur off for good.",
-      enum: backgroundEffects,
-      default: defaultSettings.backgroundEffect,
-    },
-    backgroundBlurRadius: {
-      description: `How strongly backgroundEffect blur blurs, from ${minimumBlurRadius} to ${maximumBlurRadius}. Ignored when backgroundEffect is none.`,
-      type: 'integer',
-      minimum: minimumBlurRadius,
-      maximum: maximumBlurRadius,
-      default: defaultSettings.backgroundBlurRadius,
     },
     keyBindings: {
       description:
@@ -368,24 +469,19 @@ export const starterConfig = `{
 export interface ParsedConfig {
   settings: Settings;
   // The settings the file gave invalid values, or that don't exist.
+  // A setting in a group by its group's name and its own, joined by a dot, such as `pane.scrollBar`.
   rejected: string[];
 }
 
 // The settings in the config file's text, or the defaults without a file; undefined when the text isn't a JSON object,
 // comments allowed. Editors read `$schema`, so it's no setting. The theme setting names one of `themeNames`.
 export function parseConfig (text: string | undefined, themeNames: readonly string[]): ParsedConfig | undefined {
-  const settings = { ...defaultSettings }
-  const rejected: string[] = []
   const config = text === undefined ? {} : readJsonc(text)
   if (config === undefined) return undefined
-  const parsers = settingParsers(themeNames)
-  for (const [name, value] of Object.entries(config)) {
-    if (name === '$schema') continue
-    const parsed = Object.hasOwn(parsers, name)
-      ? parsers[name as keyof Settings](value, (entry) => rejected.push(entry))
-      : invalid
-    if (parsed === invalid) rejected.push(name)
-    else Object.assign(settings, { [name]: parsed })
-  }
+  const rejected: string[] = []
+  const settings = groupOf(defaultSettings, settingParsers(themeNames))(
+    Object.fromEntries(Object.entries(config).filter(([name]) => name !== '$schema')),
+    (entry) => rejected.push(entry)
+  ) as Settings
   return { settings, rejected }
 }

@@ -8,12 +8,34 @@ export function readJsonc (text: string): Record<string, unknown> | undefined {
   }
 }
 
-// The text, which holds a JSON object, comments allowed, with the object's `key` set to `value`. Comments and
-// everything else stay as they were. A new key goes on a line of its own after the last one, indented as it is, or two
-// spaces in an empty object.
-export function setJsoncProperty (text: string, key: string, value: unknown) {
-  const { opening, properties } = topLevelObject(text)
+// The text, which holds a JSON object, comments allowed, with the object's `key` set to `value`; or, for a group and a
+// key, with the key set in the object the group holds, which is made, or made in place of what the group holds that's
+// no object. Comments and everything else stay as they were. A new key goes on a line of its own after the last one,
+// indented as it is, or two spaces in from its object's line in an empty object.
+export function setJsoncProperty (text: string, key: string | readonly [group: string, key: string], value: unknown) {
   const json = JSON.stringify(value)
+  if (typeof key === 'string') return setProperty(text, key, json, '')
+  const [group, name] = key
+  const holdsObject = (within: string) => {
+    const last = topLevelObject(within).properties.findLast((property) => property.key === group)
+    return last && within[last.start] === '{' ? last : undefined
+  }
+  const withGroup = holdsObject(text) ? text : setProperty(text, group, '{}', '')
+  const { keyStart, start, end } = holdsObject(withGroup)!
+  const lineStart = withGroup.lastIndexOf('\n', keyStart) + 1
+  const indent = indentation(withGroup.slice(lineStart, keyStart)) ?? ''
+  return withGroup.slice(0, start) + setProperty(withGroup.slice(start, end), name, json, indent) + withGroup.slice(end)
+}
+
+// The text before a key when it's only spaces and tabs, so the key starts its line; undefined otherwise.
+function indentation (beforeKey: string) {
+  return /^[ \t]*$/.test(beforeKey) ? beforeKey : undefined
+}
+
+// `setJsoncProperty` for a key of the object the text holds, with the value as JSON. The object's line is indented by
+// `objectIndent`.
+function setProperty (text: string, key: string, json: string, objectIndent: string) {
+  const { opening, properties } = topLevelObject(text)
   const existing = properties.filter((property) => property.key === key)
   if (existing.length > 0) {
     return existing
@@ -24,10 +46,11 @@ export function setJsoncProperty (text: string, key: string, value: unknown) {
   const last = properties.at(-1)
   if (!last) {
     const after = text.slice(opening + 1)
-    return `${text.slice(0, opening + 1)}\n  ${added}${after.startsWith('\n') ? '' : '\n'}${after}`
+    const closing = after.startsWith('\n') ? '' : `\n${objectIndent}`
+    return `${text.slice(0, opening + 1)}\n${objectIndent}  ${added}${closing}${after}`
   }
   const lineStart = text.lastIndexOf('\n', last.keyStart) + 1
-  const indent = /^[ \t]*$/.test(text.slice(lineStart, last.keyStart)) ? text.slice(lineStart, last.keyStart) : '  '
+  const indent = indentation(text.slice(lineStart, last.keyStart)) ?? `${objectIndent}  `
   const comma = text[nextToken(text, last.end)] === ',' ? '' : ','
   // Past the last value and its comma, and past a comment that ends its line, so the comment stays with it.
   const position = comma ? last.end : nextToken(text, last.end) + 1

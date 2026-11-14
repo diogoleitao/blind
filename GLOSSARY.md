@@ -58,6 +58,10 @@ _Avoid_: Close (when the Session should go away)
 Bringing back every Session with its Tabs, Pane layout, working directories and scrollback after the app quits or the OS restarts. Shells start fresh; nothing keeps running in between.
 _Avoid_: Resume, reattach
 
+**Login Launch**:
+The app starting on its own when the user logs in to macOS, hidden until the Hotkey shows it unless the user has chosen for it to start shown.
+_Avoid_: Autostart, startup, launch at login
+
 ### Navigation
 
 **Hotkey**:
@@ -87,3 +91,11 @@ _Avoid_: Colour scheme, profile
 **Bezel**:
 The thin border around a Session's window.
 _Avoid_: Frame, outline, window border
+
+**Background**:
+What a Session's window shows behind its terminal: the Theme's terminal background, see-through and blurred as far as the user has chosen.
+_Avoid_: Transparency, vibrancy, opacity
+
+**Menu Bar Icon**:
+The app's icon in the macOS menu bar.
+_Avoid_: Tray icon, status item

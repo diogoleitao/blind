@@ -50,10 +50,8 @@ const terminals = new Map<PaneId, PaneTerminal>()
 let focusedPaneId: PaneId | undefined
 // Both replaced by the main process's before any terminal opens.
 let windowSettings: WindowSettings = {
-  scrollbackLines: defaultSettings.scrollbackLines,
-  panePadding: defaultSettings.panePadding,
-  paneScrollBar: defaultSettings.paneScrollBar,
-  backgroundTransparency: defaultSettings.backgroundTransparency,
+  pane: defaultSettings.pane,
+  background: defaultSettings.background,
 }
 let theme: Theme = defaultTheme
 
@@ -94,11 +92,11 @@ function terminalOptions (theme: Theme): ITerminalOptions {
 }
 
 // The page's colours, as the CSS variables the stylesheet uses, e.g. `--palette-muted-text`. The terminal's background
-// is the window's, as transparent as the backgroundTransparency setting says.
+// is the window's, as transparent as the background.transparency setting says.
 function applyChromeColours (theme: Theme) {
   const { terminal, chrome } = theme
   const root = document.documentElement.style
-  const opacity = 1 - windowSettings.backgroundTransparency / 100
+  const opacity = 1 - windowSettings.background.transparency / 100
   root.setProperty('--window-background', withOpacity(terminal.background, opacity))
   root.setProperty('--strong-divider', strongDivider(theme))
   for (const [name, colour] of Object.entries(chrome)) {
@@ -143,7 +141,7 @@ function openPane (rect: PaneRect): PaneTerminal {
   const terminal = new Terminal({
     allowTransparency: true,
     ...terminalOptions(theme),
-    scrollback: windowSettings.scrollbackLines,
+    scrollback: windowSettings.pane.scrollbackLines,
     macOptionIsMeta: false,
     // The search addon highlights matches with decorations, which xterm.js still counts as proposed API.
     allowProposedApi: true,
@@ -389,7 +387,7 @@ function reportScrollback (paneId: PaneId, pane: PaneTerminal) {
   clearTimeout(pane.reportTimer)
   pane.reportTimer = undefined
   const scrollback = pane.serialize.serialize({
-    scrollback: windowSettings.scrollbackLines,
+    scrollback: windowSettings.pane.scrollbackLines,
     excludeAltBuffer: true,
     excludeModes: true,
   })
@@ -401,11 +399,11 @@ function reportScrollback (paneId: PaneId, pane: PaneTerminal) {
 // change the space their terminals have, which the stylesheet works out.
 function applyWindowSettings (settings: WindowSettings) {
   windowSettings = settings
-  for (const pane of terminals.values()) pane.terminal.options.scrollback = settings.scrollbackLines
+  for (const pane of terminals.values()) pane.terminal.options.scrollback = settings.pane.scrollbackLines
   applyChromeColours(theme)
-  document.body.classList.toggle('padded-panes', settings.panePadding === 'padded')
-  document.body.classList.toggle('scroll-bar-hidden', settings.paneScrollBar === 'none')
-  document.body.classList.toggle('has-scrollback', settings.scrollbackLines > 0)
+  document.body.classList.toggle('padded-panes', settings.pane.padding === 'padded')
+  document.body.classList.toggle('scroll-bar-hidden', settings.pane.scrollBar === 'none')
+  document.body.classList.toggle('has-scrollback', settings.pane.scrollbackLines > 0)
   for (const pane of terminals.values()) pane.fit.fit()
 }
 
