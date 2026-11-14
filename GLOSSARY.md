@@ -65,7 +65,7 @@ _Avoid_: Autostart, startup, launch at login
 ### Navigation
 
 **Hotkey**:
-The global shortcut that shows or hides the app, floating above every other app. When shown, exactly one Session is visible: the most recently used one.
+The global shortcut that shows or hides the app, floating above every other app's windows, fullscreen ones included, but beneath the system's own overlays and the launchers the user summons over it. When shown, exactly one Session is visible: the most recently used one.
 _Avoid_: Hotkey window, quake mode, visor
 
 **Session Banner**:

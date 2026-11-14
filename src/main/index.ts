@@ -467,6 +467,8 @@ app.whenReady().then(() => {
 
   // A transparent panel filling the visible area, floating above other apps, fullscreen ones included, on every Space.
   // It shows without macOS's zoom animation, so cycling swaps windows in a single frame; the Hotkey fades it instead.
+  // Its level sits one above 'floating', so it covers other apps' pinned windows, e.g. Picture-in-Picture, while the
+  // system's HUDs, notification banners, menus and launchers like Raycast (level 8) still draw over it.
   function createPanel (options: Electron.BrowserWindowConstructorOptions = {}) {
     const window = new BrowserWindow({
       type: 'panel',
@@ -484,7 +486,7 @@ app.whenReady().then(() => {
       webPreferences: { preload: join(import.meta.dirname, '../preload/index.mjs'), sandbox: false },
       ...options,
     })
-    window.setAlwaysOnTop(true, 'screen-saver')
+    window.setAlwaysOnTop(true, 'floating', 1)
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
     fitToPrimaryDisplay(window)
     windowEffects.turnOffShowAnimation(window)
