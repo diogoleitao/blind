@@ -51,6 +51,14 @@ The installed app:
 
 The app icon is made from `build/icon.iconset`. The app registers itself as a login item each time it starts, so removing it from System Settings > General > Login Items lasts only until Blind is next opened.
 
+### The `blind` command
+
+```sh
+npm run build:cli && npm link
+```
+
+Run once from the repo, this builds the `blind` command and puts it on your `PATH`. It runs from the repo, so it stays linked to this checkout. If you switch Node versions with a version manager such as nvm, run `npm link` again under the new one.
+
 ## Develop
 
 ```sh
@@ -58,7 +66,7 @@ npm install
 npm run dev
 ```
 
-Running from the repo, the Hotkey is F7. `dev` and `build` first build the native addon in `native/`, which needs the Xcode Command Line Tools (`xcode-select --install`); the first build downloads Electron's headers.
+With [the `blind` command](#the-blind-command) linked, `blind dev` does the same as `npm run dev` from any directory. Running from the repo, the Hotkey is F7. `dev` and `build` first build the native addon in `native/`, which needs the Xcode Command Line Tools (`xcode-select --install`); the first build downloads Electron's headers.
 
 ## Stack
 

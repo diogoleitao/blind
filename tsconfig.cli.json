@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["esnext"],
+    "types": ["node"],
+    "noEmit": false,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "rootDir": "src/cli",
+    "outDir": "out/cli"
+  },
+  "include": ["src/cli/**/*.ts"],
+  "exclude": ["src/cli/**/*.test.ts"]
+}
