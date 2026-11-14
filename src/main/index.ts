@@ -65,8 +65,6 @@ app.whenReady().then(() => {
   const configFile = createConfigFile(configDirectory)
   const themeFiles = createThemeFiles(join(configDirectory, 'themes'))
   const windows = new Map<SessionId, BrowserWindow>()
-  // The Command Palette on its own, made the first time the Hotkey shows it with no Open Sessions.
-  let paletteWindow: BrowserWindow | undefined
   // The installed app carries the native addon outside its archive.
   const windowEffects = loadWindowEffects(
     app.isPackaged
@@ -75,10 +73,6 @@ app.whenReady().then(() => {
   )
   const blurWarningFile = createBlurWarningFile(appDataDirectory)
   let blurWarnedThisLaunch = false
-
-  function allWindows () {
-    return paletteWindow ? [...windows.values(), paletteWindow] : [...windows.values()]
-  }
 
   // Blind shows only on the primary display, filling its work area, which can change after a window was made: another
   // display becomes primary, or the resolution or the Dock changes.
@@ -89,7 +83,7 @@ app.whenReady().then(() => {
   // Every window is fitted again when displays change, hidden ones too, so a Session's Panes already have their new size
   // when cycling swaps it in. A display unplugged while Blind is shown leaves the remaining primary display to fill.
   function fitAllWindows () {
-    allWindows().forEach(fitToPrimaryDisplay)
+    windows.forEach(fitToPrimaryDisplay)
   }
 
   // Blind becomes the active app while shown, like iTerm2's hotkey window, so switching to any other app is a focus loss.
@@ -113,14 +107,14 @@ app.whenReady().then(() => {
     })
   }
 
-  // Shows the Session's window at once and hides the one it replaces, or the Command Palette on its own, with no fade.
+  // Shows the Session's window at once and hides the one it replaces, with no fade.
   function swapToWindow (sessionId: SessionId) {
     const window = windowFor(sessionId)
     fitToPrimaryDisplay(window)
     window.setOpacity(1)
     window.show()
     window.focus()
-    for (const other of allWindows()) {
+    for (const other of windows.values()) {
       if (other !== window && other.isVisible()) other.hide()
     }
   }
@@ -138,24 +132,9 @@ app.whenReady().then(() => {
     else send()
   }
 
-  // Asks a loaded page for the palette again; a page still loading opens it by itself.
-  function showPaletteWindow () {
-    if (!paletteWindow) {
-      const window = createPanel()
-      window.on('closed', () => {
-        paletteWindow = undefined
-      })
-      loadPage(window, 'palette')
-      paletteWindow = window
-    } else if (!paletteWindow.webContents.isLoading()) {
-      paletteWindow.webContents.send(channels.openPalette)
-    }
-    showWindow(paletteWindow)
-  }
-
   // With no window left on screen, e.g. once the last Open Session's window closed, there's nothing to fade.
   function hideApp () {
-    const visible = allWindows().filter((window) => window.isVisible())
+    const visible = [...windows.values()].filter((window) => window.isVisible())
     if (visible.length === 0) app.hide()
     visible.forEach(hideWindow)
   }
@@ -172,7 +151,6 @@ app.whenReady().then(() => {
   core.onEffect((effect) => {
     if (effect.type === 'closeWindow') closeWindow(effect.sessionId)
     if (effect.type === 'showApp') showWindow(windowFor(effect.sessionId))
-    if (effect.type === 'showPalette') showPaletteWindow()
     if (effect.type === 'openPalette') windows.get(effect.sessionId)?.webContents.send(channels.openPalette)
     if (effect.type === 'hideApp') hideApp()
     if (effect.type === 'showSession') swapToWindow(effect.sessionId)
@@ -189,16 +167,12 @@ app.whenReady().then(() => {
     if (effect.type === 'configUnreadable') {
       notify("Settings couldn't be read", "config.jsonc couldn't be read as JSON with comments; settings are unchanged.")
     }
-    if (effect.type === 'applyTheme') allWindows().forEach(sendTheme)
+    if (effect.type === 'applyTheme') windows.forEach(sendTheme)
     if (effect.type === 'writeConfig') configFile.write(effect.text)
-    if (effect.type === 'pickTheme') {
-      const window = effect.sessionId === undefined ? paletteWindow : windows.get(effect.sessionId)
-      window?.webContents.send(channels.pickTheme)
-    }
+    if (effect.type === 'pickTheme') windows.get(effect.sessionId)?.webContents.send(channels.pickTheme)
     if (effect.type === 'applyMenuBarIcon') menuBarIcon.show(effect.icon)
     if (effect.type === 'pickMenuBarIcon') {
-      const window = effect.sessionId === undefined ? paletteWindow : windows.get(effect.sessionId)
-      window?.webContents.send(channels.pickMenuBarIcon, core.menuBarIcon())
+      windows.get(effect.sessionId)?.webContents.send(channels.pickMenuBarIcon, core.menuBarIcon())
     }
     if (effect.type === 'themesRejected') {
       // A file named alone was skipped; a field rejected in a file takes the Default Theme's value.
@@ -264,7 +238,7 @@ app.whenReady().then(() => {
   // from outside while hidden, the app comes forward to show it. Answers with the chosen button's index and whether the
   // checkbox, if any, was ticked.
   async function ask (options: Electron.MessageBoxOptions) {
-    const parent = allWindows().find((window) => window.isVisible())
+    const parent = [...windows.values()].find((window) => window.isVisible())
     if (!parent) app.focus({ steal: true })
     return parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
   }
@@ -289,7 +263,6 @@ app.whenReady().then(() => {
     })
     if (response !== 0) {
       quitInProgress = false
-      core.quitCancelled()
       return
     }
     await flushScrollback()
@@ -485,11 +458,11 @@ app.whenReady().then(() => {
     return window
   }
 
-  // The renderer's page; `hash` picks which page it is.
-  function loadPage (window: BrowserWindow, hash?: string) {
+  // The renderer's page.
+  function loadPage (window: BrowserWindow) {
     const url = process.env.ELECTRON_RENDERER_URL
-    if (url) window.loadURL(hash ? `${url}#${hash}` : url)
-    else window.loadFile(join(import.meta.dirname, '../renderer/index.html'), { hash })
+    if (url) window.loadURL(url)
+    else window.loadFile(join(import.meta.dirname, '../renderer/index.html'))
   }
 
   // One window per Open Session, made the first time the Session is shown, with the window's blur behind its Panes.
@@ -531,7 +504,7 @@ app.whenReady().then(() => {
   applyConfig(configFile.read())
   configFile.watch((read) => {
     applyConfig(read)
-    allWindows().forEach(sendWindowSettings)
+    windows.forEach(sendWindowSettings)
     windows.forEach(applyBackgroundEffect)
     warnIfBlurUnavailable()
     // The cycle order setting may have changed.

@@ -87,12 +87,13 @@ describe('the launch at login', () => {
       expect(effects).toEqual([{ type: 'showApp', sessionId }])
     })
 
-    it('with no Open Sessions, opens none, so the first Hotkey press does what the setting says', () => {
-      const { core, effects } = startAtLogin(undefined, '{ "hotkeyWithNoOpenSessions": "palette" }')
+    it('with no Open Sessions, opens none, leaving the first Hotkey press to open one and show it', () => {
+      const { core, effects } = startAtLogin()
 
       expect(core.state().sessions).toEqual([])
       core.hotkeyPressed()
-      expect(effects).toEqual([{ type: 'showPalette' }])
+      expect(core.state().sessions).toHaveLength(1)
+      expect(effects).toEqual([{ type: 'showApp', sessionId: core.state().sessions[0].id }])
     })
 
     it('requests nothing on focus loss, since the app is already hidden', () => {
@@ -104,10 +105,7 @@ describe('the launch at login', () => {
     })
 
     it('with no Open Sessions and set to open a new one, opens it, which the first Hotkey press shows', () => {
-      const { core, effects, shown } = startAtLogin(
-        undefined,
-        '{ "hiddenStartWithNoOpenSessions": "new", "hotkeyWithNoOpenSessions": "palette" }'
-      )
+      const { core, effects, shown } = startAtLogin(undefined, '{ "hiddenStartWithNoOpenSessions": "new" }')
 
       expect(shown).toBe(false)
       expect(core.state().sessions).toHaveLength(1)
@@ -601,104 +599,16 @@ describe('the Hotkey', () => {
     expect(effects).toEqual([{ type: 'showApp', sessionId: session.id }])
   })
 
-  describe('set to open the Command Palette with no Open Sessions', () => {
-    // `api`, closed through its last Tab, so the app is hidden with no Open Sessions.
-    function startWithNoOpenSessions () {
-      const started = startCore(undefined, '{ "hotkeyWithNoOpenSessions": "palette" }')
-      const api = started.core.state().sessions[0]
-      started.core.renameSession(api.id, 'api')
-      started.shellHost.exit(api.tabs[0].panes[0].id)
-      started.effects.length = 0
-      return { ...started, api: api.id }
-    }
-
-    it('shows the Command Palette on its own, opening no Session', () => {
-      const { core, effects } = startWithNoOpenSessions()
-
-      core.hotkeyPressed()
-
-      expect(core.state().sessions).toHaveLength(1)
-      expect(core.state().currentSessionId).toBeUndefined()
-      expect(effects).toEqual([{ type: 'showPalette' }])
-    })
-
-    it('shows a Closed Session chosen from it as the Current Session', () => {
-      const { core, effects, api } = startWithNoOpenSessions()
-      core.hotkeyPressed()
-
-      core.choosePaletteResult(core.paletteResults('ss api')[0])
-
-      expect(core.state().currentSessionId).toBe(api)
-      expect(effects.at(-1)).toEqual({ type: 'showSession', sessionId: api })
-    })
-
-    it('hides the app when dismissed, showing the Command Palette again on the next press', () => {
-      const { core, effects } = startWithNoOpenSessions()
-      core.hotkeyPressed()
-
-      core.paletteDismissed()
-      core.hotkeyPressed()
-
-      expect(effects).toEqual([{ type: 'showPalette' }, { type: 'hideApp' }, { type: 'showPalette' }])
-    })
-
-    it('hides the app after a choice that shows no Session', () => {
-      const { core, effects } = startWithNoOpenSessions()
-      core.hotkeyPressed()
-
-      chooseAction(core, 'New Tab')
-      core.hotkeyPressed()
-      chooseAction(core, 'Open Settings')
-
-      expect(effects).toEqual([
-        { type: 'showPalette' },
-        { type: 'hideApp' },
-        { type: 'showPalette' },
-        { type: 'openSettings' },
-        { type: 'hideApp' },
-      ])
-    })
-
-    it('stays shown while asking to quit, hiding the app once the quit is cancelled', () => {
-      const { core, effects } = startWithNoOpenSessions()
-      core.hotkeyPressed()
-
-      chooseAction(core, 'Quit Blind')
-      expect(effects).toEqual([{ type: 'showPalette' }, { type: 'confirmQuit' }])
-
-      core.quitCancelled()
-      expect(effects.at(-1)).toEqual({ type: 'hideApp' })
-    })
-
-    it('opens a new Session chosen from it', () => {
-      const { core, effects } = startWithNoOpenSessions()
-      core.hotkeyPressed()
-
-      chooseAction(core, 'New Session')
-
-      expect(effects).toEqual([{ type: 'showPalette' }, { type: 'showSession', sessionId: core.state().currentSessionId }])
-    })
-
-    it('shows the Command Palette even with no Sessions at all', () => {
-      const { core, effects, api } = startWithNoOpenSessions()
-      core.deleteConfirmed(api)
-      effects.length = 0
-
-      core.hotkeyPressed()
-
-      expect(core.state().sessions).toEqual([])
-      expect(effects).toEqual([{ type: 'showPalette' }])
-    })
-  })
-
-  it('rejects anything but `new` or `palette` for what it does with no Open Sessions, opening a new Session', () => {
-    const { core, shellHost, effects } = startCore(undefined, '{ "hotkeyWithNoOpenSessions": "nothing" }')
+  it('rejects an unknown setting, opening a new Session with no Open Sessions', () => {
+    const { core, shellHost, effects } = startCore(undefined, '{ "hotkeyWithNoOpenSessions": "palette" }')
     shellHost.exit(core.state().sessions[0].tabs[0].panes[0].id)
 
     core.hotkeyPressed()
 
-    expect(core.state().sessions[1].status).toBe('open')
+    const session = core.state().sessions[1]
+    expect(session.status).toBe('open')
     expect(effects[0]).toEqual({ type: 'settingsRejected', settings: ['hotkeyWithNoOpenSessions'] })
+    expect(effects.at(-1)).toEqual({ type: 'showApp', sessionId: session.id })
   })
 })
 
@@ -1508,15 +1418,6 @@ describe('quitting', () => {
     expect(effects).toEqual([{ type: 'confirmQuit' }])
   })
 
-  it('leaves the app shown over the Current Session when cancelled', () => {
-    const { core, effects } = startCore()
-    core.quitRequested()
-
-    core.quitCancelled()
-
-    expect(effects).toEqual([{ type: 'confirmQuit' }])
-  })
-
   it('once confirmed, writes everything pending to the state store before quitting', () => {
     const calls: string[] = []
     const inMemory = createInMemoryStateStore()
@@ -1995,22 +1896,13 @@ describe('Themes', () => {
     ])
   })
 
-  it('choosing Change Theme asks for a Theme, with or without a Current Session, keeping the app shown', () => {
-    const { core, effects, shellHost } = startCore(undefined, '{ "hotkeyWithNoOpenSessions": "palette" }')
+  it("choosing Change Theme asks for a Theme over the Current Session's window", () => {
+    const { core, effects } = startCore()
     const sessionId = core.state().sessions[0].id
 
     chooseAction(core, 'Change Theme')
-    shellHost.exit(core.state().sessions[0].tabs[0].panes[0].id)
-    core.hotkeyPressed()
-    chooseAction(core, 'Change Theme')
 
-    expect(effects).toEqual([
-      { type: 'pickTheme', sessionId },
-      { type: 'closeWindow', sessionId },
-      { type: 'hideApp' },
-      { type: 'showPalette' },
-      { type: 'pickTheme' },
-    ])
+    expect(effects).toEqual([{ type: 'pickTheme', sessionId }])
   })
 
   it('previews each Theme browsed, restoring the Theme from before when the Command Palette is dismissed', () => {
@@ -3413,22 +3305,12 @@ describe('the Command Palette', () => {
     ])
   })
 
-  it('choosing Open Settings opens the config file, with or without a Current Session', () => {
-    const { core, effects, shellHost } = startCore(undefined, '{ "hotkeyWithNoOpenSessions": "palette" }')
+  it('choosing Open Settings opens the config file', () => {
+    const { core, effects } = startCore()
 
     chooseAction(core, 'Open Settings')
-    shellHost.exit(core.state().sessions[0].tabs[0].panes[0].id)
-    core.hotkeyPressed()
-    chooseAction(core, 'Open Settings')
 
-    expect(effects).toEqual([
-      { type: 'openSettings' },
-      { type: 'closeWindow', sessionId: core.state().sessions[0].id },
-      { type: 'hideApp' },
-      { type: 'showPalette' },
-      { type: 'openSettings' },
-      { type: 'hideApp' },
-    ])
+    expect(effects).toEqual([{ type: 'openSettings' }])
   })
 
   it("keeps the results whose labels hold the query's letters in order, ignoring case", () => {
@@ -3702,22 +3584,13 @@ describe('the menu bar icon', () => {
     ])
   })
 
-  it('choosing Change Menu Bar Icon asks for an icon, with or without a Current Session, keeping the app shown', () => {
-    const { core, effects, shellHost } = startCore(undefined, '{ "hotkeyWithNoOpenSessions": "palette" }')
+  it("choosing Change Menu Bar Icon asks for an icon over the Current Session's window", () => {
+    const { core, effects } = startCore()
     const sessionId = core.state().sessions[0].id
 
     chooseAction(core, 'Change Menu Bar Icon')
-    shellHost.exit(core.state().sessions[0].tabs[0].panes[0].id)
-    core.hotkeyPressed()
-    chooseAction(core, 'Change Menu Bar Icon')
 
-    expect(effects).toEqual([
-      { type: 'pickMenuBarIcon', sessionId },
-      { type: 'closeWindow', sessionId },
-      { type: 'hideApp' },
-      { type: 'showPalette' },
-      { type: 'pickMenuBarIcon' },
-    ])
+    expect(effects).toEqual([{ type: 'pickMenuBarIcon', sessionId }])
   })
 
   it('lists the icons, previewing each one browsed and restoring the one from before when the Command Palette is dismissed', () => {

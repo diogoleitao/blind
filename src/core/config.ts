@@ -30,11 +30,6 @@ const paletteNestings = ['flat', 'nested'] as const
 // each Open Session's Tabs under it and each Tab's Panes under the Tab.
 export type PaletteNesting = (typeof paletteNestings)[number]
 
-const hotkeyBehaviours = ['new', 'palette'] as const
-
-// What the Hotkey shows with no Open Sessions: a new Session, or the Command Palette on its own.
-export type HotkeyWithNoOpenSessions = (typeof hotkeyBehaviours)[number]
-
 const loginLaunches = ['hidden', 'shown'] as const
 
 // How the launch at login starts: hidden until the Hotkey shows the app, or shown, as a launch by hand does.
@@ -43,7 +38,7 @@ export type LoginLaunch = (typeof loginLaunches)[number]
 const hiddenStartBehaviours = ['new', 'hotkey'] as const
 
 // What a hidden launch at login with no Open Sessions opens: a new Session, which the first Hotkey press shows, or
-// nothing, leaving the first Hotkey press to hotkeyWithNoOpenSessions.
+// nothing, leaving it to the first Hotkey press, which opens a new Session.
 export type HiddenStartWithNoOpenSessions = (typeof hiddenStartBehaviours)[number]
 
 const sessionsWithoutNameOrRootOnCloseBehaviours = ['keep', 'delete'] as const
@@ -102,7 +97,6 @@ export interface Settings {
   tabSearchScope: TabSearchScope;
   paneSearchScope: PaneSearchScope;
   paletteNesting: PaletteNesting;
-  hotkeyWithNoOpenSessions: HotkeyWithNoOpenSessions;
   loginLaunch: LoginLaunch;
   hiddenStartWithNoOpenSessions: HiddenStartWithNoOpenSessions;
   sessionsWithoutNameOrRootOnClose: SessionsWithoutNameOrRootOnClose;
@@ -132,7 +126,6 @@ export const defaultSettings: Settings = {
   tabSearchScope: 'all',
   paneSearchScope: 'all',
   paletteNesting: 'flat',
-  hotkeyWithNoOpenSessions: 'new',
   loginLaunch: 'hidden',
   hiddenStartWithNoOpenSessions: 'hotkey',
   sessionsWithoutNameOrRootOnClose: 'keep',
@@ -183,7 +176,6 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
   tabSearchScope: oneOf(tabSearchScopes),
   paneSearchScope: oneOf(paneSearchScopes),
   paletteNesting: oneOf(paletteNestings),
-  hotkeyWithNoOpenSessions: oneOf(hotkeyBehaviours),
   loginLaunch: oneOf(loginLaunches),
   hiddenStartWithNoOpenSessions: oneOf(hiddenStartBehaviours),
   sessionsWithoutNameOrRootOnClose: oneOf(sessionsWithoutNameOrRootOnCloseBehaviours),
@@ -274,11 +266,6 @@ export const configSchema = {
       enum: paletteNestings,
       default: defaultSettings.paletteNesting,
     },
-    hotkeyWithNoOpenSessions: {
-      description: 'What the Hotkey shows when there are no Open Sessions: a new Session, or the Command Palette on its own.',
-      enum: hotkeyBehaviours,
-      default: defaultSettings.hotkeyWithNoOpenSessions,
-    },
     loginLaunch: {
       description: 'How the launch at login starts: hidden until the Hotkey shows the app, or shown, as a launch by hand does.',
       enum: loginLaunches,
@@ -286,7 +273,7 @@ export const configSchema = {
     },
     hiddenStartWithNoOpenSessions: {
       description:
-        'What a hidden launch at login with no Open Sessions opens: a new Session, which the first Hotkey press shows, or nothing, leaving the first Hotkey press to hotkeyWithNoOpenSessions.',
+        'What a hidden launch at login with no Open Sessions opens: a new Session, which the first Hotkey press shows, or nothing, leaving it to the first Hotkey press, which opens a new Session.',
       enum: hiddenStartBehaviours,
       default: defaultSettings.hiddenStartWithNoOpenSessions,
     },

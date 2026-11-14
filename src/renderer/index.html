@@ -19,17 +19,13 @@
         flex-direction: column;
         background: var(--window-background);
       }
-      /* The Command Palette on its own floats over the other apps with nothing behind it. */
-      body.standalone {
-        background: transparent;
-      }
       /* The corners macOS rounds the window to, which match a Finder window's. */
       :root {
         --window-corner-radius: 16px;
       }
       /* The Bezel: a thin border around a Session's window, drawn over its edge so it takes no room from the Panes. Its
          corners follow the window's. */
-      body:not(.standalone)::after {
+      body::after {
         content: '';
         position: fixed;
         inset: 0;

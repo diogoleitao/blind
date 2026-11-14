@@ -80,7 +80,7 @@ export interface BlindApi {
   reportScrollback(paneId: PaneId, scrollback: string): void;
   // Called before the app quits. The listener reports every Pane's scrollback before it returns.
   onFlushScrollback(listener: () => void): void;
-  // Called when the Command Palette's shortcut asks for it, or when the app shows it on its own.
+  // Called when the Command Palette's shortcut asks for it.
   onOpenPalette(listener: () => void): void;
   // The Command Palette closed without a choice.
   dismissPalette(): void;

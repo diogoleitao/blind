@@ -43,8 +43,6 @@ export type Effect =
   | { type: 'closeWindow'; sessionId: SessionId }
   // Fades the app in with the Session visible.
   | { type: 'showApp'; sessionId: SessionId }
-  // Fades the app in with the Command Palette on its own, over no Session.
-  | { type: 'showPalette' }
   // Opens the Command Palette over the Session's window.
   | { type: 'openPalette'; sessionId: SessionId }
   | { type: 'hideApp' }
@@ -74,10 +72,10 @@ export type Effect =
   | { type: 'applyMenuBarIcon'; icon: MenuBarIcon }
   // Replaces the config file's text, e.g. to set the theme setting to the Theme chosen in the Command Palette.
   | { type: 'writeConfig'; text: string }
-  // Has the Command Palette list the Themes, over the Session's window or, without one, on its own.
-  | { type: 'pickTheme'; sessionId?: SessionId }
+  // Has the Command Palette list the Themes over the Session's window.
+  | { type: 'pickTheme'; sessionId: SessionId }
   // Has the Command Palette list the menu bar icons, like `pickTheme`.
-  | { type: 'pickMenuBarIcon'; sessionId?: SessionId }
+  | { type: 'pickMenuBarIcon'; sessionId: SessionId }
   // Tells the user the Theme files, or their fields, that were rejected, as `loadThemes` names them.
   | { type: 'themesRejected'; rejected: string[] }
   // Opens a search over the Pane's scrollback in the Session's window.
@@ -182,17 +180,14 @@ export interface Core {
   // until the Hotkey shows it. Answers whether the app started shown.
   start(options: { atLogin: boolean }): { shown: boolean };
   state(): CoreState;
-  // With no Open Sessions, shows a new Session or the Command Palette on its own, as the setting says.
+  // With no Open Sessions, opens a new Session and shows it.
   hotkeyPressed(): void;
-  // The Command Palette closed without a choice, ending any Theme preview. Shown on its own, with no Current Session,
-  // the app hides with it.
+  // The Command Palette closed without a choice, ending any Theme preview.
   paletteDismissed(): void;
   // Blind stopped being the active app, e.g. because another app was clicked.
   focusLost(): void;
   // Quitting always asks for confirmation first.
   quitRequested(): void;
-  // With the Command Palette on its own, the only thing on screen, the app hides once the quit is cancelled.
-  quitCancelled(): void;
   quitConfirmed(): void;
   // The config file's text, or undefined without a file. Settings start at their defaults, as without a file. Text that
   // isn't a JSON object, e.g. a save caught halfway through an edit, leaves the settings as they were.
@@ -659,13 +654,6 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     setState({ ...state, currentSessionId: mostRecentlyUsedOpenSession()?.id })
   }
 
-  // With the Command Palette on its own, the only thing on screen, the app hides.
-  function hideWithNoCurrentSession () {
-    if (!appShown || state.currentSessionId !== undefined) return
-    appShown = false
-    emit({ type: 'hideApp' })
-  }
-
   // The smallest label number no Unnamed Session holds, starting at 1.
   function freeLabelNumber () {
     const taken = new Set(state.sessions.map((session) => session.labelNumber))
@@ -985,7 +973,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
 
   // The app actions on the Current Session, by the core's own commands.
   const sessionActions: Record<
-    Exclude<PaletteAction, 'newSession' | 'changeTheme' | 'changeMenuBarIcon' | 'openSettings' | 'quit'>,
+    Exclude<PaletteAction, 'newSession' | 'openSettings' | 'quit'>,
     (sessionId: SessionId) => void
   > = {
     renameSession: (sessionId) => {
@@ -1033,15 +1021,13 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       save()
       emit({ type: 'clearScrollback', sessionId, paneId: tab.focusedPaneId })
     },
+    changeTheme: (sessionId) => emit({ type: 'pickTheme', sessionId }),
+    changeMenuBarIcon: (sessionId) => emit({ type: 'pickMenuBarIcon', sessionId }),
   }
 
   // Without a Session, only the actions that don't act on one run.
   function runAction (action: BoundAction, sessionId: SessionId | undefined) {
     if (action === 'newSession') return core.newSession()
-    if (action === 'changeTheme' || action === 'changeMenuBarIcon') {
-      const type = action === 'changeTheme' ? 'pickTheme' : 'pickMenuBarIcon'
-      return emit(sessionId === undefined ? { type } : { type, sessionId })
-    }
     if (action === 'openSettings') return emit({ type: 'openSettings' })
     if (action === 'quit') return core.quitRequested()
     if (sessionId === undefined) return
@@ -1066,10 +1052,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     hotkeyPressed: command(() => {
       appShown = !appShown
       if (!appShown) return emit({ type: 'hideApp' })
-      if (state.currentSessionId === undefined) {
-        if (settings.hotkeyWithNoOpenSessions === 'palette') return emit({ type: 'showPalette' })
-        addSession()
-      }
+      if (state.currentSessionId === undefined) addSession()
       emit({ type: 'showApp', sessionId: state.currentSessionId! })
     }),
     paletteDismissed: command(() => {
@@ -1077,7 +1060,6 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       previewedMenuBarIcon = undefined
       applyThemeInEffect()
       applyMenuBarIconInEffect()
-      hideWithNoCurrentSession()
     }),
     focusLost: command(() => {
       if (!appShown) return
@@ -1088,7 +1070,6 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       const sessionsToDelete = sessionsDeletedOnQuit().length
       emit(sessionsToDelete > 0 ? { type: 'confirmQuit', sessionsToDelete } : { type: 'confirmQuit' })
     }),
-    quitCancelled: command(hideWithNoCurrentSession),
     quitConfirmed: command(() => {
       deleteSessionsOnQuit()
       stateStore.flush()
@@ -1304,8 +1285,6 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       )
       return searchResults(results, query)
     },
-    // The Command Palette on its own leaves nothing on screen after a choice that shows no Session, except while the
-    // quit confirmation waits for an answer or the palette lists the Themes or the menu bar icons.
     choosePaletteResult: command((result) => {
       if (result.type === 'session') jumpToSession(result.sessionId)
       if (result.type === 'tab') jumpToTab(result.tabId)
@@ -1313,10 +1292,6 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       if (result.type === 'action') runAction(result.action, state.currentSessionId)
       if (result.type === 'theme') chooseTheme(result.name)
       if (result.type === 'menuBarIcon') chooseMenuBarIcon(result.icon)
-      const keepsPaletteBusy = ['quit', 'changeTheme', 'changeMenuBarIcon']
-      if (!(result.type === 'action' && keepsPaletteBusy.includes(result.action))) {
-        hideWithNoCurrentSession()
-      }
     }),
     paneRects (tabId) {
       const tab = findTab(tabId)

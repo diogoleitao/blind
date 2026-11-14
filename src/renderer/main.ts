@@ -40,8 +40,6 @@ interface PaneTerminal {
 }
 
 const { blind } = window
-// The page of the Command Palette on its own, which the app shows with no Open Sessions, rather than a Session's.
-const standalone = location.hash === '#palette'
 const panesElement = document.getElementById('panes')!
 const tabBar = document.getElementById('tab-bar')!
 const tabsElement = document.getElementById('tabs')!
@@ -409,7 +407,7 @@ function pill (text: string) {
   return element
 }
 
-// Shown once the Session's view arrives, so the Command Palette on its own has none.
+// Shown once the Session's view arrives.
 function renderTabBar (view: SessionView) {
   tabBar.hidden = false
   sessionLabelPill.textContent = view.sessionLabel
@@ -715,8 +713,3 @@ blind.onPaste(paste)
 window.addEventListener('resize', () => {
   for (const pane of terminals.values()) pane.fit.fit()
 })
-// Shown the first time once loaded; the main process asks for it on every later showing.
-if (standalone) {
-  document.body.classList.add('standalone')
-  openPalette()
-}
