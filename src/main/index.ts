@@ -32,6 +32,13 @@ import { loadWindowEffects } from './window-effects'
 // The installed app's Hotkey is F12; running from the repo uses F7, so both can run side by side.
 const hotkey = app.isPackaged ? 'F12' : 'F7'
 
+// Running from the repo keeps its data and config apart from the installed app's, so trying a change never touches the
+// installed app's Sessions or settings. Electron's own files go with the data, set before the app is ready, as Electron
+// requires; the installed app keeps Electron's default.
+const dataDirectory = join(app.getPath('appData'), app.isPackaged ? 'Blind' : 'Blind Dev')
+const configDirectory = join(homedir(), '.config', app.isPackaged ? 'blind' : 'blind-dev')
+if (!app.isPackaged) app.setPath('userData', dataDirectory)
+
 // How long quitting waits for the windows' terminals to report their scrollback.
 const scrollbackFlushTimeoutMilliseconds = 1_000
 
@@ -55,14 +62,12 @@ app.whenReady().then(() => {
   app.setActivationPolicy('accessory')
 
   const shellHost = createNodePtyShellHost({ loginShell: process.env.SHELL || userInfo().shell || '/bin/zsh' })
-  const appDataDirectory = join(app.getPath('appData'), 'Blind')
   const core = createCore({
     shellHost,
-    stateStore: createFileStateStore(appDataDirectory),
+    stateStore: createFileStateStore(dataDirectory),
     clock: { now: () => Date.now() },
     homeDirectory: homedir(),
   })
-  const configDirectory = join(homedir(), '.config', 'blind')
   const configFile = createConfigFile(configDirectory)
   const themeFiles = createThemeFiles(join(configDirectory, 'themes'))
   const windows = new Map<SessionId, BrowserWindow>()
@@ -72,7 +77,7 @@ app.whenReady().then(() => {
       ? join(process.resourcesPath, 'native', 'window_effects.node')
       : join(app.getAppPath(), 'native', 'build', 'Release', 'window_effects.node')
   )
-  const blurWarningFile = createBlurWarningFile(appDataDirectory)
+  const blurWarningFile = createBlurWarningFile(dataDirectory)
   let blurWarnedThisLaunch = false
 
   // Blind shows only on the primary display, filling its work area, which can change after a window was made: another

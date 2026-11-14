@@ -66,7 +66,7 @@ npm install
 npm run dev
 ```
 
-With [the `blind` command](#the-blind-command) linked, `blind dev` does the same as `npm run dev` from any directory. Running from the repo, the Hotkey is F7. `dev` and `build` first build the native addon in `native/`, which needs the Xcode Command Line Tools (`xcode-select --install`); the first build downloads Electron's headers.
+With [the `blind` command](#the-blind-command) linked, `blind dev` does the same as `npm run dev` from any directory. Running from the repo, the Hotkey is F7. The app keeps its data in `~/Library/Application Support/Blind Dev/` and its config and Themes in `~/.config/blind-dev/`, apart from the installed app's, so the two never share Sessions or settings. `dev` and `build` first build the native addon in `native/`, which needs the Xcode Command Line Tools (`xcode-select --install`); the first build downloads Electron's headers.
 
 ## Stack
 
