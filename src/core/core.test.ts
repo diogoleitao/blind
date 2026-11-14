@@ -1689,6 +1689,18 @@ describe('the Pane padding setting', () => {
   })
 })
 
+describe('the Pane scroll bar setting', () => {
+  it('hides the scroll bar by default, and can show it', () => {
+    const { core, effects } = startCore(undefined, '{ "paneScrollBar": "auto" }')
+    expect(core.settings().paneScrollBar).toBe('none')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['paneScrollBar'] }])
+
+    core.configChanged('{ "paneScrollBar": "visible" }')
+
+    expect(core.settings().paneScrollBar).toBe('visible')
+  })
+})
+
 describe('the background settings', () => {
   it('shows the background 25% transparent by default, and as transparent as configured', () => {
     const { core } = startCore()

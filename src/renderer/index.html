@@ -5,10 +5,12 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
     <title>Blind</title>
     <style>
+      /* The page always fills the window exactly, so it never scrolls, even if something inside reaches past an edge. */
       html,
       body {
         margin: 0;
         height: 100%;
+        overflow: hidden;
       }
       /* The Theme's terminal background, as transparent as the backgroundTransparency setting says, over the window's
          blur. The colours are the Theme's, set by the script. */
@@ -36,15 +38,21 @@
         position: relative;
         flex: 1;
       }
-      /* Isolated, so the layers xterm.js stacks inside a terminal stay under the Session Banner. */
+      /* Isolated, so the layers xterm.js stacks inside a terminal stay under the Session Banner. A terminal's box can
+         reach past the Pane's edge, by the scroll bar's room, which the Pane clips. */
       .pane {
         position: absolute;
         box-sizing: border-box;
         isolation: isolate;
+        overflow: hidden;
       }
       /* With the panePadding setting padded, the text keeps off the Pane's edges and the dividers next to it. */
+      :root {
+        --pane-padding-x: 7px;
+        --pane-padding-y: 5px;
+      }
       body.padded-panes .pane {
-        padding: 5px 7px;
+        padding: var(--pane-padding-y) var(--pane-padding-x);
       }
       /* Stronger than the Tab bar's lines, in the colour the script mixes for them. */
       .pane.divided-left {
@@ -58,6 +66,30 @@
       }
       .pane .terminal {
         height: 100%;
+      }
+      /* Once the scroll bar's width, `--scroll-bar-width`, is set, xterm.js draws search matches in a column beside it;
+         blind shows none. */
+      .xterm .xterm-decoration-overview-ruler {
+        display: none;
+      }
+      /* The scroll bar's thumb is rounded, on a clear track. */
+      .xterm .xterm-scrollable-element > .scrollbar > .slider {
+        border-radius: 4px;
+      }
+      /* xterm.js keeps room for the bar beside the text only while there is scrollback, and marks the bar `fade` when
+         it is needed but has faded out after the mouse left or the scrolling stopped. With the paneScrollBar setting
+         visible, that bar stays shown; one with nothing to scroll stays hidden. */
+      body:not(.scroll-bar-hidden) .xterm .xterm-scrollable-element > .scrollbar.vertical.fade {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      /* With none, the bar is hidden, and the terminal's box reaches past the Pane's edge by the bar's room, which the
+         Pane clips, so the columns fill the Pane. */
+      body.scroll-bar-hidden .xterm .xterm-scrollable-element > .scrollbar.vertical {
+        display: none;
+      }
+      body.has-scrollback.scroll-bar-hidden .pane .terminal {
+        margin-right: calc(-1 * var(--scroll-bar-width));
       }
       /* xterm's stylesheet paints the viewport opaque black, which would cover the body's background. */
       .pane .xterm .xterm-viewport {

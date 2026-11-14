@@ -9,6 +9,7 @@ import {
   Terminal,
 } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
+import { mixColours, withOpacity } from '../core/colours'
 import { defaultSettings } from '../core/config'
 import type { PaletteResult } from '../core/core'
 import type { KeyPress } from '../core/key-bindings'
@@ -52,43 +53,55 @@ let windowSettings: WindowSettings = {
   scrollbackLines: defaultSettings.scrollbackLines,
   sessionLabelPosition: defaultSettings.sessionLabelPosition,
   panePadding: defaultSettings.panePadding,
+  paneScrollBar: defaultSettings.paneScrollBar,
   backgroundTransparency: defaultSettings.backgroundTransparency,
 }
 let theme: Theme = defaultTheme
 
-// The colour with its alpha scaled by `factor`.
-function withOpacity (colour: Colour, factor: number) {
-  const alpha = colour.length === 9 ? Number.parseInt(colour.slice(7), 16) : 255
-  return `${colour.slice(0, 7)}${Math.round(alpha * factor).toString(16).padStart(2, '0')}`
+// How wide a Pane's scroll bar is. xterm.js takes it from the overview ruler's width, which also keeps that much room
+// for the bar beside the text while there is scrollback. The stylesheet needs it to give that room back.
+const scrollBarWidth = 8
+document.documentElement.style.setProperty('--scroll-bar-width', `${scrollBarWidth}px`)
+
+// The Theme's divider colour pulled a quarter of the way towards its text colour: the dividers between Panes, the
+// Bezel and the scroll bar's thumb.
+function strongDivider ({ terminal, chrome }: Theme) {
+  return mixColours(terminal.foreground, chrome.divider, 0.25)
 }
 
 // The terminal's options for the Theme. The terminal's background stays clear, since the page's background shows
 // through, keeping the window's transparency and blur.
-function terminalOptions ({ font, cursor, terminal }: Theme): ITerminalOptions {
+function terminalOptions (theme: Theme): ITerminalOptions {
+  const { font, cursor, terminal } = theme
   const { cursorText, selection, selectionText, ...colours } = terminal
+  const scrollBarThumb = strongDivider(theme)
   return {
     fontFamily: `${JSON.stringify(font.family)}, monospace`,
     fontSize: font.size,
     cursorStyle: cursor.style,
     cursorBlink: cursor.blink,
+    overviewRuler: { width: scrollBarWidth },
     theme: {
       ...colours,
       background: '#00000000',
       cursorAccent: cursorText,
       selectionBackground: selection,
       selectionForeground: selectionText,
+      scrollbarSliderBackground: scrollBarThumb,
+      scrollbarSliderHoverBackground: scrollBarThumb,
+      scrollbarSliderActiveBackground: scrollBarThumb,
     },
   }
 }
 
 // The page's colours, as the CSS variables the stylesheet uses, e.g. `--palette-muted-text`. The terminal's background
-// is the window's, as transparent as the backgroundTransparency setting says. The Pane dividers and the Bezel take the
-// Theme's divider colour pulled a quarter of the way towards its text colour.
-function applyChromeColours ({ terminal, chrome }: Theme) {
+// is the window's, as transparent as the backgroundTransparency setting says.
+function applyChromeColours (theme: Theme) {
+  const { terminal, chrome } = theme
   const root = document.documentElement.style
   const opacity = 1 - windowSettings.backgroundTransparency / 100
   root.setProperty('--window-background', withOpacity(terminal.background, opacity))
-  root.setProperty('--strong-divider', `color-mix(in srgb, ${terminal.foreground} 25%, ${chrome.divider})`)
+  root.setProperty('--strong-divider', strongDivider(theme))
   for (const [name, colour] of Object.entries(chrome)) {
     root.setProperty(`--${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`, colour)
   }
@@ -368,13 +381,16 @@ function reportScrollback (paneId: PaneId, pane: PaneTerminal) {
 
 // Open terminals keep their scrollback up to the new number of lines from now on. The Session's label moves at once,
 // leaving the Tab bar's height, and so the Panes' space, as it was. The background takes the new transparency at once.
-// Padding the Panes, or not, changes the space their terminals have.
+// Padding the Panes, or not, hiding their scroll bars, or not, and having scrollback, or not, change the space their
+// terminals have, which the stylesheet works out.
 function applyWindowSettings (settings: WindowSettings) {
   windowSettings = settings
   for (const pane of terminals.values()) pane.terminal.options.scrollback = settings.scrollbackLines
   tabBar.classList.toggle('label-above', settings.sessionLabelPosition === 'aboveTabs')
   applyChromeColours(theme)
   document.body.classList.toggle('padded-panes', settings.panePadding === 'padded')
+  document.body.classList.toggle('scroll-bar-hidden', settings.paneScrollBar === 'none')
+  document.body.classList.toggle('has-scrollback', settings.scrollbackLines > 0)
   for (const pane of terminals.values()) pane.fit.fit()
 }
 
