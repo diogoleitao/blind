@@ -82,6 +82,8 @@ export interface Settings {
   newTabDirectory: StartDirectory;
   splitPaneDirectory: StartDirectory;
   sessionLabelPosition: SessionLabelPosition;
+  // Whether cycling Open Sessions shows the Session Banner.
+  sessionBanner: boolean;
   // Each action's shortcut; null for an unbound action.
   keyBindings: Record<BoundAction, Shortcut | null>;
   // The name of the Theme in effect, built in or from a Theme file.
@@ -102,6 +104,7 @@ export const defaultSettings: Settings = {
   newTabDirectory: 'root',
   splitPaneDirectory: 'current',
   sessionLabelPosition: 'belowTabs',
+  sessionBanner: true,
   keyBindings: Object.fromEntries(
     Object.entries(defaultKeyBindings).map(([action, shortcut]) => [action, shortcut && parseShortcut(shortcut)!])
   ) as Settings['keyBindings'],
@@ -141,6 +144,7 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
   newTabDirectory: oneOf(startDirectories),
   splitPaneDirectory: oneOf(startDirectories),
   sessionLabelPosition: oneOf(sessionLabelPositions),
+  sessionBanner: (value) => (typeof value === 'boolean' ? value : invalid),
   keyBindings: parseKeyBindings,
   // Theme names are unique ignoring case, so the setting matches one ignoring case and takes its spelling.
   theme: (value) =>
@@ -251,6 +255,11 @@ export const configSchema = {
       description: "Where the Tab bar shows the Session's label: on a row below the Tabs, or above them.",
       enum: sessionLabelPositions,
       default: defaultSettings.sessionLabelPosition,
+    },
+    sessionBanner: {
+      description: 'Whether cycling Open Sessions shows the Session Banner, naming the Session in the middle of its window.',
+      type: 'boolean',
+      default: defaultSettings.sessionBanner,
     },
     theme: {
       description:

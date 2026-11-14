@@ -50,6 +50,8 @@ export type Effect =
   | { type: 'hideApp' }
   // Makes the Session the visible one in place of the Session shown before, without a fade.
   | { type: 'showSession'; sessionId: SessionId }
+  // Shows the Session Banner over the Session's window, which cycling has just swapped in.
+  | { type: 'showSessionBanner'; sessionId: SessionId }
   // Asks the user whether to quit, answered with `quitConfirmed`, telling how many Sessions quitting deletes, if any.
   | { type: 'confirmQuit'; sessionsToDelete?: number }
   // Asks the user for the Session's name, offering `suggestion`, answered with `renameSession`.
@@ -722,13 +724,15 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   }
 
   // Consecutive presses keep the order from the first one, so that marking each Session as used on the way doesn't
-  // re-sort the `recent` order under them.
+  // re-sort the `recent` order under them. Each Session swapped in shows the Session Banner unless the setting is off.
   function focusSessionBy (offset: number) {
     const order = cycleStreak ?? sessionsInCycleOrder().map((session) => session.id)
     const open = order.filter((sessionId) => findSession(sessionId)?.status === 'open')
     if (open.length < 2) return
     const position = open.indexOf(state.currentSessionId!)
-    makeCurrent(open[(position + offset + open.length) % open.length])
+    const sessionId = open[(position + offset + open.length) % open.length]
+    makeCurrent(sessionId)
+    if (appShown && settings.sessionBanner) emit({ type: 'showSessionBanner', sessionId })
     cycleStreak = order
   }
 

@@ -35,7 +35,7 @@ export interface TerminalColours {
   brightWhite: Colour;
 }
 
-// The colours of the app's own chrome: the Tab bar, the Command Palette and the Pane dividers.
+// The colours of the app's own chrome: the Tab bar, the Command Palette, the Session Banner and the Pane dividers.
 export interface ChromeColours {
   // Between Panes, above the Tab bar, between its rows, and around the Tabs that aren't focused.
   divider: Colour;
@@ -44,6 +44,9 @@ export interface ChromeColours {
   accent: Colour;
   // Text on the accent, as the focused Tab's is.
   accentText: Colour;
+  // The Session Banner's fill and text: light, so it stands out over the terminal.
+  sessionBannerBackground: Colour;
+  sessionBannerText: Colour;
   paletteBackground: Colour;
   paletteBorder: Colour;
   paletteText: Colour;
@@ -94,6 +97,8 @@ export const defaultTheme: Theme = {
     tabText: '#ffffff8c',
     accent: '#ffffffd9',
     accentText: '#000000',
+    sessionBannerBackground: '#ffffffe6',
+    sessionBannerText: '#000000',
     paletteBackground: '#1e1e1ef7',
     paletteBorder: '#ffffff26',
     paletteText: '#ffffffd9',
@@ -137,6 +142,8 @@ const alternativeThemes: Theme[] = [
       tabText: '#7f849c',
       accent: '#89b4fa',
       accentText: '#1e1e2e',
+      sessionBannerBackground: '#cdd6f4',
+      sessionBannerText: '#1e1e2e',
       paletteBackground: '#181825f7',
       paletteBorder: '#45475a',
       paletteText: '#cdd6f4',
@@ -177,6 +184,8 @@ const alternativeThemes: Theme[] = [
       tabText: '#565f89',
       accent: '#7aa2f7',
       accentText: '#1a1b26',
+      sessionBannerBackground: '#c0caf5',
+      sessionBannerText: '#1a1b26',
       paletteBackground: '#16161ef7',
       paletteBorder: '#3b4261',
       paletteText: '#c0caf5',
@@ -217,6 +226,8 @@ const alternativeThemes: Theme[] = [
       tabText: '#6e6a86',
       accent: '#c4a7e7',
       accentText: '#191724',
+      sessionBannerBackground: '#e0def4',
+      sessionBannerText: '#191724',
       paletteBackground: '#1f1d2ef7',
       paletteBorder: '#403d52',
       paletteText: '#e0def4',
@@ -257,6 +268,8 @@ const alternativeThemes: Theme[] = [
       tabText: '#a89984',
       accent: '#d79921',
       accentText: '#282828',
+      sessionBannerBackground: '#ebdbb2',
+      sessionBannerText: '#282828',
       paletteBackground: '#1d2021f7',
       paletteBorder: '#504945',
       paletteText: '#ebdbb2',
@@ -369,7 +382,7 @@ export const themeSchema = {
       defaultTheme.terminal
     ),
     chrome: colourGroupSchema(
-      'The colours of the Tab bar, the Command Palette and the Pane dividers.',
+      'The colours of the Tab bar, the Command Palette, the Session Banner and the Pane dividers.',
       defaultTheme.chrome
     ),
   },

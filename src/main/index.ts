@@ -99,6 +99,19 @@ app.whenReady().then(() => {
     }
   }
 
+  // A window cycling has just made for the Session is still loading, so the banner waits for its page, and is dropped
+  // if another press has swapped the window out by then.
+  function showSessionBanner (sessionId: SessionId) {
+    const window = windows.get(sessionId)
+    const label = core.shortSessionLabel(sessionId)
+    if (!window || label === undefined) return
+    const send = () => {
+      if (!window.isDestroyed() && window.isVisible()) window.webContents.send(channels.showSessionBanner, label)
+    }
+    if (window.webContents.isLoading()) window.webContents.once('did-finish-load', send)
+    else send()
+  }
+
   // Asks a loaded page for the palette again; a page still loading opens it by itself.
   function showPaletteWindow () {
     if (!paletteWindow) {
@@ -137,6 +150,7 @@ app.whenReady().then(() => {
     if (effect.type === 'openPalette') windows.get(effect.sessionId)?.webContents.send(channels.openPalette)
     if (effect.type === 'hideApp') hideApp()
     if (effect.type === 'showSession') swapToWindow(effect.sessionId)
+    if (effect.type === 'showSessionBanner') showSessionBanner(effect.sessionId)
     if (effect.type === 'confirmQuit') confirmQuit(effect.sessionsToDelete)
     if (effect.type === 'confirmDelete') confirmDelete(effect.sessionId)
     if (effect.type === 'askSessionName' || effect.type === 'askTabTitle') {

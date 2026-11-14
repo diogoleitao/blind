@@ -11,7 +11,7 @@ Terminal windows get buried under everything else, and each project's tabs and s
 ## Features
 
 - **Hotkey.** `F12` brings blind down over every app, including fullscreen ones, on every Space. The same key, or clicking away, hides it and gives focus back to the app you were in.
-- **Sessions.** One Session per project, each with its own name. `` Cmd+` `` cycles through them. The Tab bar shows the Session's name on a row below its Tabs; set `sessionLabelPosition` to `aboveTabs` to show it above them.
+- **Sessions.** One Session per project, each with its own name. `` Cmd+` `` cycles through them, naming each one in the middle of the window as it lands; set `sessionBanner` to `false` to turn that off. The Tab bar shows the Session's name on a row below its Tabs; set `sessionLabelPosition` to `aboveTabs` to show it above them.
 - **Restore.** After a quit or an OS restart, every Session comes back with its Tabs, splits, working directories and scrollback, below a "Restored" marker. Shells start fresh.
 - **Closed Sessions.** Closing a Session's window keeps the Session. Reopen it from the Command Palette or the menu bar. Set `sessionsWithoutNameOrRootOnClose` to `delete` to have closing or quitting delete Sessions with neither a name nor a Root directory instead.
 - **Tabs and Panes.** Splits nest without limit, and each Tab's title follows the program running in it, or its folder when the Shell is idle. New Tabs start at the Session's Root directory, or the current Pane's directory without one, and new Panes in the split Pane's directory. Set `newTabDirectory` and `splitPaneDirectory` to `root`, `current` or `home` to change that.

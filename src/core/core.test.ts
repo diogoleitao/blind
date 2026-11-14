@@ -318,8 +318,9 @@ describe('cycling the Current Session', () => {
 
     core.focusPreviousSession()
     expect(currentLabel(core)).toBe('Session 2 (~)')
-    expect(effects.at(-1)).toEqual({ type: 'showSession', sessionId: core.state().currentSessionId })
-    expect(effects).toHaveLength(5)
+    const swaps = effectsOfType(effects, 'showSession')
+    expect(swaps.at(-1)).toEqual({ type: 'showSession', sessionId: core.state().currentSessionId })
+    expect(swaps).toHaveLength(5)
   })
 
   it('sorts by creation, oldest first, with Unnamed Sessions last, in the created order', () => {
@@ -406,6 +407,76 @@ describe('cycling the Current Session', () => {
     core.focusPreviousSession()
 
     expect(effects).toEqual([])
+  })
+
+  describe('the Session Banner', () => {
+    const banners = (effects: unknown[]) => effectsOfType(effects, 'showSessionBanner')
+
+    it('is asked for in each Session a press makes the Current Session, right after swapping it in', () => {
+      const { core, effects } = startWithFiveSessions()
+      const [zed, , sessionOne] = core.state().sessions.map((session) => session.id)
+
+      core.focusNextSession()
+      core.focusNextSession()
+      core.focusPreviousSession()
+
+      expect(effects).toEqual([
+        { type: 'showSession', sessionId: zed },
+        { type: 'showSessionBanner', sessionId: zed },
+        { type: 'showSession', sessionId: sessionOne },
+        { type: 'showSessionBanner', sessionId: sessionOne },
+        { type: 'showSession', sessionId: zed },
+        { type: 'showSessionBanner', sessionId: zed },
+      ])
+    })
+
+    it('is not asked for by any other way of changing the Current Session, or by the Hotkey', () => {
+      const { core, shellHost, effects } = startWithFiveSessions()
+      const [, sessionTwo, , api] = core.state().sessions
+      const swaps = () => effectsOfType(effects, 'showSession').length
+
+      core.choosePaletteResult(core.paletteResults('ss ').find((result) => result.label === 'zed')!)
+      core.menuBarSessionChosen(api.id)
+      core.closeSession(sessionTwo.id)
+      core.reopenSession(sessionTwo.id)
+      expect(swaps()).toBe(3)
+
+      core.newSession()
+      shellHost.exit(core.state().sessions.at(-1)!.tabs[0].panes[0].id)
+      core.hotkeyPressed()
+      core.hotkeyPressed()
+
+      expect(swaps()).toBe(5)
+      expect(effects).toContainEqual({ type: 'showApp', sessionId: core.state().currentSessionId })
+      expect(banners(effects)).toEqual([])
+    })
+
+    it('is not asked for while the app is hidden', () => {
+      const { core, effects } = startWithFiveSessions()
+      core.hotkeyPressed()
+
+      core.focusNextSession()
+
+      expect(banners(effects)).toEqual([])
+    })
+
+    it('is not asked for with the sessionBanner setting false, which is true by default', () => {
+      const { core, effects } = startWithFiveSessions()
+      expect(core.settings().sessionBanner).toBe(true)
+
+      core.configChanged('{ "sessionBanner": false }')
+      core.focusNextSession()
+
+      expect(effectsOfType(effects, 'showSession')).toHaveLength(1)
+      expect(banners(effects)).toEqual([])
+    })
+
+    it('rejects anything but true or false for the setting, keeping true, telling the user', () => {
+      const { core, effects } = startCore(undefined, '{ "sessionBanner": "off" }')
+
+      expect(core.settings().sessionBanner).toBe(true)
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['sessionBanner'] }])
+    })
   })
 })
 
@@ -673,7 +744,8 @@ describe('key bindings', () => {
     expect(core.state().currentSessionId).toBe(sessionId)
     core.keyPressed(sessionId, press('~', 'Backquote', 'meta', 'shift'))
     expect(core.state().currentSessionId).not.toBe(sessionId)
-    expect(effects).toHaveLength(3)
+    // A new Session and the two presses each swap a Session in, and each press shows the Session Banner.
+    expect(effects).toHaveLength(5)
   })
 
   it("leave every other key to the Pane's terminal", () => {
@@ -1767,6 +1839,25 @@ describe('Themes', () => {
       { name: 'Tokyo Night', accent: '#7aa2f7', accentText: '#1a1b26' },
       { name: 'Rosé Pine', accent: '#c4a7e7', accentText: '#191724' },
       { name: 'Gruvbox', accent: '#d79921', accentText: '#282828' },
+    ])
+  })
+
+  it("gives each built-in Theme light Session Banner colours, taking the Default Theme's for a Theme file without them", () => {
+    const { core } = startCore()
+    core.themeFilesChanged([{ fileName: 'nord.jsonc', text: '{ "name": "Nord" }' }])
+    const banners = ['Default', 'Catppuccin', 'Tokyo Night', 'Rosé Pine', 'Gruvbox', 'Nord'].map((name) => {
+      core.configChanged(JSON.stringify({ theme: name }))
+      const { sessionBannerBackground, sessionBannerText } = core.theme().chrome
+      return { name, sessionBannerBackground, sessionBannerText }
+    })
+
+    expect(banners).toEqual([
+      { name: 'Default', sessionBannerBackground: '#ffffffe6', sessionBannerText: '#000000' },
+      { name: 'Catppuccin', sessionBannerBackground: '#cdd6f4', sessionBannerText: '#1e1e2e' },
+      { name: 'Tokyo Night', sessionBannerBackground: '#c0caf5', sessionBannerText: '#1a1b26' },
+      { name: 'Rosé Pine', sessionBannerBackground: '#e0def4', sessionBannerText: '#191724' },
+      { name: 'Gruvbox', sessionBannerBackground: '#ebdbb2', sessionBannerText: '#282828' },
+      { name: 'Nord', sessionBannerBackground: '#ffffffe6', sessionBannerText: '#000000' },
     ])
   })
 
@@ -3495,4 +3586,9 @@ function chooseTheme (core: ReturnType<typeof startCore>['core'], name: string) 
 // Each result as its type and label, e.g. `tab vim`.
 function summarize (results: PaletteResult[]) {
   return results.map((result) => `${result.type} ${result.label}`)
+}
+
+// The effects of one type, in the order they were emitted.
+function effectsOfType (effects: unknown[], type: Effect['type']) {
+  return effects.filter((effect) => (effect as Effect).type === type)
 }

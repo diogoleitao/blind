@@ -28,6 +28,7 @@ export type PalettePrompt = Extract<Effect, { type: 'askSessionName' | 'askTabTi
 export const channels = {
   sessionView: 'session:view',
   windowSettings: 'settings:window',
+  showSessionBanner: 'session:banner',
   focusPane: 'pane:focus',
   attachPane: 'pane:attach',
   writeToPane: 'pane:write',
@@ -64,6 +65,8 @@ export interface BlindApi {
   onSessionView(listener: (view: SessionView) => void): void;
   // Called once the page has loaded, before its Session view, and again whenever the config file changes them.
   onWindowSettings(listener: (settings: WindowSettings) => void): void;
+  // Called with the Session's label when cycling has just swapped this window in, to show the Session Banner.
+  onShowSessionBanner(listener: (label: string) => void): void;
   focusPane(paneId: PaneId): void;
   attachPane(paneId: PaneId, size: TerminalSize): Promise<void>;
   writeToPane(paneId: PaneId, data: string): void;

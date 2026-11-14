@@ -401,6 +401,31 @@ function renderTabBar (view: SessionView) {
   )
 }
 
+const sessionBanner = document.getElementById('session-banner')!
+// How long the Session Banner shows in full before its fade, which the stylesheet times.
+const sessionBannerHoldMilliseconds = 250
+// Pending while the Session Banner shows in full.
+let sessionBannerTimer: ReturnType<typeof setTimeout> | undefined
+
+// Shows the Session Banner at once, then fades it out. Showing it again, by another cycle press, starts it over.
+function showSessionBanner (label: string) {
+  clearTimeout(sessionBannerTimer)
+  sessionBanner.textContent = label
+  sessionBanner.classList.remove('fading')
+  sessionBanner.hidden = false
+  sessionBannerTimer = setTimeout(() => sessionBanner.classList.add('fading'), sessionBannerHoldMilliseconds)
+}
+
+function hideSessionBanner () {
+  clearTimeout(sessionBannerTimer)
+  sessionBanner.hidden = true
+  sessionBanner.classList.remove('fading')
+}
+
+sessionBanner.addEventListener('transitionend', hideSessionBanner)
+// Cycling away hides this window, and it keeps no banner for when it's shown again.
+window.addEventListener('blur', hideSessionBanner)
+
 // Every Pane's terminal stays open, hidden but laid out, so switching Tabs keeps its scrollback and size.
 function render (view: SessionView) {
   renderTabBar(view)
@@ -641,6 +666,7 @@ paletteInput.addEventListener('blur', dismissPalette)
 
 applyChromeColours(theme)
 blind.onWindowSettings(applyWindowSettings)
+blind.onShowSessionBanner(showSessionBanner)
 blind.onTheme(applyTheme)
 blind.onOpenPalette(openPalette)
 blind.onPickTheme(() => openPicker('theme', theme.name))

@@ -64,6 +64,10 @@ _Avoid_: Resume, reattach
 The global shortcut that shows or hides the app, floating above every other app. When shown, exactly one Session is visible: the most recently used one.
 _Avoid_: Hotkey window, quake mode, visor
 
+**Session Banner**:
+A brief label naming the Session that cycling has just made the Current Session, shown in the middle of its window.
+_Avoid_: Toast, HUD, flash, OSD
+
 **Command Palette**:
 The searchable dialog for jumping to any Session, Tab or Pane and for running any app action.
 _Avoid_: Cmd+K menu, launcher, quick open
@@ -71,5 +75,5 @@ _Avoid_: Cmd+K menu, launcher, quick open
 ### Appearance
 
 **Theme**:
-A named set of colours covering both the terminal and the app's own chrome (Tab bar, Command Palette, Pane dividers).
+A named set of colours covering both the terminal and the app's own chrome (Tab bar, Command Palette, Session Banner, Pane dividers).
 _Avoid_: Colour scheme, profile
