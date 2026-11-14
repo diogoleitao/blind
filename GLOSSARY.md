@@ -72,6 +72,12 @@ _Avoid_: Toast, HUD, flash, OSD
 The searchable dialog for jumping to any Session, Tab or Pane and for running any app action.
 _Avoid_: Cmd+K menu, launcher, quick open
 
+### Attention
+
+**Activity**:
+A Pane's standing request for the user's attention, raised when the program in its Shell asks for it and cleared when the Pane becomes the Current Pane or the program says it no longer needs the user. A Tab or Session has Activity while any of its Panes does.
+_Avoid_: Unread, alert, output
+
 ### Appearance
 
 **Theme**:

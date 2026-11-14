@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { ProgramState } from './attention'
 import { createCore, type Effect, type PaletteResult } from './core'
 import { createControllableClock, createFakeShellHost, press } from './fakes'
 import { createInMemoryStateStore } from './in-memory-state-store'
@@ -2901,10 +2902,10 @@ describe('the Command Palette', () => {
     const { core, web, api, old, unnamed } = startWithPaletteSessions()
 
     expect(core.paletteResults('ss ')).toEqual([
-      { type: 'session', sessionId: api, label: 'api', closed: false, current: false },
-      { type: 'session', sessionId: web, label: 'web', closed: false, current: false },
-      { type: 'session', sessionId: unnamed, label: 'Session 1 (~)', closed: false, current: true },
-      { type: 'session', sessionId: old, label: 'old', closed: true, current: false },
+      { type: 'session', sessionId: api, label: 'api', closed: false, current: false, activity: false },
+      { type: 'session', sessionId: web, label: 'web', closed: false, current: false, activity: false },
+      { type: 'session', sessionId: unnamed, label: 'Session 1 (~)', closed: false, current: true, activity: false },
+      { type: 'session', sessionId: old, label: 'old', closed: true, current: false, activity: false },
     ])
 
     core.configChanged('{ "cycleOrder": "created" }')
@@ -2982,10 +2983,17 @@ describe('the Command Palette', () => {
     const [web, api, , unnamed] = core.state().sessions
 
     expect(core.paletteResults('tt ')).toEqual([
-      { type: 'tab', tabId: api.tabs[0].id, label: 'api', sessionLabel: 'api', current: false },
-      { type: 'tab', tabId: web.tabs[0].id, label: 'web', sessionLabel: 'web', current: false },
-      { type: 'tab', tabId: web.tabs[1].id, label: 'vim', sessionLabel: 'web', current: false },
-      { type: 'tab', tabId: unnamed.tabs[0].id, label: 'me', sessionLabel: 'Session 1 (~)', current: true },
+      { type: 'tab', tabId: api.tabs[0].id, label: 'api', sessionLabel: 'api', current: false, activity: false },
+      { type: 'tab', tabId: web.tabs[0].id, label: 'web', sessionLabel: 'web', current: false, activity: false },
+      { type: 'tab', tabId: web.tabs[1].id, label: 'vim', sessionLabel: 'web', current: false, activity: false },
+      {
+        type: 'tab',
+        tabId: unnamed.tabs[0].id,
+        label: 'me',
+        sessionLabel: 'Session 1 (~)',
+        current: true,
+        activity: false,
+      },
     ])
   })
 
@@ -2999,6 +3007,7 @@ describe('the Command Palette', () => {
       workingDirectory,
       sessionLabel,
       current,
+      activity: false,
     })
 
     expect(core.paletteResults('pp ')).toEqual([
@@ -3638,6 +3647,201 @@ describe('the menu bar icon', () => {
 
     expect(core.menuBarIcon()).toBe('colour')
     expect(effects).toEqual([{ type: 'applyMenuBarIcon', icon: 'colour' }, { type: 'configUnreadable' }])
+  })
+})
+
+describe('Activity', () => {
+  it("is raised on a Pane that isn't the Current Pane by a notification, showing on its Tab", () => {
+    const { core, tabId, left } = startWithThreePanes()
+
+    expect(core.tabHasActivity(tabId)).toBe(false)
+    core.notificationReceived(left)
+
+    expect(core.tabHasActivity(tabId)).toBe(true)
+  })
+
+  it('is never raised on the Current Pane, even while the app is hidden', () => {
+    const { core, tabId, bottomRight } = startWithThreePanes()
+
+    core.notificationReceived(bottomRight)
+    core.hotkeyPressed()
+    core.notificationReceived(bottomRight)
+
+    expect(core.tabHasActivity(tabId)).toBe(false)
+  })
+
+  it('clears when its Pane becomes the Current Pane, and is raised again by a later notification', () => {
+    const { core, tabId, left, bottomRight } = startWithThreePanes()
+    core.notificationReceived(left)
+
+    core.focusPane(left)
+    core.focusPane(bottomRight)
+    expect(core.tabHasActivity(tabId)).toBe(false)
+
+    core.notificationReceived(left)
+    expect(core.tabHasActivity(tabId)).toBe(true)
+  })
+
+  it('tells the state listeners when it is raised, so the windows show it', () => {
+    const { core, left } = startWithThreePanes()
+    let changes = 0
+    core.onStateChange(() => (changes += 1))
+
+    core.notificationReceived(left)
+
+    expect(changes).toBe(1)
+  })
+
+  it('goes with its Pane when the Pane closes', () => {
+    const { core, shellHost, tabId, left } = startWithThreePanes()
+    core.notificationReceived(left)
+
+    shellHost.exit(left)
+
+    expect(core.tabHasActivity(tabId)).toBe(false)
+  })
+
+  it('goes when its Session closes, so the Session reopens without it', () => {
+    const { core, sessionId, tabId, left } = startWithThreePanes()
+    core.newSession()
+    core.notificationReceived(left)
+
+    core.closeSession(sessionId)
+    core.reopenSession(sessionId)
+
+    expect(core.tabHasActivity(tabId)).toBe(false)
+  })
+
+  it("isn't raised on a Pane that's gone or in a Closed Session, whose Shell can still report on its way out", () => {
+    const { core, sessionId, tabId, left } = startWithThreePanes()
+    core.newSession()
+    core.closeSession(sessionId)
+    let changes = 0
+    core.onStateChange(() => (changes += 1))
+
+    core.notificationReceived(left)
+    core.programStatusReported('missing', { id: '', state: 'done' })
+
+    expect(changes).toBe(0)
+    expect(core.tabHasActivity(tabId)).toBe(false)
+  })
+
+  it("isn't brought back by Restore", () => {
+    const { core, stateStore, tabId, left } = startWithThreePanes()
+    core.notificationReceived(left)
+
+    const relaunched = startCore(stateStore).core
+
+    expect(relaunched.tabHasActivity(tabId)).toBe(false)
+  })
+
+  describe("the Session label row's chips", () => {
+    // Open Sessions `web`, `Session 2`, `api`, `Session 4` and `Session 5`, the last one current, each holding one Pane.
+    function startWithFiveSessions () {
+      const started = startCore()
+      for (let count = 1; count < 5; count += 1) started.core.newSession()
+      const sessions = started.core.state().sessions
+      started.core.renameSession(sessions[0].id, 'web')
+      started.core.renameSession(sessions[2].id, 'api')
+      const [web, second, api, fourth] = sessions.map((session) => session.tabs[0].panes[0].id)
+      return { ...started, web, second, api, fourth, current: sessions[4].id }
+    }
+
+    it('name the other Sessions with Activity in cycle order, by their Tab bar labels', () => {
+      const { core, web, second, api, current } = startWithFiveSessions()
+      core.notificationReceived(second)
+      core.notificationReceived(api)
+      core.notificationReceived(web)
+
+      expect(core.activityChips(current)).toEqual(['api', 'web', 'Session 2'])
+    })
+
+    it("leave out the Session's own Activity", () => {
+      const { core, sessionId, left } = startWithThreePanes()
+      core.notificationReceived(left)
+
+      expect(core.activityChips(sessionId)).toEqual([])
+    })
+
+    it('become a single `3+` past three Sessions', () => {
+      const { core, web, second, api, fourth, current } = startWithFiveSessions()
+      for (const paneId of [web, second, api, fourth]) core.notificationReceived(paneId)
+
+      expect(core.activityChips(current)).toEqual(['3+'])
+    })
+  })
+
+  it("marks the Command Palette's Session, Tab and Pane results that have it, flat and nested", () => {
+    const { core, sessionId, tabId, left, topRight } = startWithThreePanes()
+    core.newSession()
+    core.notificationReceived(left)
+    const withActivity = (results: PaletteResult[]) =>
+      results.flatMap((result) => {
+        if (result.type === 'session') return result.activity ? [result.sessionId] : []
+        if (result.type === 'tab') return result.activity ? [result.tabId] : []
+        if (result.type === 'pane') return result.activity ? [result.paneId] : []
+        return []
+      })
+
+    expect(withActivity(core.paletteResults(''))).toEqual([sessionId, tabId, left])
+    expect(withActivity(core.paletteResults('pp '))).toEqual([left])
+    expect(core.paletteResults('pp ').some((result) => result.type === 'pane' && result.paneId === topRight)).toBe(true)
+
+    core.configChanged('{ "paletteNesting": "nested" }')
+    expect(withActivity(core.paletteResults(''))).toEqual([sessionId, left])
+  })
+
+  describe("from a program's status reports", () => {
+    it('is raised by a record blocked, done or in error, but not working or idle', () => {
+      const raisedBy = (state: ProgramState) => {
+        const { core, tabId, left } = startWithThreePanes()
+        core.programStatusReported(left, { id: '', state })
+        return core.tabHasActivity(tabId)
+      }
+
+      expect(raisedBy('blocked')).toBe(true)
+      expect(raisedBy('done')).toBe(true)
+      expect(raisedBy('error')).toBe(true)
+      expect(raisedBy('working')).toBe(false)
+      expect(raisedBy('idle')).toBe(false)
+      expect(raisedBy('clear')).toBe(false)
+    })
+
+    it('clears record by record, as each later reports working, idle or clear', () => {
+      const { core, tabId, left } = startWithThreePanes()
+      core.programStatusReported(left, { id: 'a', state: 'blocked' })
+      core.programStatusReported(left, { id: 'b', state: 'done' })
+      core.programStatusReported(left, { id: 'c', state: 'error' })
+
+      core.programStatusReported(left, { id: 'a', state: 'working' })
+      core.programStatusReported(left, { id: 'b', state: 'idle' })
+      expect(core.tabHasActivity(tabId)).toBe(true)
+
+      core.programStatusReported(left, { id: 'c', state: 'clear' })
+      expect(core.tabHasActivity(tabId)).toBe(false)
+    })
+
+    it('clears a record with the records under it, or every record without an id', () => {
+      const { core, tabId, left, topRight } = startWithThreePanes()
+      core.programStatusReported(left, { id: 'agents', state: 'done' })
+      core.programStatusReported(left, { id: 'agents/a1', state: 'blocked' })
+      core.programStatusReported(topRight, { id: '', state: 'done' })
+      core.programStatusReported(topRight, { id: 'b', state: 'blocked' })
+
+      core.programStatusReported(left, { id: 'agents', state: 'clear' })
+      core.programStatusReported(topRight, { id: '', state: 'clear' })
+
+      expect(core.tabHasActivity(tabId)).toBe(false)
+    })
+
+    it("leaves a notification's Activity for the Pane's focus to clear", () => {
+      const { core, tabId, left } = startWithThreePanes()
+      core.notificationReceived(left)
+
+      core.programStatusReported(left, { id: '', state: 'clear' })
+
+      expect(core.tabHasActivity(tabId)).toBe(true)
+    })
   })
 })
 

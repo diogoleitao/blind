@@ -19,6 +19,8 @@ const api: BlindApi = {
     ipcRenderer.on(channels.paneData, (_event, paneId, data) => listener(paneId, data))
   },
   reportScrollback: (paneId, scrollback) => ipcRenderer.send(channels.reportScrollback, paneId, scrollback),
+  reportNotification: (paneId) => ipcRenderer.send(channels.reportNotification, paneId),
+  reportProgramStatus: (paneId, report) => ipcRenderer.send(channels.reportProgramStatus, paneId, report),
   // Messages from one page arrive in order, so the main process has every report once it hears back.
   onFlushScrollback: (listener) => {
     ipcRenderer.on(channels.flushScrollback, () => {

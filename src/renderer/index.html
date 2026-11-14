@@ -183,6 +183,25 @@
         border-color: var(--accent);
         color: var(--accent);
       }
+      /* The dot marking a Tab, a Session or a Command Palette result with Activity, in the Theme's activity colour. */
+      .activity-dot {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        margin-right: 5px;
+        border-radius: 50%;
+        background: var(--activity);
+        vertical-align: middle;
+      }
+      /* After the Session's label, the other Sessions with Activity, each in a pill of its own. */
+      .activity-chip {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 7px;
+        border: 1px solid var(--divider);
+        border-radius: 999px;
+        vertical-align: middle;
+      }
       /* Each result sits `--result-inset` in from the Command Palette's sides, with its text `--result-padding-x` in
          from its own. */
       :root {

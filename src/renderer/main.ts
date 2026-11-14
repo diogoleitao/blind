@@ -9,6 +9,7 @@ import {
   Terminal,
 } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
+import { isNotification, notificationOscs, programStatus, programStatusSupported } from '../core/attention'
 import { mixColours, withOpacity } from '../core/colours'
 import { defaultSettings } from '../core/config'
 import type { PaletteResult } from '../core/core'
@@ -43,7 +44,8 @@ const { blind } = window
 const panesElement = document.getElementById('panes')!
 const tabBar = document.getElementById('tab-bar')!
 const tabsElement = document.getElementById('tabs')!
-const sessionLabelPill = document.querySelector('#session-label .pill')!
+const sessionLabelRow = document.getElementById('session-label')!
+const sessionLabelPill = sessionLabelRow.querySelector('.pill')!
 const terminals = new Map<PaneId, PaneTerminal>()
 let focusedPaneId: PaneId | undefined
 // Both replaced by the main process's before any terminal opens.
@@ -156,6 +158,7 @@ function openPane (rect: PaneRect): PaneTerminal {
   terminal.loadAddon(serialize)
   terminal.loadAddon(search)
   terminal.registerLinkProvider(linkProvider(paneId, terminal))
+  watchForActivity(paneId, terminal)
   terminal.attachCustomKeyEventHandler((event) => {
     const input = terminalInput(keyPress(event))
     if (input === undefined) return true
@@ -172,6 +175,23 @@ function openPane (rect: PaneRect): PaneTerminal {
   element.addEventListener('mousedown', () => blind.focusPane(paneId))
   blind.attachPane(paneId, { cols: terminal.cols, rows: terminal.rows })
   return { element, terminal, fit, serialize, search }
+}
+
+// Passes on what asks for the user's attention: a program's OSC 7501 status reports, its query answered so it sends
+// them, and its desktop notifications. The terminal shows none of them.
+function watchForActivity (paneId: PaneId, terminal: Terminal) {
+  terminal.parser.registerOscHandler(7501, (payload) => {
+    const status = programStatus(payload)
+    if (status?.type === 'query') blind.writeToPane(paneId, programStatusSupported)
+    if (status?.type === 'report') blind.reportProgramStatus(paneId, { id: status.id, state: status.state })
+    return true
+  })
+  for (const osc of notificationOscs) {
+    terminal.parser.registerOscHandler(osc, (payload) => {
+      if (isNotification(osc, payload)) blind.reportNotification(paneId)
+      return true
+    })
+  }
 }
 
 // A browser key event as the `KeyPress` core decides on.
@@ -407,16 +427,34 @@ function pill (text: string) {
   return element
 }
 
+// The dot marking a Tab, a Session or a Command Palette result with Activity.
+function activityDot () {
+  const element = document.createElement('span')
+  element.className = 'activity-dot'
+  return element
+}
+
+// A pill naming another Session with Activity, or saying there are more than the Tab bar names.
+function activityChip (text: string) {
+  const element = document.createElement('span')
+  element.className = 'activity-chip'
+  element.append(activityDot(), text)
+  return element
+}
+
 // Shown once the Session's view arrives.
 function renderTabBar (view: SessionView) {
   tabBar.hidden = false
   sessionLabelPill.textContent = view.sessionLabel
+  sessionLabelRow.replaceChildren(sessionLabelPill, ...view.activityChips.map(activityChip))
   tabsElement.replaceChildren(
     ...view.tabs.map((tab) => {
       const element = document.createElement('div')
       element.className = 'tab'
       element.classList.toggle('focused', tab.id === view.focusedTabId)
-      element.append(pill(tab.title))
+      const title = pill(tab.title)
+      if (tab.activity) title.prepend(activityDot())
+      element.append(title)
       return element
     })
   )
@@ -542,7 +580,9 @@ function renderPalette () {
       if (level) element.classList.add(`level-${level}`)
       // A nested Tab or Pane shows its title alone under its Session or Tab.
       const label = document.createElement('span')
-      label.textContent = level ? `↳ ${result.label}` : result.label
+      if (level) label.append('↳ ')
+      if ('activity' in result && result.activity) label.append(activityDot())
+      label.append(result.label)
       const detail = document.createElement('span')
       detail.className = 'detail'
       detail.textContent = level ? '' : resultDetail(result)

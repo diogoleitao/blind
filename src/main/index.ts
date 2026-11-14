@@ -14,6 +14,7 @@ import {
   shell,
   type WebContents,
 } from 'electron'
+import type { ProgramStatusReport } from '../core/attention'
 import { blurIssueUrl, shouldWarnBlurUnavailable } from '../core/blur-warning'
 import { type MenuBarIcon, minimumBlurRadius } from '../core/config'
 import { createCore, type PaletteResult } from '../core/core'
@@ -349,11 +350,13 @@ app.whenReady().then(() => {
     if (!session) return undefined
     return {
       sessionLabel: core.shortSessionLabel(sessionId) ?? '',
+      activityChips: core.activityChips(sessionId),
       tabs: session.tabs.map((tab) => ({
         id: tab.id,
         title: core.tabTitle(tab.id) ?? '',
         panes: core.paneRects(tab.id),
         focusedPaneId: tab.focusedPaneId,
+        activity: core.tabHasActivity(tab.id),
       })),
       focusedTabId: session.focusedTabId,
     }
@@ -413,6 +416,10 @@ app.whenReady().then(() => {
   ipcMain.on(channels.resizePane, (_event, paneId: PaneId, size: TerminalSize) => shellHost.resize(paneId, size))
   ipcMain.on(channels.reportScrollback, (_event, paneId: PaneId, scrollback: string) =>
     core.scrollbackChanged(paneId, scrollback)
+  )
+  ipcMain.on(channels.reportNotification, (_event, paneId: PaneId) => core.notificationReceived(paneId))
+  ipcMain.on(channels.reportProgramStatus, (_event, paneId: PaneId, report: ProgramStatusReport) =>
+    core.programStatusReported(paneId, report)
   )
   ipcMain.on(channels.scrollbackFlushed, (event) => scrollbackFlushes.get(event.sender)?.())
   ipcMain.on(channels.copyText, (_event, text: string) => clipboard.writeText(text))

@@ -1,3 +1,4 @@
+import type { ProgramStatusReport } from '../core/attention'
 import type { MenuBarIcon, PanePadding, PaneScrollBar, SessionLabelPosition } from '../core/config'
 import type { Effect, PaletteResult } from '../core/core'
 import type { PaneRect } from '../core/layout'
@@ -9,10 +10,12 @@ export interface TerminalSize {
   rows: number;
 }
 
-// What a Session's window draws: the Session's label and its Tabs, in order, each with where its Panes sit.
+// What a Session's window draws: the Session's label, followed by the chips naming the other Sessions with Activity,
+// and its Tabs, in order, each with where its Panes sit and whether it has Activity.
 export interface SessionView {
   sessionLabel: string;
-  tabs: { id: TabId; title: string; panes: PaneRect[]; focusedPaneId: PaneId }[];
+  activityChips: string[];
+  tabs: { id: TabId; title: string; panes: PaneRect[]; focusedPaneId: PaneId; activity: boolean }[];
   focusedTabId?: TabId;
 }
 
@@ -39,6 +42,8 @@ export const channels = {
   resizePane: 'pane:resize',
   paneData: 'pane:data',
   reportScrollback: 'pane:scrollback',
+  reportNotification: 'pane:notification',
+  reportProgramStatus: 'pane:status',
   flushScrollback: 'scrollback:flush',
   scrollbackFlushed: 'scrollback:flushed',
   openPalette: 'palette:open',
@@ -78,6 +83,10 @@ export interface BlindApi {
   onPaneData(listener: (paneId: PaneId, data: string) => void): void;
   // Sends a Pane's serialized terminal, for Restore.
   reportScrollback(paneId: PaneId, scrollback: string): void;
+  // A program in the Pane sent a desktop notification.
+  reportNotification(paneId: PaneId): void;
+  // A program in the Pane reported one of its status records.
+  reportProgramStatus(paneId: PaneId, report: ProgramStatusReport): void;
   // Called before the app quits. The listener reports every Pane's scrollback before it returns.
   onFlushScrollback(listener: () => void): void;
   // Called when the Command Palette's shortcut asks for it.

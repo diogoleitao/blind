@@ -1,3 +1,4 @@
+import { type ProgramStatusReport, replaces, wantsTheUser } from './attention'
 import {
   type FocusDirection,
   neighbourOf,
@@ -125,11 +126,27 @@ export type PaletteAction = keyof typeof paletteActionLabels
 export type PaletteLevel = 0 | 1 | 2
 
 // One entry the Command Palette offers. `current` marks the Current Session, Current Tab or Current Pane, where the
-// user already is, which the Command Palette lists and lets the user select but not choose. `level` is set in the
-// nested view alone.
+// user already is, which the Command Palette lists and lets the user select but not choose. `activity` marks a Session,
+// Tab or Pane with Activity. `level` is set in the nested view alone.
 export type PaletteResult =
-  | { type: 'session'; sessionId: SessionId; label: string; closed: boolean; current: boolean; level?: PaletteLevel }
-  | { type: 'tab'; tabId: TabId; label: string; sessionLabel: string; current: boolean; level?: PaletteLevel }
+  | {
+    type: 'session';
+    sessionId: SessionId;
+    label: string;
+    closed: boolean;
+    current: boolean;
+    activity: boolean;
+    level?: PaletteLevel;
+  }
+  | {
+    type: 'tab';
+    tabId: TabId;
+    label: string;
+    sessionLabel: string;
+    current: boolean;
+    activity: boolean;
+    level?: PaletteLevel;
+  }
   | {
     type: 'pane';
     paneId: PaneId;
@@ -137,6 +154,7 @@ export type PaletteResult =
     workingDirectory: string;
     sessionLabel: string;
     current: boolean;
+    activity: boolean;
     level?: PaletteLevel;
   }
   | { type: 'action'; action: PaletteAction; label: string; level?: PaletteLevel }
@@ -167,6 +185,15 @@ export interface MenuBar {
   closed: MenuBarSession[];
   actions: { action: MenuBarAction; label: string }[];
 }
+
+// Why a Pane has Activity: a notification, or its program's status records in a state that wants the user, by id.
+interface PaneActivity {
+  notified: boolean;
+  records: string[];
+}
+
+// How many other Sessions a Session's Tab bar names by their Activity before it only says there are more.
+const maximumActivityChips = 3
 
 export interface CoreDependencies {
   shellHost: ShellHost;
@@ -290,6 +317,16 @@ export interface Core {
   // What Cmd+clicking a link in the Pane's terminal opens: a relative path is taken from the Pane's working directory.
   // Absent for an unknown Pane.
   linkTarget(paneId: PaneId, text: string): LinkTarget | undefined;
+  // A program in the Pane sent a desktop notification, OSC 9, 99 or 777, raising Activity on it.
+  notificationReceived(paneId: PaneId): void;
+  // A program in the Pane reported one of its status records, OSC 7501: one blocked, done or in error raises Activity on
+  // the Pane.
+  programStatusReported(paneId: PaneId, report: ProgramStatusReport): void;
+  // Whether any of the Tab's Panes has Activity.
+  tabHasActivity(tabId: TabId): boolean;
+  // What the Session's Tab bar shows after its label: the other Sessions with Activity in cycle order, by their Tab bar
+  // labels, up to three of them; past three, a single `3+`.
+  activityChips(sessionId: SessionId): string[];
   onEffect(listener: (effect: Effect) => void): void;
   onStateChange(listener: (state: CoreState) => void): void;
 }
@@ -300,6 +337,8 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   let scrollback: Record<PaneId, SavedScrollback> = {}
   // Whether the app is on screen. Not part of the snapshot: it says nothing about Sessions.
   let appShown = true
+  // The Panes with Activity. Not part of the snapshot: Restore brings back none.
+  let activity: Record<PaneId, PaneActivity> = {}
   let settings: Settings = defaultSettings
   // The config file's text the settings were last read from, read again when the Themes change.
   let configText: string | undefined
@@ -400,8 +439,49 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
 
   function setState (next: CoreState) {
     state = next
+    dropSettledActivity()
     save()
     for (const listener of stateListeners) listener(state)
+  }
+
+  // Tells the state listeners, as a change of state does, without saving: Activity isn't part of the snapshot.
+  function setActivity (next: Record<PaneId, PaneActivity>) {
+    activity = next
+    for (const listener of stateListeners) listener(state)
+  }
+
+  function tabHasActivity (tab: Tab) {
+    return tab.panes.some((pane) => pane.id in activity)
+  }
+
+  function sessionHasActivity (session: Session) {
+    return session.tabs.some(tabHasActivity)
+  }
+
+  // Only a Pane of an Open Session that isn't the Current Pane gets Activity: a stopped Shell can still report on its way
+  // out.
+  function canRaiseActivity (paneId: PaneId) {
+    return findSessionWithPane(paneId)?.status === 'open' && paneId !== currentPaneId()
+  }
+
+  // A Pane left with no reason for Activity has none.
+  function updatePaneActivity (paneId: PaneId, update: (pane: PaneActivity) => PaneActivity) {
+    const current = activity[paneId] ?? { notified: false, records: [] }
+    const updated = update(current)
+    if (updated === current) return
+    const { [paneId]: _replaced, ...others } = activity
+    setActivity(updated.notified || updated.records.length > 0 ? { ...others, [paneId]: updated } : others)
+  }
+
+  // The Current Pane's Activity clears as it becomes the Current Pane, and a Pane's goes when it closes or its Session
+  // does.
+  function dropSettledActivity () {
+    const currentPane = currentPaneId()
+    const openPanes = new Set(
+      state.sessions.filter((session) => session.status === 'open').flatMap(paneIdsOf)
+    )
+    const kept = Object.entries(activity).filter(([paneId]) => paneId !== currentPane && openPanes.has(paneId))
+    if (kept.length < Object.keys(activity).length) activity = Object.fromEntries(kept)
   }
 
   function findSession (sessionId: SessionId) {
@@ -786,6 +866,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       label: labelOf(session),
       closed: session.status === 'closed',
       current: session.id === state.currentSessionId,
+      activity: sessionHasActivity(session),
     }
   }
 
@@ -814,6 +895,12 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return isCurrentTab(session, tab) && pane.id === tab.focusedPaneId
   }
 
+  // The Current Pane's id, whether or not the app is on screen; absent without a Current Session.
+  function currentPaneId () {
+    const tab = state.currentSessionId === undefined ? undefined : focusedTabOf(state.currentSessionId)
+    return tab?.focusedPaneId
+  }
+
   function tabResults (tabs = tabsInScope('all')): PaletteResult[] {
     return tabs.map(({ session, tab }) => ({
       type: 'tab' as const,
@@ -821,6 +908,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       label: titleOf(tab),
       sessionLabel: labelOf(session),
       current: isCurrentTab(session, tab),
+      activity: tabHasActivity(tab),
     }))
   }
 
@@ -833,6 +921,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
         workingDirectory: displayDirectory(pane.workingDirectory),
         sessionLabel: labelOf(session),
         current: isCurrentPane(session, tab, pane),
+        activity: pane.id in activity,
       }))
     )
   }
@@ -1307,6 +1396,32 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     linkTarget (paneId, text) {
       const pane = findPane(paneId)
       return pane && linkTarget(text, pane.workingDirectory, homeDirectory)
+    },
+    notificationReceived (paneId) {
+      if (!canRaiseActivity(paneId)) return
+      updatePaneActivity(paneId, (pane) => ({ ...pane, notified: true }))
+    },
+    // A report in a state that doesn't want the user drops the records it replaces.
+    programStatusReported (paneId, report) {
+      if (!wantsTheUser(report.state)) {
+        const dropped = (record: string) => replaces(report, record)
+        return updatePaneActivity(paneId, (pane) =>
+          pane.records.some(dropped) ? { ...pane, records: pane.records.filter((record) => !dropped(record)) } : pane
+        )
+      }
+      if (!canRaiseActivity(paneId)) return
+      const { id } = report
+      updatePaneActivity(paneId, (pane) => (pane.records.includes(id) ? pane : { ...pane, records: [...pane.records, id] }))
+    },
+    tabHasActivity (tabId) {
+      const tab = findTab(tabId)
+      return tab !== undefined && tabHasActivity(tab)
+    },
+    activityChips (sessionId) {
+      const labels = sessionsInCycleOrder()
+        .filter((session) => session.id !== sessionId && sessionHasActivity(session))
+        .map(shortLabelOf)
+      return labels.length > maximumActivityChips ? [`${maximumActivityChips}+`] : labels
     },
     onEffect (listener) {
       effectListeners.push(listener)

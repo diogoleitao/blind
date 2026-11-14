@@ -55,6 +55,9 @@ export interface ChromeColours {
   // A result's details and kind.
   paletteMutedText: Colour;
   paletteSelection: Colour;
+  // The dot marking a Tab, a Session or a Command Palette result with Activity: apart from accent, which fills the
+  // focused Tab it can sit on.
+  activity: Colour;
 }
 
 export interface Theme {
@@ -106,6 +109,7 @@ export const defaultTheme: Theme = {
     paletteText: '#ffffffd9',
     paletteMutedText: '#ffffff73',
     paletteSelection: '#ffffff1a',
+    activity: '#f0a500',
   },
 }
 
@@ -151,6 +155,7 @@ const alternativeThemes: Theme[] = [
       paletteText: '#cdd6f4',
       paletteMutedText: '#7f849c',
       paletteSelection: '#313244',
+      activity: '#fab387',
     },
   },
   {
@@ -193,6 +198,7 @@ const alternativeThemes: Theme[] = [
       paletteText: '#c0caf5',
       paletteMutedText: '#565f89',
       paletteSelection: '#283457',
+      activity: '#ff9e64',
     },
   },
   {
@@ -235,6 +241,7 @@ const alternativeThemes: Theme[] = [
       paletteText: '#e0def4',
       paletteMutedText: '#908caa',
       paletteSelection: '#26233a',
+      activity: '#f6c177',
     },
   },
   {
@@ -277,6 +284,7 @@ const alternativeThemes: Theme[] = [
       paletteText: '#ebdbb2',
       paletteMutedText: '#928374',
       paletteSelection: '#3c3836',
+      activity: '#83a598',
     },
   },
 ]
@@ -384,7 +392,7 @@ export const themeSchema = {
       defaultTheme.terminal
     ),
     chrome: colourGroupSchema(
-      'The colours of the Tab bar, the Command Palette, the Session Banner, the Pane dividers and the Bezel around the window. The Pane dividers and the Bezel take divider pulled a quarter of the way towards the terminal foreground.',
+      'The colours of the Tab bar, the Command Palette, the Session Banner, the Pane dividers and the Bezel around the window. The Pane dividers and the Bezel take divider pulled a quarter of the way towards the terminal foreground. activity fills the dot marking a Tab, a Session or a Command Palette result with Activity.',
       defaultTheme.chrome
     ),
   },
