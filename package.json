@@ -10,9 +10,10 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
-    "install-app": "electron-vite build && iconutil -c icns build/icon.iconset -o build/icon.icns && electron-builder --mac && rm -rf /Applications/Blind.app && ditto dist/mac*/Blind.app /Applications/Blind.app",
+    "build:native": "node-gyp rebuild --directory=native --target=$(node -p \"require('electron/package.json').version\") --dist-url=https://electronjs.org/headers",
+    "dev": "npm run build:native && electron-vite dev",
+    "build": "npm run build:native && electron-vite build",
+    "install-app": "npm run build && iconutil -c icns build/icon.iconset -o build/icon.icns && electron-builder --mac && rm -rf /Applications/Blind.app && ditto dist/mac*/Blind.app /Applications/Blind.app",
     "prepare": "git config core.hooksPath .githooks || true",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper && node node_modules/electron/install.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.core.json",
@@ -27,6 +28,8 @@
     "electron-vite": "^6.0.0",
     "eslint": "^10.14.0",
     "neostandard": "^0.14.1",
+    "node-addon-api": "^8.9.2",
+    "node-gyp": "^13.1.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.7",
     "vitest": "^5.1.0"
@@ -49,6 +52,10 @@
       {
         "from": "resources",
         "to": "resources"
+      },
+      {
+        "from": "native/build/Release/window_effects.node",
+        "to": "native/window_effects.node"
       }
     ],
     "npmRebuild": false,

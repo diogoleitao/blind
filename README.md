@@ -19,6 +19,7 @@ Terminal windows get buried under everything else, and each project's tabs and s
 - **Clickable links.** `Cmd+click` opens URLs and file paths, including relative paths and `path:line:col`.
 - **Find in Pane.** `Cmd+F` searches the scrollback and shows the match count.
 - **Themes.** Five built-in Themes, plus your own `.jsonc` files in `~/.config/blind/themes/`. The picker previews each Theme as you move through the list.
+- **See-through windows.** A Session's window shows its Theme's background 25% transparent over a blur of what's behind it, as iTerm2 does. Set `backgroundTransparency` (0 to 100), `backgroundBlurRadius` (1 to 64), or `backgroundEffect` to `none` for next to no blur. The blur uses a private macOS function ([ADR 0003](docs/adr/0003-blur-through-a-private-macos-api.md)); if a macOS update breaks it, windows show unblurred and blind tells you, once per launch.
 - **One config file.** `~/.config/blind/config.jsonc` comes with a schema for editor autocomplete, applies changes as you save, and rebinds any shortcut.
 - **Menu bar icon.** Lists your Open and Closed Sessions, so any of them is one click away.
 - **Out of the way.** blind is not in the Dock or `Cmd+Tab`, and starts hidden at login unless `loginLaunch` says to start shown.
@@ -55,7 +56,7 @@ npm install
 npm run dev
 ```
 
-Running from the repo, the Hotkey is F7.
+Running from the repo, the Hotkey is F7. `dev` and `build` first build the native addon in `native/`, which needs the Xcode Command Line Tools (`xcode-select --install`); the first build downloads Electron's headers.
 
 ## Stack
 
@@ -66,6 +67,7 @@ Running from the repo, the Hotkey is F7.
 Why:
 - [ADR 0001](docs/adr/0001-electron-and-xterm-js.md) (not Swift or Tauri)
 - [ADR 0002](docs/adr/0002-no-background-daemon.md) (no background daemon)
+- [ADR 0003](docs/adr/0003-blur-through-a-private-macos-api.md) (blur through a private macOS API)
 
 ## Documentation
 

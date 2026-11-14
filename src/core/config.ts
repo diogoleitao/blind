@@ -68,6 +68,16 @@ export const menuBarIcons = ['monochrome', 'colour'] as const
 // The menu bar icon's look: one colour that follows the menu bar's, light or dark, or the icon's own colours.
 export type MenuBarIcon = (typeof menuBarIcons)[number]
 
+const backgroundEffects = ['blur', 'none'] as const
+
+// What a Session window's background shows behind it: a blur of what's there, or what's there as good as unblurred.
+export type BackgroundEffect = (typeof backgroundEffects)[number]
+
+// The blur radius's bounds. Never 0, which is reported to stop macOS blurring the window for good; see
+// docs/adr/0003-blur-through-a-private-macos-api.md.
+export const minimumBlurRadius = 1
+export const maximumBlurRadius = 64
+
 // What `unlimited` scrollback keeps: the terminal sets its buffer aside up front, so it can't be truly unbounded.
 export const unlimitedScrollbackLines = 1_000_000
 
@@ -96,6 +106,11 @@ export interface Settings {
   // The name of the Theme in effect, built in or from a Theme file.
   theme: string;
   menuBarIcon: MenuBarIcon;
+  // How transparent a Session window's background is, in percent: 0 is opaque.
+  backgroundTransparency: number;
+  backgroundEffect: BackgroundEffect;
+  // How strongly `blur` blurs, from `minimumBlurRadius` to `maximumBlurRadius`.
+  backgroundBlurRadius: number;
 }
 
 export const defaultSettings: Settings = {
@@ -118,6 +133,9 @@ export const defaultSettings: Settings = {
   ) as Settings['keyBindings'],
   theme: defaultTheme.name,
   menuBarIcon: 'monochrome',
+  backgroundTransparency: 25,
+  backgroundEffect: 'blur',
+  backgroundBlurRadius: 15,
 }
 
 const invalid = Symbol('invalid')
@@ -128,6 +146,11 @@ type SettingParser<Value> = (value: unknown, rejectEntry: (entry: string) => voi
 
 function oneOf<const Values extends readonly string[]> (values: Values): SettingParser<Values[number]> {
   return (value) => (values.includes(value as string) ? (value as Values[number]) : invalid)
+}
+
+function wholeNumberFrom (minimum: number, maximum: number): SettingParser<number> {
+  return (value) =>
+    Number.isInteger(value) && (value as number) >= minimum && (value as number) <= maximum ? (value as number) : invalid
 }
 
 type SettingParsers = { [Name in keyof Settings]-?: SettingParser<Settings[Name]> }
@@ -159,6 +182,9 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
   theme: (value) =>
     themeNames.find((name) => typeof value === 'string' && name.toLowerCase() === value.toLowerCase()) ?? invalid,
   menuBarIcon: oneOf(menuBarIcons),
+  backgroundTransparency: wholeNumberFrom(0, 100),
+  backgroundEffect: oneOf(backgroundEffects),
+  backgroundBlurRadius: wholeNumberFrom(minimumBlurRadius, maximumBlurRadius),
 })
 
 // The defaults with each configured action's shortcut, or null, in place. A configured shortcut is taken away from the
@@ -289,6 +315,27 @@ export const configSchema = {
         "The menu bar icon: monochrome follows the menu bar's colour, light or dark; colour keeps the icon's own colours. The Command Palette's Change Menu Bar Icon sets it too.",
       enum: menuBarIcons,
       default: defaultSettings.menuBarIcon,
+    },
+    backgroundTransparency: {
+      description:
+        "How transparent a Session window's background, the Theme's terminal background, is, in percent: 0 is opaque, 100 shows only what backgroundEffect makes of what's behind the window. The Command Palette and the Session Banner keep their own colours.",
+      type: 'integer',
+      minimum: 0,
+      maximum: 100,
+      default: defaultSettings.backgroundTransparency,
+    },
+    backgroundEffect: {
+      description:
+        "What a Session window shows through its background: blur blurs what's behind the window, by backgroundBlurRadius; none shows it as good as unblurred, at the lightest blur macOS allows without turning blur off for good.",
+      enum: backgroundEffects,
+      default: defaultSettings.backgroundEffect,
+    },
+    backgroundBlurRadius: {
+      description: `How strongly backgroundEffect blur blurs, from ${minimumBlurRadius} to ${maximumBlurRadius}. Ignored when backgroundEffect is none.`,
+      type: 'integer',
+      minimum: minimumBlurRadius,
+      maximum: maximumBlurRadius,
+      default: defaultSettings.backgroundBlurRadius,
     },
     keyBindings: {
       description:

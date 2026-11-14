@@ -1677,6 +1677,57 @@ describe('the scrollback lines setting', () => {
   })
 })
 
+describe('the background settings', () => {
+  it('shows the background 25% transparent by default, and as transparent as configured', () => {
+    const { core } = startCore()
+    expect(core.settings().backgroundTransparency).toBe(25)
+
+    core.configChanged('{ "backgroundTransparency": 60 }')
+
+    expect(core.settings().backgroundTransparency).toBe(60)
+  })
+
+  it('rejects a transparency that is not a whole number from 0 to 100, keeping 25', () => {
+    for (const transparency of ['-1', '101', '12.5', '"half"']) {
+      const { core, effects } = startCore(undefined, `{ "backgroundTransparency": ${transparency} }`)
+
+      expect(core.settings().backgroundTransparency).toBe(25)
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['backgroundTransparency'] }])
+    }
+  })
+
+  it('blurs what is behind the background by default, and can show it unblurred', () => {
+    const { core, effects } = startCore(undefined, '{ "backgroundEffect": "frosted" }')
+    expect(core.settings().backgroundEffect).toBe('blur')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['backgroundEffect'] }])
+
+    core.configChanged('{ "backgroundEffect": "none" }')
+
+    expect(core.settings().backgroundEffect).toBe('none')
+  })
+
+  it('blurs at a radius of 15 by default, and at any whole radius from 1 to 64', () => {
+    const { core } = startCore()
+    expect(core.settings().backgroundBlurRadius).toBe(15)
+
+    for (const radius of [1, 64]) {
+      core.configChanged(`{ "backgroundBlurRadius": ${radius} }`)
+
+      expect(core.settings().backgroundBlurRadius).toBe(radius)
+    }
+  })
+
+  // A radius of 0 is reported to stop macOS blurring the window for good.
+  it('rejects a blur radius of 0, or anything else outside 1 to 64, keeping 15', () => {
+    for (const radius of ['0', '65', '7.5', '"soft"']) {
+      const { core, effects } = startCore(undefined, `{ "backgroundBlurRadius": ${radius} }`)
+
+      expect(core.settings().backgroundBlurRadius).toBe(15)
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['backgroundBlurRadius'] }])
+    }
+  })
+})
+
 describe('Themes', () => {
   it("starts with the Default Theme, the iTerm2 profile's font, steady block cursor and colours", () => {
     const { core } = startCore()

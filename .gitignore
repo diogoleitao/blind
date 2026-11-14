@@ -4,6 +4,9 @@ node_modules/
 # electron-vite build output
 out/
 
+# node-gyp build output of the native addon
+native/build/
+
 # electron-builder output, and the app icon it's given, made from build/icon.iconset
 dist/
 build/icon.icns

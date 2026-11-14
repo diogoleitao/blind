@@ -14,16 +14,19 @@ import {
   shell,
   type WebContents,
 } from 'electron'
-import type { MenuBarIcon } from '../core/config'
+import { blurIssueUrl, shouldWarnBlurUnavailable } from '../core/blur-warning'
+import { type MenuBarIcon, minimumBlurRadius } from '../core/config'
 import { createCore, type PaletteResult } from '../core/core'
 import type { PaneId, SessionId } from '../core/state'
 import { channels, type PalettePrompt, type SessionView, type TerminalSize, type WindowSettings } from '../shared/ipc'
+import { createBlurWarningFile } from './blur-warning-file'
 import { type ConfigRead, createConfigFile } from './config-file'
 import { fadeWindow } from './fade'
 import { createFileStateStore } from './file-state-store'
 import { createMenuBarIcon } from './menu-bar-icon'
 import { createNodePtyShellHost } from './node-pty-shell-host'
 import { createThemeFiles } from './theme-files'
+import { loadWindowEffects } from './window-effects'
 
 // The installed app's Hotkey is F12; running from the repo uses F7, so both can run side by side.
 const hotkey = app.isPackaged ? 'F12' : 'F7'
@@ -51,9 +54,10 @@ app.whenReady().then(() => {
   app.setActivationPolicy('accessory')
 
   const shellHost = createNodePtyShellHost({ loginShell: process.env.SHELL || userInfo().shell || '/bin/zsh' })
+  const appDataDirectory = join(app.getPath('appData'), 'Blind')
   const core = createCore({
     shellHost,
-    stateStore: createFileStateStore(join(app.getPath('appData'), 'Blind')),
+    stateStore: createFileStateStore(appDataDirectory),
     clock: { now: () => Date.now() },
     homeDirectory: homedir(),
   })
@@ -63,6 +67,14 @@ app.whenReady().then(() => {
   const windows = new Map<SessionId, BrowserWindow>()
   // The Command Palette on its own, made the first time the Hotkey shows it with no Open Sessions.
   let paletteWindow: BrowserWindow | undefined
+  // The installed app carries the native addon outside its archive.
+  const windowEffects = loadWindowEffects(
+    app.isPackaged
+      ? join(process.resourcesPath, 'native', 'window_effects.node')
+      : join(app.getAppPath(), 'native', 'build', 'Release', 'window_effects.node')
+  )
+  const blurWarningFile = createBlurWarningFile(appDataDirectory)
+  let blurWarnedThisLaunch = false
 
   function allWindows () {
     return paletteWindow ? [...windows.values(), paletteWindow] : [...windows.values()]
@@ -235,12 +247,12 @@ app.whenReady().then(() => {
   }
 
   // Attached to the visible window, if any, so the dialog shows above the floating panel. With none, e.g. when quit
-  // from outside while hidden, the app comes forward to show it. Answers with the chosen button's index.
+  // from outside while hidden, the app comes forward to show it. Answers with the chosen button's index and whether the
+  // checkbox, if any, was ticked.
   async function ask (options: Electron.MessageBoxOptions) {
     const parent = allWindows().find((window) => window.isVisible())
     if (!parent) app.focus({ steal: true })
-    const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
-    return response
+    return parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
   }
 
   // Tells how many Sessions quitting deletes, if any.
@@ -253,7 +265,7 @@ app.whenReady().then(() => {
         : sessionsToDelete === 1
           ? ' 1 Session without a name or Root directory is deleted.'
           : ` ${sessionsToDelete} Sessions without a name or Root directory are deleted.`
-    const response = await ask({
+    const { response } = await ask({
       type: 'question',
       message: 'Quit Blind?',
       detail: `Every Shell stops. Sessions come back with fresh Shells the next time Blind starts.${deletionNote}`,
@@ -274,7 +286,7 @@ app.whenReady().then(() => {
   async function confirmDelete (sessionId: SessionId) {
     const label = core.sessionLabel(sessionId)
     if (label === undefined) return
-    const response = await ask({
+    const { response } = await ask({
       type: 'warning',
       message: `Delete ${label}?`,
       detail: 'Its Shells stop, and its Tabs, Panes and scrollback are removed for good.',
@@ -283,6 +295,42 @@ app.whenReady().then(() => {
       cancelId: 1,
     })
     if (response === 0) core.deleteConfirmed(sessionId)
+  }
+
+  // Blurs what's behind a Session window as the settings say, through the native addon. `none` sets the lightest blur
+  // rather than none at all, so that `blur` can come back. Only a visible window: macOS makes a window's backing only
+  // once it is first shown, and a window's blur is set again each time it shows.
+  function applyBackgroundEffect (window: BrowserWindow) {
+    if (!windowEffects.available || window.isDestroyed() || !window.isVisible()) return
+    const { backgroundEffect, backgroundBlurRadius } = core.settings()
+    windowEffects.setBlurRadius(window, backgroundEffect === 'blur' ? backgroundBlurRadius : minimumBlurRadius)
+  }
+
+  // Says that windows can't blur, while blur is wanted: once per launch, and not again until Blind or macOS changes
+  // version once "Don't show again" is ticked. Report on GitHub opens a new issue, filled in.
+  async function warnIfBlurUnavailable () {
+    if (windowEffects.available) return
+    const versions = { app: app.getVersion(), os: process.getSystemVersion() }
+    const check = {
+      backgroundEffect: core.settings().backgroundEffect,
+      warnedThisLaunch: blurWarnedThisLaunch,
+      dismissedFor: blurWarningFile.dismissedFor(),
+      versions,
+    }
+    if (!shouldWarnBlurUnavailable(check)) return
+    blurWarnedThisLaunch = true
+    const { response, checkboxChecked } = await ask({
+      type: 'warning',
+      message: "Windows can't blur",
+      detail:
+        "Blind blurs what's behind its windows through a private macOS function, which no longer works, so windows show it unblurred. Setting backgroundEffect to none in config.jsonc stops this message.",
+      buttons: ['Report on GitHub', 'OK'],
+      defaultId: 1,
+      cancelId: 1,
+      checkboxLabel: "Don't show again",
+    })
+    if (checkboxChecked) blurWarningFile.dismiss(versions)
+    if (response === 0) shell.openExternal(blurIssueUrl(versions, windowEffects.failure, homedir()))
   }
 
   if (!globalShortcut.register(hotkey, () => core.hotkeyPressed())) {
@@ -329,8 +377,8 @@ app.whenReady().then(() => {
 
   function sendWindowSettings (window: BrowserWindow) {
     if (window.isDestroyed()) return
-    const { scrollbackLines, sessionLabelPosition } = core.settings()
-    const settings: WindowSettings = { scrollbackLines, sessionLabelPosition }
+    const { scrollbackLines, sessionLabelPosition, backgroundTransparency } = core.settings()
+    const settings: WindowSettings = { scrollbackLines, sessionLabelPosition, backgroundTransparency }
     window.webContents.send(channels.windowSettings, settings)
   }
 
@@ -397,6 +445,7 @@ app.whenReady().then(() => {
       maximizable: false,
       fullscreenable: false,
       alwaysOnTop: true,
+      transparent: true,
       backgroundColor: '#00000000',
       webPreferences: { preload: join(import.meta.dirname, '../preload/index.mjs'), sandbox: false },
       ...options,
@@ -421,8 +470,9 @@ app.whenReady().then(() => {
   function windowFor (sessionId: SessionId) {
     const existing = windows.get(sessionId)
     if (existing) return existing
-    const window = createPanel({ vibrancy: 'under-window', visualEffectState: 'active' })
+    const window = createPanel()
     windows.set(sessionId, window)
+    window.on('show', () => applyBackgroundEffect(window))
     // A window closing late, after its scrollback flush, leaves alone the window a reopened Session has since made.
     window.on('closed', () => {
       if (windows.get(sessionId) === window) windows.delete(sessionId)
@@ -456,6 +506,8 @@ app.whenReady().then(() => {
   configFile.watch((read) => {
     applyConfig(read)
     allWindows().forEach(sendWindowSettings)
+    windows.forEach(applyBackgroundEffect)
+    warnIfBlurUnavailable()
     // The cycle order setting may have changed.
     menuBarIcon.update()
   })
@@ -464,4 +516,5 @@ app.whenReady().then(() => {
   const { shown } = core.start({ atLogin: app.getLoginItemSettings().wasOpenedAtLogin })
   // Showing now, not on ready-to-show, keeps the window in step with the core.
   if (shown) showWindow(windowFor(core.state().currentSessionId!))
+  warnIfBlurUnavailable()
 })

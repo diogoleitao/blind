@@ -16,10 +16,12 @@ export interface SessionView {
   focusedTabId?: TabId;
 }
 
-// The settings a window follows: its terminals' scrollback, and where its Tab bar shows the Session's label.
+// The settings a window follows: its terminals' scrollback, where its Tab bar shows the Session's label, and how
+// transparent its background is.
 export interface WindowSettings {
   scrollbackLines: number;
   sessionLabelPosition: SessionLabelPosition;
+  backgroundTransparency: number;
 }
 
 // What the Command Palette asks for in place of a search: a Session's name or a Tab's title.

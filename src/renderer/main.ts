@@ -51,11 +51,9 @@ let focusedPaneId: PaneId | undefined
 let windowSettings: WindowSettings = {
   scrollbackLines: defaultSettings.scrollbackLines,
   sessionLabelPosition: defaultSettings.sessionLabelPosition,
+  backgroundTransparency: defaultSettings.backgroundTransparency,
 }
 let theme: Theme = defaultTheme
-
-// The opacity of the window's background over its blur, as iTerm2's 25% transparency.
-const windowOpacity = 0.75
 
 // The colour with its alpha scaled by `factor`.
 function withOpacity (colour: Colour, factor: number) {
@@ -82,10 +80,12 @@ function terminalOptions ({ font, cursor, terminal }: Theme): ITerminalOptions {
   }
 }
 
-// The page's colours, as the CSS variables the stylesheet uses, e.g. `--palette-muted-text`.
+// The page's colours, as the CSS variables the stylesheet uses, e.g. `--palette-muted-text`. The terminal's background
+// is the window's, as transparent as the backgroundTransparency setting says.
 function applyChromeColours ({ terminal, chrome }: Theme) {
   const root = document.documentElement.style
-  root.setProperty('--window-background', withOpacity(terminal.background, windowOpacity))
+  const opacity = 1 - windowSettings.backgroundTransparency / 100
+  root.setProperty('--window-background', withOpacity(terminal.background, opacity))
   for (const [name, colour] of Object.entries(chrome)) {
     root.setProperty(`--${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`, colour)
   }
@@ -364,11 +364,12 @@ function reportScrollback (paneId: PaneId, pane: PaneTerminal) {
 }
 
 // Open terminals keep their scrollback up to the new number of lines from now on. The Session's label moves at once,
-// leaving the Tab bar's height, and so the Panes' space, as it was.
+// leaving the Tab bar's height, and so the Panes' space, as it was. The background takes the new transparency at once.
 function applyWindowSettings (settings: WindowSettings) {
   windowSettings = settings
   for (const pane of terminals.values()) pane.terminal.options.scrollback = settings.scrollbackLines
   tabBar.classList.toggle('label-above', settings.sessionLabelPosition === 'aboveTabs')
+  applyChromeColours(theme)
 }
 
 function writeToTerminal (paneId: PaneId, data: string) {
