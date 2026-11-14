@@ -41,7 +41,7 @@ Terminal windows get buried under everything else, and each project's tabs and s
 npm run install-app
 ```
 
-Builds `Blind.app` and copies it to `/Applications`, replacing any previous copy. Quit a running Blind and open it again to use the new copy.
+Builds `Blind.app` and copies it to `/Applications`, replacing any previous copy. Quit a running Blind and open it again to use the new copy, or use `blind install` (below), which does both.
 
 The installed app:
 
@@ -60,6 +60,8 @@ npm run build:cli && npm link
 Run once from the repo, this builds the `blind` command and puts it on your `PATH`. It runs from the repo, so it stays linked to this checkout. If you switch Node versions with a version manager such as nvm, run `npm link` again under the new one.
 
 `blind settings` lists every setting but `keyBindings` with its value and description, and changes them as you go: arrow keys move and pick values, Enter types a number or the `shell` setting, and `q` quits. Each change is saved at once, so a running Blind applies it straight away. Settings changed since the editor opened show in bold yellow with a `*`, and quitting lists them with their old and new values. `blind settings open` opens `~/.config/blind/config.jsonc` in `$EDITOR`, or in its default app without one, creating it first if it's missing.
+
+`blind install` runs `npm run install-app`, then asks a running Blind to restart into the new copy: it asks you to confirm, as quitting does, and starts again once you do. Cancel and the old copy keeps running until you next quit. `blind install --force` restarts it without asking, saving your Sessions first. A Blind that isn't running is left that way.
 
 ## Develop
 

@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { constants, homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import { loadThemes } from '../core/themes'
 import { createConfigFile } from '../main/config-file'
 import { createThemeFiles } from '../main/theme-files'
-import { runCli } from './run'
+import { installedApp, runCli } from './run'
 import { createTerminal } from './terminal'
 
 // out/cli/main.js -> the repo root. Node resolves `npm link`'s symlinks before running this, so it's the repo itself.
@@ -22,6 +23,9 @@ process.exitCode = await runCli(process.argv.slice(2), {
   themeNames: () => loadThemes(createThemeFiles(join(configDirectory, 'themes')).read()).themes.map((theme) => theme.name),
   terminal: createTerminal(),
   run,
+  runningBlindPid,
+  relaunchAfterExit,
+  terminate,
   stdout: (text) => { process.stdout.write(text) },
   stderr: (text) => { process.stderr.write(text) },
 })
@@ -44,4 +48,30 @@ function run (command: string, args: string[], cwd?: string) {
       resolve(code ?? 128 + constants.signals[signal!])
     })
   })
+}
+
+// Matched by the executable it runs, so neither its helper processes nor the app running from the repo count.
+async function runningBlindPid () {
+  const executable = `${installedApp}/Contents/MacOS/Blind`
+  const { stdout } = await promisify(execFile)('ps', ['-Ao', 'pid=,command='])
+  const found = stdout
+    .split('\n')
+    .map((line) => /^\s*(\d+) (.*)$/.exec(line))
+    .find((match) => match && (match[2] === executable || match[2].startsWith(`${executable} `)))
+  return found ? Number(found[1]) : undefined
+}
+
+// `sh` in a process group of its own, detached from this one's terminal, so it lives on when Blind quitting closes it.
+function relaunchAfterExit (pid: number) {
+  const script = `while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; open -a ${installedApp}`
+  spawn('/bin/sh', ['-c', script, 'sh', String(pid)], { detached: true, stdio: 'ignore' }).unref()
+}
+
+// A process that's already gone has stopped, as asked.
+function terminate (pid: number) {
+  try {
+    process.kill(pid, 'SIGTERM')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+  }
 }

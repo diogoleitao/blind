@@ -51,8 +51,9 @@ export type Effect =
   | { type: 'showSession'; sessionId: SessionId }
   // Shows the Session Banner over the Session's window, which cycling has just swapped in.
   | { type: 'showSessionBanner'; sessionId: SessionId }
-  // Asks the user whether to quit, answered with `quitConfirmed`, telling how many Sessions quitting deletes, if any.
-  | { type: 'confirmQuit'; sessionsToDelete?: number }
+  // Asks the user whether to quit, or to restart, which quits and starts Blind again; answered with `quitConfirmed`,
+  // telling how many Sessions quitting deletes, if any.
+  | { type: 'confirmQuit'; restart?: true; sessionsToDelete?: number }
   // Asks the user for the Session's name, offering `suggestion`, answered with `renameSession`.
   | { type: 'askSessionName'; sessionId: SessionId; suggestion: string }
   // Asks the user whether to delete the Session, answered with `deleteConfirmed`.
@@ -215,6 +216,8 @@ export interface Core {
   focusLost(): void;
   // Quitting always asks for confirmation first.
   quitRequested(): void;
+  // Asked from outside, e.g. after a new copy of Blind is installed; confirmed like quitting.
+  restartRequested(): void;
   quitConfirmed(): void;
   // The config file's text, or undefined without a file. Settings start at their defaults, as without a file. Text that
   // isn't a JSON object, e.g. a save caught halfway through an edit, leaves the settings as they were.
@@ -734,6 +737,12 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     setState({ ...state, currentSessionId: mostRecentlyUsedOpenSession()?.id })
   }
 
+  // Asks whether to quit, or to restart, saying how many Sessions quitting deletes, if any.
+  function confirmQuit (restart?: true) {
+    const sessionsToDelete = sessionsDeletedOnQuit().length
+    emit({ type: 'confirmQuit', ...(restart ? { restart } : {}), ...(sessionsToDelete > 0 ? { sessionsToDelete } : {}) })
+  }
+
   // The smallest label number no Unnamed Session holds, starting at 1.
   function freeLabelNumber () {
     const taken = new Set(state.sessions.map((session) => session.labelNumber))
@@ -1155,10 +1164,8 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       appShown = false
       emit({ type: 'hideApp' })
     }),
-    quitRequested: command(() => {
-      const sessionsToDelete = sessionsDeletedOnQuit().length
-      emit(sessionsToDelete > 0 ? { type: 'confirmQuit', sessionsToDelete } : { type: 'confirmQuit' })
-    }),
+    quitRequested: command(() => confirmQuit()),
+    restartRequested: command(() => confirmQuit(true)),
     quitConfirmed: command(() => {
       deleteSessionsOnQuit()
       stateStore.flush()

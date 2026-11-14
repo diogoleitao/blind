@@ -64,6 +64,14 @@
       }
     ],
     "npmRebuild": false,
+    "protocols": [
+      {
+        "name": "Blind",
+        "schemes": [
+          "blind"
+        ]
+      }
+    ],
     "mac": {
       "target": "dir",
       "icon": "build/icon.icns",

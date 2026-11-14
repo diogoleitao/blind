@@ -1434,6 +1434,14 @@ describe('quitting', () => {
 
     expect(calls).toEqual(['flush', 'quit'])
   })
+
+  it('asks the same confirmation for a restart, saying it is one', () => {
+    const { core, effects } = startCore()
+
+    core.restartRequested()
+
+    expect(effects).toEqual([{ type: 'confirmQuit', restart: true }])
+  })
 })
 
 describe('the config file', () => {
@@ -2795,6 +2803,14 @@ describe('the setting for closing Sessions with neither a name nor a Root direct
       core.quitRequested()
 
       expect(effects).toEqual([{ type: 'confirmQuit', sessionsToDelete: 2 }])
+    })
+
+    it('has the restart confirmation tell how many Sessions restarting deletes', () => {
+      const { core, effects } = startDeleting()
+
+      core.restartRequested()
+
+      expect(effects).toEqual([{ type: 'confirmQuit', restart: true, sessionsToDelete: 2 }])
     })
 
     it('leaves the quit confirmation as usual when quitting deletes none', () => {

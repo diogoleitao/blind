@@ -17,7 +17,7 @@ import {
 import type { ProgramStatusReport } from '../core/attention'
 import { blurIssueUrl, shouldWarnBlurUnavailable } from '../core/blur-warning'
 import { type MenuBarIcon, minimumBlurRadius } from '../core/config'
-import { createCore, type PaletteResult } from '../core/core'
+import { createCore, type Effect, type PaletteResult } from '../core/core'
 import type { PaneId, SessionId } from '../core/state'
 import { channels, type PalettePrompt, type SessionView, type TerminalSize, type WindowSettings } from '../shared/ipc'
 import { createBlurWarningFile } from './blur-warning-file'
@@ -161,7 +161,7 @@ app.whenReady().then(() => {
     if (effect.type === 'hideApp') hideApp()
     if (effect.type === 'showSession') swapToWindow(effect.sessionId)
     if (effect.type === 'showSessionBanner') showSessionBanner(effect.sessionId)
-    if (effect.type === 'confirmQuit') confirmQuit(effect.sessionsToDelete)
+    if (effect.type === 'confirmQuit') confirmQuit(effect)
     if (effect.type === 'confirmDelete') confirmDelete(effect.sessionId)
     if (effect.type === 'askSessionName' || effect.type === 'askTabTitle') {
       windows.get(effect.sessionId)?.webContents.send(channels.promptPalette, effect)
@@ -216,6 +216,12 @@ app.whenReady().then(() => {
   let savedForQuit = false
   // Set from the confirmation dialog appearing until the quit is cancelled or saved, so a second quit doesn't ask again.
   let quitInProgress = false
+  // Set while the dialog is up for a restart, or for a quit that a restart was asked for during, so that confirming it
+  // starts Blind again.
+  let restartOnQuit = false
+  // Set once saving for a quit has begun, so that ways of quitting that meet, e.g. SIGTERM while the dialog is up, save
+  // and quit once.
+  let saving = false
   // Each window waiting to report its scrollback, by its page.
   const scrollbackFlushes = new Map<WebContents, () => void>()
 
@@ -249,30 +255,45 @@ app.whenReady().then(() => {
     return parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
   }
 
-  // Tells how many Sessions quitting deletes, if any.
-  async function confirmQuit (sessionsToDelete?: number) {
-    if (quitInProgress) return
+  // Saves and quits, taking the terminals' latest scrollback first unless told not to wait for it.
+  async function saveAndQuit ({ waitForScrollback }: { waitForScrollback: boolean }) {
+    if (savedForQuit || saving) return
+    saving = true
+    if (waitForScrollback) await flushScrollback()
+    core.quitConfirmed()
+  }
+
+  // Tells how many Sessions quitting deletes, if any. A restart starts Blind again once it has quit, from the copy now in
+  // its place, e.g. one just installed; cancelled, nothing of it is left to happen later.
+  async function confirmQuit ({ restart, sessionsToDelete }: Extract<Effect, { type: 'confirmQuit' }>) {
+    if (quitInProgress) {
+      restartOnQuit ||= restart === true
+      return
+    }
     quitInProgress = true
+    restartOnQuit = restart === true
     const deletionNote =
       sessionsToDelete === undefined
         ? ''
         : sessionsToDelete === 1
           ? ' 1 Session without a name or Root directory is deleted.'
           : ` ${sessionsToDelete} Sessions without a name or Root directory are deleted.`
+    const comingBack = restart ? 'as Blind starts again' : 'the next time Blind starts'
     const { response } = await ask({
       type: 'question',
-      message: 'Quit Blind?',
-      detail: `Every Shell stops. Sessions come back with fresh Shells the next time Blind starts.${deletionNote}`,
-      buttons: ['Quit', 'Cancel'],
+      message: restart ? 'Restart Blind?' : 'Quit Blind?',
+      detail: `Every Shell stops. Sessions come back with fresh Shells ${comingBack}.${deletionNote}`,
+      buttons: [restart ? 'Restart' : 'Quit', 'Cancel'],
       defaultId: 0,
       cancelId: 1,
     })
     if (response !== 0) {
       quitInProgress = false
+      restartOnQuit = false
       return
     }
-    await flushScrollback()
-    core.quitConfirmed()
+    if (restartOnQuit) app.relaunch()
+    await saveAndQuit({ waitForScrollback: true })
   }
 
   // Like the quit confirmation, Return accepts and Escape cancels.
@@ -337,11 +358,18 @@ app.whenReady().then(() => {
     event.preventDefault()
     core.quitRequested()
   })
-  // A restart or shutdown isn't the user quitting, so it saves and quits without asking. It skips waiting for the
+  // An OS restart or shutdown isn't the user quitting, so it saves and quits without asking. It skips waiting for the
   // terminals, whose scrollback is at most a moment old, so that the system's own quit request finds the app quitting
-  // rather than cancelling the restart.
-  powerMonitor.on('shutdown', () => {
-    if (!savedForQuit) core.quitConfirmed()
+  // rather than cancelling the OS restart.
+  powerMonitor.on('shutdown', () => saveAndQuit({ waitForScrollback: false }))
+  // Being told to stop, e.g. by `blind install --force` or `kill`, saves and quits without asking, as an OS restart or
+  // shutdown does, though with time to take the terminals' latest scrollback first.
+  process.on('SIGTERM', () => saveAndQuit({ waitForScrollback: true }))
+  // `blind install` asks for a restart into the copy it has just installed. Only the installed app takes `blind:` URLs,
+  // and any app or web page can open one, so a restart this way is always confirmed.
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    if (url === 'blind://restart') core.restartRequested()
   })
   // Closing the last Open Session's window leaves the app running, so the Hotkey can open a new Session.
   app.on('window-all-closed', () => {})
