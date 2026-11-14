@@ -51,7 +51,6 @@ let focusedPaneId: PaneId | undefined
 // Both replaced by the main process's before any terminal opens.
 let windowSettings: WindowSettings = {
   scrollbackLines: defaultSettings.scrollbackLines,
-  sessionLabelPosition: defaultSettings.sessionLabelPosition,
   panePadding: defaultSettings.panePadding,
   paneScrollBar: defaultSettings.paneScrollBar,
   backgroundTransparency: defaultSettings.backgroundTransparency,
@@ -397,14 +396,12 @@ function reportScrollback (paneId: PaneId, pane: PaneTerminal) {
   blind.reportScrollback(paneId, scrollback)
 }
 
-// Open terminals keep their scrollback up to the new number of lines from now on. The Session's label moves at once,
-// leaving the Tab bar's height, and so the Panes' space, as it was. The background takes the new transparency at once.
-// Padding the Panes, or not, hiding their scroll bars, or not, and having scrollback, or not, change the space their
-// terminals have, which the stylesheet works out.
+// Open terminals keep their scrollback up to the new number of lines from now on. The background takes the new
+// transparency at once. Padding the Panes, or not, hiding their scroll bars, or not, and having scrollback, or not,
+// change the space their terminals have, which the stylesheet works out.
 function applyWindowSettings (settings: WindowSettings) {
   windowSettings = settings
   for (const pane of terminals.values()) pane.terminal.options.scrollback = settings.scrollbackLines
-  tabBar.classList.toggle('label-above', settings.sessionLabelPosition === 'aboveTabs')
   applyChromeColours(theme)
   document.body.classList.toggle('padded-panes', settings.panePadding === 'padded')
   document.body.classList.toggle('scroll-bar-hidden', settings.paneScrollBar === 'none')

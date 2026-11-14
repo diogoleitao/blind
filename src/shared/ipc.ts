@@ -1,5 +1,5 @@
 import type { ProgramStatusReport } from '../core/attention'
-import type { MenuBarIcon, PanePadding, PaneScrollBar, SessionLabelPosition } from '../core/config'
+import type { MenuBarIcon, PanePadding, PaneScrollBar } from '../core/config'
 import type { Effect, PaletteResult } from '../core/core'
 import type { PaneRect } from '../core/layout'
 import type { PaneId, TabId } from '../core/state'
@@ -19,11 +19,10 @@ export interface SessionView {
   focusedTabId?: TabId;
 }
 
-// The settings a window follows: its terminals' scrollback, where its Tab bar shows the Session's label, whether its
-// Panes are padded and show a scroll bar, and how transparent its background is.
+// The settings a window follows: its terminals' scrollback, whether its Panes are padded and show a scroll bar, and how
+// transparent its background is.
 export interface WindowSettings {
   scrollbackLines: number;
-  sessionLabelPosition: SessionLabelPosition;
   panePadding: PanePadding;
   paneScrollBar: PaneScrollBar;
   backgroundTransparency: number;

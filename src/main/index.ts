@@ -404,10 +404,9 @@ app.whenReady().then(() => {
 
   function sendWindowSettings (window: BrowserWindow) {
     if (window.isDestroyed()) return
-    const { scrollbackLines, sessionLabelPosition, panePadding, paneScrollBar, backgroundTransparency } = core.settings()
+    const { scrollbackLines, panePadding, paneScrollBar, backgroundTransparency } = core.settings()
     const settings: WindowSettings = {
       scrollbackLines,
-      sessionLabelPosition,
       panePadding,
       paneScrollBar,
       backgroundTransparency,

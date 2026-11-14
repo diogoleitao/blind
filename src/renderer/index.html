@@ -122,16 +122,13 @@
         opacity: 0;
         transition: opacity 250ms linear;
       }
-      /* The Session's label on a row of its own, below the Tabs or, reversed, above them. */
+      /* The Session's label on a row of its own, below the Tabs. */
       #tab-bar {
         display: flex;
         flex-direction: column;
         border-top: 1px solid var(--divider);
         font: 12px system-ui, sans-serif;
         color: var(--tab-text);
-      }
-      #tab-bar.label-above {
-        flex-direction: column-reverse;
       }
       #tab-bar[hidden] {
         display: none;
@@ -153,10 +150,6 @@
       #session-label {
         padding: 3px 6px;
         border-top: 1px solid var(--divider);
-      }
-      .label-above #session-label {
-        border-top: none;
-        border-bottom: 1px solid var(--divider);
       }
       /* Every pill has a border, clear where unused, so all of them keep the same height. */
       .pill {

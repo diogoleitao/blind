@@ -53,11 +53,6 @@ const startDirectories = ['root', 'current', 'home'] as const
 // the current Pane's working directory; or the home directory.
 export type StartDirectory = (typeof startDirectories)[number]
 
-const sessionLabelPositions = ['belowTabs', 'aboveTabs'] as const
-
-// Where the Tab bar shows the Session's label: on a row below the Tabs, or above them.
-export type SessionLabelPosition = (typeof sessionLabelPositions)[number]
-
 export const menuBarIcons = ['monochrome', 'colour'] as const
 
 // The menu bar icon's look: one colour that follows the menu bar's, light or dark, or the icon's own colours.
@@ -102,7 +97,6 @@ export interface Settings {
   sessionsWithoutNameOrRootOnClose: SessionsWithoutNameOrRootOnClose;
   newTabDirectory: StartDirectory;
   splitPaneDirectory: StartDirectory;
-  sessionLabelPosition: SessionLabelPosition;
   panePadding: PanePadding;
   paneScrollBar: PaneScrollBar;
   // Whether cycling Open Sessions shows the Session Banner.
@@ -131,7 +125,6 @@ export const defaultSettings: Settings = {
   sessionsWithoutNameOrRootOnClose: 'keep',
   newTabDirectory: 'root',
   splitPaneDirectory: 'current',
-  sessionLabelPosition: 'belowTabs',
   panePadding: 'padded',
   paneScrollBar: 'none',
   sessionBanner: true,
@@ -181,7 +174,6 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
   sessionsWithoutNameOrRootOnClose: oneOf(sessionsWithoutNameOrRootOnCloseBehaviours),
   newTabDirectory: oneOf(startDirectories),
   splitPaneDirectory: oneOf(startDirectories),
-  sessionLabelPosition: oneOf(sessionLabelPositions),
   panePadding: oneOf(panePaddings),
   paneScrollBar: oneOf(paneScrollBars),
   sessionBanner: (value) => (typeof value === 'boolean' ? value : invalid),
@@ -294,11 +286,6 @@ export const configSchema = {
         "Where the new Pane of a split starts: root is the Session's Root directory, or the split Pane's working directory without one; current is the split Pane's working directory; home is the home directory.",
       enum: startDirectories,
       default: defaultSettings.splitPaneDirectory,
-    },
-    sessionLabelPosition: {
-      description: "Where the Tab bar shows the Session's label: on a row below the Tabs, or above them.",
-      enum: sessionLabelPositions,
-      default: defaultSettings.sessionLabelPosition,
     },
     panePadding: {
       description:

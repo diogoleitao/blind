@@ -273,6 +273,13 @@ describe("the Tab bar's Session label", () => {
 
     expect(core.shortSessionLabel('missing')).toBeUndefined()
   })
+
+  it('rejects an unknown setting, with no setting left to move it above the Tabs', () => {
+    const { core, effects } = startCore(undefined, '{ "sessionLabelPosition": "aboveTabs" }')
+
+    expect(core.settings()).not.toHaveProperty('sessionLabelPosition')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['sessionLabelPosition'] }])
+  })
 })
 
 describe('cycling the Current Session', () => {
@@ -2589,30 +2596,6 @@ describe('the new Tab directory setting', () => {
     core.newTab(sessionId)
 
     expect(shellHost.started.at(-1)?.workingDirectory).toBe('/Users/me')
-  })
-})
-
-describe('the Session label position setting', () => {
-  it("puts the Session's label below the Tabs by default", () => {
-    const { core } = startCore()
-
-    expect(core.settings().sessionLabelPosition).toBe('belowTabs')
-  })
-
-  it('set to aboveTabs, puts it above them, going back below once the config file is gone', () => {
-    const { core } = startCore(undefined, '{ "sessionLabelPosition": "aboveTabs" }')
-    expect(core.settings().sessionLabelPosition).toBe('aboveTabs')
-
-    core.configChanged(undefined)
-
-    expect(core.settings().sessionLabelPosition).toBe('belowTabs')
-  })
-
-  it('rejects anything else, keeping belowTabs, telling the user', () => {
-    const { core, effects } = startCore(undefined, '{ "sessionLabelPosition": "left" }')
-
-    expect(core.settings().sessionLabelPosition).toBe('belowTabs')
-    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['sessionLabelPosition'] }])
   })
 })
 
