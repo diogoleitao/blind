@@ -80,9 +80,22 @@ app.whenReady().then(() => {
     return paletteWindow ? [...windows.values(), paletteWindow] : [...windows.values()]
   }
 
+  // Blind shows only on the primary display, filling its work area, which can change after a window was made: another
+  // display becomes primary, or the resolution or the Dock changes.
+  function fitToPrimaryDisplay (window: BrowserWindow) {
+    if (!window.isDestroyed()) window.setBounds(screen.getPrimaryDisplay().workArea)
+  }
+
+  // Every window is fitted again when displays change, hidden ones too, so a Session's Panes already have their new size
+  // when cycling swaps it in. A display unplugged while Blind is shown leaves the remaining primary display to fill.
+  function fitAllWindows () {
+    allWindows().forEach(fitToPrimaryDisplay)
+  }
+
   // Blind becomes the active app while shown, like iTerm2's hotkey window, so switching to any other app is a focus loss.
   function showWindow (window: BrowserWindow) {
     app.show()
+    fitToPrimaryDisplay(window)
     if (!window.isVisible()) {
       window.setOpacity(0)
       window.show()
@@ -103,6 +116,7 @@ app.whenReady().then(() => {
   // Shows the Session's window at once and hides the one it replaces, or the Command Palette on its own, with no fade.
   function swapToWindow (sessionId: SessionId) {
     const window = windowFor(sessionId)
+    fitToPrimaryDisplay(window)
     window.setOpacity(1)
     window.show()
     window.focus()
@@ -353,6 +367,9 @@ app.whenReady().then(() => {
   // Closing the last Open Session's window leaves the app running, so the Hotkey can open a new Session.
   app.on('window-all-closed', () => {})
   app.on('did-resign-active', () => core.focusLost())
+  screen.on('display-added', fitAllWindows)
+  screen.on('display-removed', fitAllWindows)
+  screen.on('display-metrics-changed', fitAllWindows)
 
   function sessionView (sessionId: SessionId): SessionView | undefined {
     const session = core.state().sessions.find((candidate) => candidate.id === sessionId)
@@ -442,7 +459,6 @@ app.whenReady().then(() => {
   // It shows without macOS's zoom animation, so cycling swaps windows in a single frame; the Hotkey fades it instead.
   function createPanel (options: Electron.BrowserWindowConstructorOptions = {}) {
     const window = new BrowserWindow({
-      ...screen.getPrimaryDisplay().workArea,
       type: 'panel',
       show: false,
       frame: false,
@@ -460,6 +476,7 @@ app.whenReady().then(() => {
     })
     window.setAlwaysOnTop(true, 'screen-saver')
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+    fitToPrimaryDisplay(window)
     windowEffects.turnOffShowAnimation(window)
     window.webContents.on('did-finish-load', () => {
       sendWindowSettings(window)
