@@ -23,14 +23,18 @@
       body.standalone {
         background: transparent;
       }
+      /* The corners macOS rounds the window to, which match a Finder window's. */
+      :root {
+        --window-corner-radius: 16px;
+      }
       /* The Bezel: a thin border around a Session's window, drawn over its edge so it takes no room from the Panes. Its
-         corners follow the ones macOS rounds the window to, which match a Finder window's. */
+         corners follow the window's. */
       body:not(.standalone)::after {
         content: '';
         position: fixed;
         inset: 0;
         z-index: 2;
-        border-radius: 16px;
+        border-radius: var(--window-corner-radius);
         box-shadow: inset 0 0 0 1px var(--strong-divider);
         pointer-events: none;
       }
@@ -183,6 +187,13 @@
         border-color: var(--accent);
         color: var(--accent);
       }
+      /* Each result sits `--result-inset` in from the Command Palette's sides, with its text `--result-padding-x` in
+         from its own. */
+      :root {
+        --result-inset: 10px;
+        --result-padding-x: 14px;
+      }
+      /* Its corners match the window's. */
       #palette {
         position: fixed;
         top: 15%;
@@ -190,8 +201,9 @@
         transform: translateX(-50%);
         width: min(640px, 90vw);
         z-index: 1;
+        padding: 7px;
         border: 1px solid var(--palette-border);
-        border-radius: 8px;
+        border-radius: var(--window-corner-radius);
         background: var(--palette-background);
         box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
         font: 13px system-ui, sans-serif;
@@ -201,22 +213,25 @@
       #palette[hidden] {
         display: none;
       }
+      /* The text starts where the results' text does. The line under it, in the colour of the Pane dividers, is as wide
+         as the results. */
       #palette-input {
         box-sizing: border-box;
         width: 100%;
-        padding: 12px 14px;
+        padding: 13px calc(var(--result-inset) + var(--result-padding-x)) 14px;
         border: none;
-        border-bottom: 1px solid var(--palette-border);
         outline: none;
-        background: transparent;
+        background: linear-gradient(var(--strong-divider), var(--strong-divider)) center bottom /
+          calc(100% - 2 * var(--result-inset)) 1px no-repeat;
         font: inherit;
         font-size: 15px;
         color: inherit;
       }
+      /* The last result ends as far above the dialog's bottom edge as the search text starts below its top edge. */
       #palette-results {
         max-height: 50vh;
         margin: 0;
-        padding: 4px 0;
+        padding: 7px 0 13px;
         list-style: none;
         overflow-y: auto;
       }
@@ -227,11 +242,13 @@
         display: flex;
         gap: 10px;
         align-items: baseline;
-        padding: 6px 14px;
+        margin: 0 var(--result-inset);
+        padding: 7px var(--result-padding-x);
         white-space: nowrap;
         cursor: default;
       }
       .result.selected {
+        border-radius: 14px;
         background: var(--palette-selection);
       }
       /* Where the user already is, which can be selected but not chosen. */
@@ -271,7 +288,7 @@
         font-size: 11px;
         color: var(--palette-muted-text);
       }
-      /* The find bar takes the Command Palette's colours. */
+      /* The find bar takes the Command Palette's colours, and the Pane dividers' for the line before its count. */
       #find {
         position: fixed;
         top: 8px;
@@ -281,9 +298,10 @@
         align-items: baseline;
         gap: 8px;
         width: min(320px, 60vw);
-        padding: 6px 10px;
+        box-sizing: border-box;
+        padding: 7px 12px;
         border: 1px solid var(--palette-border);
-        border-radius: 6px;
+        border-radius: 14px;
         background: var(--palette-background);
         box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
         font: 13px system-ui, sans-serif;
@@ -300,6 +318,15 @@
         background: transparent;
         font: inherit;
         color: inherit;
+      }
+      /* Shown while there is a count. */
+      #find-separator {
+        align-self: stretch;
+        width: 1px;
+        background: var(--strong-divider);
+      }
+      #find:has(#find-count:empty) #find-separator {
+        display: none;
       }
       #find-count {
         font-size: 11px;
@@ -326,6 +353,7 @@
         autocomplete="off"
         placeholder="Find: Enter for next, Shift+Enter for previous"
       />
+      <span id="find-separator"></span>
       <span id="find-count"></span>
     </div>
     <script type="module" src="./main.ts"></script>
