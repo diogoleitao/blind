@@ -32,12 +32,13 @@ interface RunningShell {
   outputSinceInspection: boolean;
 }
 
-// Electron's and npm's own variables don't belong in the user's Shell.
+// Electron's and npm's own variables don't belong in the user's Shell. `TERM_PROGRAM` names blind, replacing the value of
+// any terminal blind itself was started from.
 function shellEnvironment () {
   const inherited = Object.entries(process.env).filter(
     ([name]) => !name.startsWith('ELECTRON_') && !name.startsWith('npm_')
   )
-  return { ...Object.fromEntries(inherited), TERM: 'xterm-256color', COLORTERM: 'truecolor' }
+  return { ...Object.fromEntries(inherited), TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'blind' }
 }
 
 // Read from the process, so no shell configuration is needed.
