@@ -1677,6 +1677,18 @@ describe('the scrollback lines setting', () => {
   })
 })
 
+describe('the Pane padding setting', () => {
+  it('pads Panes by default, and can leave them unpadded', () => {
+    const { core, effects } = startCore(undefined, '{ "panePadding": "wide" }')
+    expect(core.settings().panePadding).toBe('padded')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['panePadding'] }])
+
+    core.configChanged('{ "panePadding": "none" }')
+
+    expect(core.settings().panePadding).toBe('none')
+  })
+})
+
 describe('the background settings', () => {
   it('shows the background 25% transparent by default, and as transparent as configured', () => {
     const { core } = startCore()

@@ -51,6 +51,7 @@ let focusedPaneId: PaneId | undefined
 let windowSettings: WindowSettings = {
   scrollbackLines: defaultSettings.scrollbackLines,
   sessionLabelPosition: defaultSettings.sessionLabelPosition,
+  panePadding: defaultSettings.panePadding,
   backgroundTransparency: defaultSettings.backgroundTransparency,
 }
 let theme: Theme = defaultTheme
@@ -81,11 +82,13 @@ function terminalOptions ({ font, cursor, terminal }: Theme): ITerminalOptions {
 }
 
 // The page's colours, as the CSS variables the stylesheet uses, e.g. `--palette-muted-text`. The terminal's background
-// is the window's, as transparent as the backgroundTransparency setting says.
+// is the window's, as transparent as the backgroundTransparency setting says. The Pane dividers and the Bezel take the
+// Theme's divider colour pulled a quarter of the way towards its text colour.
 function applyChromeColours ({ terminal, chrome }: Theme) {
   const root = document.documentElement.style
   const opacity = 1 - windowSettings.backgroundTransparency / 100
   root.setProperty('--window-background', withOpacity(terminal.background, opacity))
+  root.setProperty('--strong-divider', `color-mix(in srgb, ${terminal.foreground} 25%, ${chrome.divider})`)
   for (const [name, colour] of Object.entries(chrome)) {
     root.setProperty(`--${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`, colour)
   }
@@ -365,11 +368,14 @@ function reportScrollback (paneId: PaneId, pane: PaneTerminal) {
 
 // Open terminals keep their scrollback up to the new number of lines from now on. The Session's label moves at once,
 // leaving the Tab bar's height, and so the Panes' space, as it was. The background takes the new transparency at once.
+// Padding the Panes, or not, changes the space their terminals have.
 function applyWindowSettings (settings: WindowSettings) {
   windowSettings = settings
   for (const pane of terminals.values()) pane.terminal.options.scrollback = settings.scrollbackLines
   tabBar.classList.toggle('label-above', settings.sessionLabelPosition === 'aboveTabs')
   applyChromeColours(theme)
+  document.body.classList.toggle('padded-panes', settings.panePadding === 'padded')
+  for (const pane of terminals.values()) pane.fit.fit()
 }
 
 function writeToTerminal (paneId: PaneId, data: string) {

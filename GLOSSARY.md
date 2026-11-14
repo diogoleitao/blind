@@ -75,5 +75,9 @@ _Avoid_: Cmd+K menu, launcher, quick open
 ### Appearance
 
 **Theme**:
-A named set of colours covering both the terminal and the app's own chrome (Tab bar, Command Palette, Session Banner, Pane dividers).
+A named set of colours covering both the terminal and the app's own chrome (Tab bar, Command Palette, Session Banner, Pane dividers, Bezel).
 _Avoid_: Colour scheme, profile
+
+**Bezel**:
+The thin border around a Session's window.
+_Avoid_: Frame, outline, window border

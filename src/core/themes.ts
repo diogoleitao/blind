@@ -35,9 +35,11 @@ export interface TerminalColours {
   brightWhite: Colour;
 }
 
-// The colours of the app's own chrome: the Tab bar, the Command Palette, the Session Banner and the Pane dividers.
+// The colours of the app's own chrome: the Tab bar, the Command Palette, the Session Banner, the Pane dividers and the
+// Bezel.
 export interface ChromeColours {
-  // Between Panes, above the Tab bar, between its rows, and around the Tabs that aren't focused.
+  // Above the Tab bar, between its rows, and around the Tabs that aren't focused. The dividers between Panes and the
+  // Bezel take a stronger mix of it, which the page makes.
   divider: Colour;
   tabText: Colour;
   // The outline and text of the Session's label, and the fill of the focused Tab.
@@ -382,7 +384,7 @@ export const themeSchema = {
       defaultTheme.terminal
     ),
     chrome: colourGroupSchema(
-      'The colours of the Tab bar, the Command Palette, the Session Banner and the Pane dividers.',
+      'The colours of the Tab bar, the Command Palette, the Session Banner, the Pane dividers and the Bezel around the window. The Pane dividers and the Bezel take divider pulled a quarter of the way towards the terminal foreground.',
       defaultTheme.chrome
     ),
   },

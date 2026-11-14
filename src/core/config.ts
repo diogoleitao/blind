@@ -68,6 +68,11 @@ export const menuBarIcons = ['monochrome', 'colour'] as const
 // The menu bar icon's look: one colour that follows the menu bar's, light or dark, or the icon's own colours.
 export type MenuBarIcon = (typeof menuBarIcons)[number]
 
+const panePaddings = ['padded', 'none'] as const
+
+// Whether each Pane keeps its terminal's text off its edges and dividers, by a fixed amount, or lets it run up to them.
+export type PanePadding = (typeof panePaddings)[number]
+
 const backgroundEffects = ['blur', 'none'] as const
 
 // What a Session window's background shows behind it: a blur of what's there, or what's there as good as unblurred.
@@ -99,6 +104,7 @@ export interface Settings {
   newTabDirectory: StartDirectory;
   splitPaneDirectory: StartDirectory;
   sessionLabelPosition: SessionLabelPosition;
+  panePadding: PanePadding;
   // Whether cycling Open Sessions shows the Session Banner.
   sessionBanner: boolean;
   // Each action's shortcut; null for an unbound action.
@@ -127,6 +133,7 @@ export const defaultSettings: Settings = {
   newTabDirectory: 'root',
   splitPaneDirectory: 'current',
   sessionLabelPosition: 'belowTabs',
+  panePadding: 'padded',
   sessionBanner: true,
   keyBindings: Object.fromEntries(
     Object.entries(defaultKeyBindings).map(([action, shortcut]) => [action, shortcut && parseShortcut(shortcut)!])
@@ -176,6 +183,7 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
   newTabDirectory: oneOf(startDirectories),
   splitPaneDirectory: oneOf(startDirectories),
   sessionLabelPosition: oneOf(sessionLabelPositions),
+  panePadding: oneOf(panePaddings),
   sessionBanner: (value) => (typeof value === 'boolean' ? value : invalid),
   keyBindings: parseKeyBindings,
   // Theme names are unique ignoring case, so the setting matches one ignoring case and takes its spelling.
@@ -296,6 +304,12 @@ export const configSchema = {
       description: "Where the Tab bar shows the Session's label: on a row below the Tabs, or above them.",
       enum: sessionLabelPositions,
       default: defaultSettings.sessionLabelPosition,
+    },
+    panePadding: {
+      description:
+        'Whether each Pane keeps its text off its edges and the dividers next to it: padded leaves 7px at its sides and 5px at its top and bottom; none lets the text run up to them.',
+      enum: panePaddings,
+      default: defaultSettings.panePadding,
     },
     sessionBanner: {
       description: 'Whether cycling Open Sessions shows the Session Banner, naming the Session in the middle of its window.',
