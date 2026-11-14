@@ -61,13 +61,22 @@ export function createConfigFile (directory: string) {
         console.error(`Couldn't write the config file ${path}:`, error)
       }
     },
-    // Leaves an existing file alone.
+    // Leaves an existing file alone. Answers whether there's a file afterwards. The directory is made apart from the
+    // file, as making it also fails with EEXIST when a file stands in its place.
     createIfMissing () {
       try {
         mkdirSync(directory, { recursive: true })
-        writeFileSync(path, starterConfig, { flag: 'wx' })
       } catch (error) {
-        if (errorCode(error) !== 'EEXIST') console.error(`Couldn't create ${path}:`, error)
+        console.error(`Couldn't create ${directory}:`, error)
+        return false
+      }
+      try {
+        writeFileSync(path, starterConfig, { flag: 'wx' })
+        return true
+      } catch (error) {
+        if (errorCode(error) === 'EEXIST') return true
+        console.error(`Couldn't create ${path}:`, error)
+        return false
       }
     },
     // Watches the directory rather than the file, since editors often save by replacing the file.
