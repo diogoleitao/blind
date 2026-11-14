@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { createFakeDependencies, fakeConfigPath } from './fakes'
 import { runCli } from './run'
 
 const repoRoot = '/repos/blind'
-const configPath = '/home/.config/blind/config.jsonc'
 
 // Runs the CLI against fakes: what it does is recorded in order, each command it runs exits with `exitCode`, and the
 // config file exists afterwards unless `configCreatable` is false.
@@ -12,11 +12,11 @@ async function cli (
 ) {
   const events: unknown[] = []
   let stderr = ''
+  const deps = createFakeDependencies({ repoRoot, editor })
   const code = await runCli(argv, {
-    repoRoot,
-    editor,
+    ...deps,
     configFile: {
-      path: configPath,
+      ...deps.configFile,
       createIfMissing: () => {
         events.push('config file created if missing')
         return configCreatable
@@ -44,7 +44,7 @@ describe('blind settings open', () => {
     const { code, events } = await cli(['settings', 'open'], { exitCode: 4, editor: 'code --wait' })
     expect(events).toEqual([
       'config file created if missing',
-      { command: '/bin/sh', args: ['-c', 'code --wait "$@"', 'sh', configPath], cwd: undefined },
+      { command: '/bin/sh', args: ['-c', 'code --wait "$@"', 'sh', fakeConfigPath], cwd: undefined },
     ])
     expect(code).toBe(4)
   })
@@ -56,7 +56,7 @@ describe('blind settings open', () => {
     const { code, events } = await cli(['settings', 'open'], { editor, exitCode: 1 })
     expect(events).toEqual([
       'config file created if missing',
-      { command: 'open', args: [configPath], cwd: undefined },
+      { command: 'open', args: [fakeConfigPath], cwd: undefined },
     ])
     expect(code).toBe(1)
   })

@@ -51,14 +51,16 @@ export function createConfigFile (directory: string) {
         console.error(`Couldn't write the config schema to ${directory}:`, error)
       }
     },
-    // Taken as read, since the core already holds the settings it wrote.
+    // Taken as read, since the core already holds the settings it wrote. Answers whether it was written.
     write (text: string) {
       try {
         mkdirSync(directory, { recursive: true })
         writeFileSync(path, text)
         lastRead = { readable: true, text }
+        return true
       } catch (error) {
         console.error(`Couldn't write the config file ${path}:`, error)
+        return false
       }
     },
     // Leaves an existing file alone. Answers whether there's a file afterwards. The directory is made apart from the

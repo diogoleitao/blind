@@ -3,18 +3,26 @@ import { spawn } from 'node:child_process'
 import { constants, homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadThemes } from '../core/themes'
 import { createConfigFile } from '../main/config-file'
+import { createThemeFiles } from '../main/theme-files'
 import { runCli } from './run'
+import { createTerminal } from './terminal'
 
 // out/cli/main.js -> the repo root. Node resolves `npm link`'s symlinks before running this, so it's the repo itself.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
+// Always the installed app's, never the dev app's.
+const configDirectory = join(homedir(), '.config', 'blind')
+
 process.exitCode = await runCli(process.argv.slice(2), {
   repoRoot,
   editor: process.env.EDITOR,
-  // Always the installed app's, never the dev app's.
-  configFile: createConfigFile(join(homedir(), '.config', 'blind')),
+  configFile: createConfigFile(configDirectory),
+  themeNames: () => loadThemes(createThemeFiles(join(configDirectory, 'themes')).read()).themes.map((theme) => theme.name),
+  terminal: createTerminal(),
   run,
+  stdout: (text) => { process.stdout.write(text) },
   stderr: (text) => { process.stderr.write(text) },
 })
 
