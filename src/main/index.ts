@@ -301,7 +301,7 @@ app.whenReady().then(() => {
   // rather than none at all, so that `blur` can come back. Only a visible window: macOS makes a window's backing only
   // once it is first shown, and a window's blur is set again each time it shows.
   function applyBackgroundEffect (window: BrowserWindow) {
-    if (!windowEffects.available || window.isDestroyed() || !window.isVisible()) return
+    if (window.isDestroyed() || !window.isVisible()) return
     const { backgroundEffect, backgroundBlurRadius } = core.settings()
     windowEffects.setBlurRadius(window, backgroundEffect === 'blur' ? backgroundBlurRadius : minimumBlurRadius)
   }
@@ -309,7 +309,8 @@ app.whenReady().then(() => {
   // Says that windows can't blur, while blur is wanted: once per launch, and not again until Blind or macOS changes
   // version once "Don't show again" is ticked. Report on GitHub opens a new issue, filled in.
   async function warnIfBlurUnavailable () {
-    if (windowEffects.available) return
+    const failure = windowEffects.blurFailure
+    if (!failure) return
     const versions = { app: app.getVersion(), os: process.getSystemVersion() }
     const check = {
       backgroundEffect: core.settings().backgroundEffect,
@@ -330,7 +331,7 @@ app.whenReady().then(() => {
       checkboxLabel: "Don't show again",
     })
     if (checkboxChecked) blurWarningFile.dismiss(versions)
-    if (response === 0) shell.openExternal(blurIssueUrl(versions, windowEffects.failure, homedir()))
+    if (response === 0) shell.openExternal(blurIssueUrl(versions, failure, homedir()))
   }
 
   if (!globalShortcut.register(hotkey, () => core.hotkeyPressed())) {
@@ -432,6 +433,7 @@ app.whenReady().then(() => {
   })
 
   // A transparent panel filling the visible area, floating above other apps, fullscreen ones included, on every Space.
+  // It shows without macOS's zoom animation, so cycling swaps windows in a single frame; the Hotkey fades it instead.
   function createPanel (options: Electron.BrowserWindowConstructorOptions = {}) {
     const window = new BrowserWindow({
       ...screen.getPrimaryDisplay().workArea,
@@ -452,6 +454,7 @@ app.whenReady().then(() => {
     })
     window.setAlwaysOnTop(true, 'screen-saver')
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+    windowEffects.turnOffShowAnimation(window)
     window.webContents.on('did-finish-load', () => {
       sendWindowSettings(window)
       sendTheme(window)
