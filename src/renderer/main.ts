@@ -503,18 +503,28 @@ function resultDetail (result: PaletteResult) {
   return ''
 }
 
+// How deep the result sits in the nested view; undefined outside it.
+function levelOf (result: PaletteResult | undefined) {
+  return result && 'level' in result ? result.level : undefined
+}
+
 function renderPalette () {
   paletteList.replaceChildren(
     ...paletteResults.map((result, index) => {
+      const level = levelOf(result)
       const element = document.createElement('li')
       element.className = 'result'
       element.classList.toggle('selected', index === selectedResult)
       element.classList.toggle('current', isCurrent(result))
+      element.classList.toggle('top-level', level === 0)
+      element.classList.toggle('parent', level === 0 && Boolean(levelOf(paletteResults[index + 1])))
+      if (level) element.classList.add(`level-${level}`)
+      // A nested Tab or Pane shows its title alone under its Session or Tab.
       const label = document.createElement('span')
-      label.textContent = result.label
+      label.textContent = level ? `↳ ${result.label}` : result.label
       const detail = document.createElement('span')
       detail.className = 'detail'
-      detail.textContent = resultDetail(result)
+      detail.textContent = level ? '' : resultDetail(result)
       const kind = document.createElement('span')
       kind.className = 'kind'
       kind.textContent = resultKind(result)

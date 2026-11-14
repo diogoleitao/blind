@@ -24,6 +24,12 @@ const paneSearchScopes = ['all', 'currentSession', 'currentTab'] as const
 // Tab's alone.
 export type PaneSearchScope = (typeof paneSearchScopes)[number]
 
+const paletteNestings = ['flat', 'nested'] as const
+
+// How the Command Palette lists Tabs and Panes with nothing typed: every Tab and then every Pane after the Sessions, or
+// each Open Session's Tabs under it and each Tab's Panes under the Tab.
+export type PaletteNesting = (typeof paletteNestings)[number]
+
 const hotkeyBehaviours = ['new', 'palette'] as const
 
 // What the Hotkey shows with no Open Sessions: a new Session, or the Command Palette on its own.
@@ -75,6 +81,7 @@ export interface Settings {
   sessionSearchOrder: SessionSearchOrder;
   tabSearchScope: TabSearchScope;
   paneSearchScope: PaneSearchScope;
+  paletteNesting: PaletteNesting;
   hotkeyWithNoOpenSessions: HotkeyWithNoOpenSessions;
   loginLaunch: LoginLaunch;
   hiddenStartWithNoOpenSessions: HiddenStartWithNoOpenSessions;
@@ -97,6 +104,7 @@ export const defaultSettings: Settings = {
   sessionSearchOrder: 'openFirst',
   tabSearchScope: 'all',
   paneSearchScope: 'all',
+  paletteNesting: 'flat',
   hotkeyWithNoOpenSessions: 'new',
   loginLaunch: 'hidden',
   hiddenStartWithNoOpenSessions: 'hotkey',
@@ -137,6 +145,7 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers => ({
   sessionSearchOrder: oneOf(sessionSearchOrders),
   tabSearchScope: oneOf(tabSearchScopes),
   paneSearchScope: oneOf(paneSearchScopes),
+  paletteNesting: oneOf(paletteNestings),
   hotkeyWithNoOpenSessions: oneOf(hotkeyBehaviours),
   loginLaunch: oneOf(loginLaunches),
   hiddenStartWithNoOpenSessions: oneOf(hiddenStartBehaviours),
@@ -216,6 +225,12 @@ export const configSchema = {
         "Whose Panes the Command Palette lists when the query starts with pp: all lists every Open Session's, currentSession the Current Session's alone, currentTab the Current Tab's alone. A query without a prefix lists every Open Session's either way.",
       enum: paneSearchScopes,
       default: defaultSettings.paneSearchScope,
+    },
+    paletteNesting: {
+      description:
+        "How the Command Palette lists Tabs and Panes when nothing is typed: flat lists every Tab, then every Pane, after the Sessions; nested lists each Open Session's Tabs under it and each Tab's Panes under the Tab, leaving out a Session's only Tab and a Tab's only Pane. Searching, and the ss, tt and pp prefixes, list them flat either way.",
+      enum: paletteNestings,
+      default: defaultSettings.paletteNesting,
     },
     hotkeyWithNoOpenSessions: {
       description: 'What the Hotkey shows when there are no Open Sessions: a new Session, or the Command Palette on its own.',

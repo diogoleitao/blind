@@ -123,13 +123,25 @@ const paletteActionLabels = {
 
 export type PaletteAction = keyof typeof paletteActionLabels
 
+// How deep a result sits in the Command Palette's nested view: 0 at the top, 1 under a Session, 2 under a Tab.
+export type PaletteLevel = 0 | 1 | 2
+
 // One entry the Command Palette offers. `current` marks the Current Session, Current Tab or Current Pane, where the
-// user already is, which the Command Palette lists and lets the user select but not choose.
+// user already is, which the Command Palette lists and lets the user select but not choose. `level` is set in the
+// nested view alone.
 export type PaletteResult =
-  | { type: 'session'; sessionId: SessionId; label: string; closed: boolean; current: boolean }
-  | { type: 'tab'; tabId: TabId; label: string; sessionLabel: string; current: boolean }
-  | { type: 'pane'; paneId: PaneId; label: string; workingDirectory: string; sessionLabel: string; current: boolean }
-  | { type: 'action'; action: PaletteAction; label: string }
+  | { type: 'session'; sessionId: SessionId; label: string; closed: boolean; current: boolean; level?: PaletteLevel }
+  | { type: 'tab'; tabId: TabId; label: string; sessionLabel: string; current: boolean; level?: PaletteLevel }
+  | {
+    type: 'pane';
+    paneId: PaneId;
+    label: string;
+    workingDirectory: string;
+    sessionLabel: string;
+    current: boolean;
+    level?: PaletteLevel;
+  }
+  | { type: 'action'; action: PaletteAction; label: string; level?: PaletteLevel }
   // A Theme, labelled with its name.
   | { type: 'theme'; name: string; label: string }
   | { type: 'menuBarIcon'; icon: MenuBarIcon; label: string }
@@ -776,13 +788,17 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   }
 
   function sessionResults (): PaletteResult[] {
-    return sessionsInCycleOrder().map((session) => ({
+    return sessionsInCycleOrder().map(sessionResult)
+  }
+
+  function sessionResult (session: Session): PaletteResult {
+    return {
       type: 'session',
       sessionId: session.id,
       label: labelOf(session),
       closed: session.status === 'closed',
       current: session.id === state.currentSessionId,
-    }))
+    }
   }
 
   function openSessionsInCycleOrder () {
@@ -850,8 +866,34 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     'pp ': (search) => searchResults(paneResults(tabsInScope(settings.paneSearchScope)), search),
   }
 
+  // Every Session, each Open Session followed by its Tabs and each Tab by its Panes, then every app action, each at its
+  // level.
+  function nestedResults (): PaletteResult[] {
+    return [
+      ...sessionsInCycleOrder().flatMap((session) => [
+        ...atLevel([sessionResult(session)], 0),
+        ...(session.status === 'open' ? nestedUnder(session) : []),
+      ]),
+      ...atLevel(actionResults(), 0),
+    ]
+  }
+
+  // An Open Session's Tabs at level 1, each followed by its Panes at level 2. A Session's only Tab is left out, its Panes
+  // taking its place at level 1, and a Tab's only Pane is left out.
+  function nestedUnder (session: Session): PaletteResult[] {
+    const panesAt = (tab: Tab, level: PaletteLevel) =>
+      tab.panes.length > 1 ? atLevel(paneResults([{ session, tab }]), level) : []
+    if (session.tabs.length === 1) return panesAt(session.tabs[0], 1)
+    return session.tabs.flatMap((tab) => [...atLevel(tabResults([{ session, tab }]), 1), ...panesAt(tab, 2)])
+  }
+
+  function atLevel (results: PaletteResult[], level: PaletteLevel): PaletteResult[] {
+    return results.map((result) => ({ ...result, level }))
+  }
+
   // The results that match the query, in the order they're offered.
   function searchPalette (query: string) {
+    if (query === '' && settings.paletteNesting === 'nested') return nestedResults()
     const prefix = Object.keys(paletteScopes).find((candidate) => query.startsWith(candidate))
     if (prefix) return paletteScopes[prefix](query.slice(prefix.length))
     return searchResults([...sessionResults(), ...tabResults(), ...paneResults(), ...actionResults()], query)

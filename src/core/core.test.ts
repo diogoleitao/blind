@@ -3110,6 +3110,128 @@ describe('the Command Palette', () => {
     })
   })
 
+  describe('the palette nesting setting', () => {
+    it('lists the Tabs and Panes flat by default', () => {
+      const { core } = startCore()
+
+      expect(core.settings().paletteNesting).toBe('flat')
+    })
+
+    it('set to nested, nests them, going back to flat once the config file is gone', () => {
+      const { core } = startCore(undefined, '{ "paletteNesting": "nested" }')
+      expect(core.settings().paletteNesting).toBe('nested')
+
+      core.configChanged(undefined)
+
+      expect(core.settings().paletteNesting).toBe('flat')
+    })
+
+    it('rejects anything else, keeping flat, telling the user', () => {
+      const { core, effects } = startCore(undefined, '{ "paletteNesting": "tree" }')
+
+      expect(core.settings().paletteNesting).toBe('flat')
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['paletteNesting'] }])
+    })
+
+    it("set to nested, offers each Session with an Open Session's Tabs and their Panes under it, then every app action", () => {
+      const { core } = startWithPaletteSessions()
+      const actions = summarize(core.paletteResults(''))
+        .filter((result) => result.startsWith('action '))
+        .map((result) => `0 ${result}`)
+
+      core.configChanged('{ "paletteNesting": "nested" }')
+
+      expect(outline(core.paletteResults(''))).toEqual([
+        '0 session api',
+        '0 session old',
+        '0 session web',
+        '1 tab web',
+        '1 tab vim',
+        '2 pane src',
+        '2 pane vim',
+        '0 session Session 1 (~)',
+        ...actions,
+      ])
+    })
+
+    it('set to nested, follows a Tab with two Panes by its Panes, and a Tab with one Pane by none', () => {
+      const { core } = startCore(undefined, '{ "paletteNesting": "nested" }')
+      const sessionId = core.state().sessions[0].id
+      core.renameSession(sessionId, 'a')
+      core.splitPane(sessionId, 'vertical')
+      core.newTab(sessionId)
+      const [t1, t2] = core.state().sessions[0].tabs
+
+      const results = core.paletteResults('').slice(0, 6)
+
+      expect(outline(results)).toEqual(['0 session a', '1 tab me', '2 pane me', '2 pane me', '1 tab me', '0 action New Session'])
+      expect(results.slice(1, 5).map((result) => (result.type === 'tab' ? result.tabId : 'paneId' in result && result.paneId)))
+        .toEqual([t1.id, t1.panes[0].id, t1.panes[1].id, t2.id])
+    })
+
+    it("set to nested, leaves out a Session's only Tab, its Panes in its place under the Session", () => {
+      const { core, left, topRight, bottomRight } = startWithThreePanes()
+
+      core.configChanged('{ "paletteNesting": "nested" }')
+
+      const results = core.paletteResults('')
+      expect(outline(results.slice(0, 4))).toEqual([
+        '0 session Session 1 (~)',
+        '1 pane me',
+        '1 pane me',
+        '1 pane me',
+      ])
+      expect(results.slice(1, 4).map((result) => result.type === 'pane' && result.paneId)).toEqual([
+        left,
+        topRight,
+        bottomRight,
+      ])
+      expect(results[4].type).toBe('action')
+    })
+
+    it('set to nested, keeps searches and the `ss `, `tt ` and `pp ` prefixes flat', () => {
+      const { core } = startWithPaletteSessions()
+      const queries = ['w', 'ss ', 'tt ', 'pp ', 'pp src']
+      const flat = queries.map((query) => core.paletteResults(query))
+
+      core.configChanged('{ "paletteNesting": "nested" }')
+
+      expect(queries.map((query) => core.paletteResults(query))).toEqual(flat)
+      expect(outline(core.paletteResults('tt '))).toEqual(['- tab api', '- tab web', '- tab vim', '- tab me'])
+    })
+
+    it('set to nested, marks the Current Tab and Current Pane among the nested results', () => {
+      const { core } = startCore(undefined, '{ "paletteNesting": "nested" }')
+      const web = core.state().sessions[0].id
+      core.renameSession(web, 'web')
+      core.newTab(web)
+      core.splitPane(web, 'vertical')
+
+      const current = core.paletteResults('').filter((result) => 'current' in result && result.current)
+
+      expect(outline(current)).toEqual(['0 session web', '1 tab me', '2 pane me'])
+      expect(current[1]).toMatchObject({ tabId: core.state().sessions[0].tabs[1].id })
+      expect(current[2]).toMatchObject({ paneId: core.state().sessions[0].tabs[1].panes[1].id })
+    })
+
+    it('set to nested, choosing a nested Tab or Pane in another Session makes it current, as choosing it flat does', () => {
+      const { core, effects, web } = startWithPaletteSessions()
+      core.configChanged('{ "paletteNesting": "nested" }')
+      const nested = (type: string, label: string) =>
+        core.paletteResults('').find((result) => result.type === type && result.label === label && 'level' in result)!
+
+      core.choosePaletteResult(nested('tab', 'web'))
+      const session = core.state().sessions[0]
+      expect(core.state().currentSessionId).toBe(web)
+      expect(session.focusedTabId).toBe(session.tabs[0].id)
+      expect(effects).toEqual([{ type: 'showSession', sessionId: web }])
+
+      core.choosePaletteResult(nested('pane', 'src'))
+      expect(core.state().sessions[0].focusedTabId).toBe(session.tabs[1].id)
+      expect(core.state().sessions[0].tabs[1].focusedPaneId).toBe(session.tabs[1].panes[0].id)
+    })
+  })
+
   describe('the Tab search scope setting', () => {
     it('set to currentSession, narrows with `tt ` to the Tabs of the Current Session alone', () => {
       const { core } = startWithPaletteSessions()
@@ -3586,6 +3708,11 @@ function chooseTheme (core: ReturnType<typeof startCore>['core'], name: string) 
 // Each result as its type and label, e.g. `tab vim`.
 function summarize (results: PaletteResult[]) {
   return results.map((result) => `${result.type} ${result.label}`)
+}
+
+// Each result as its level in the nested view, its type and its label, e.g. `2 pane vim`; `-` for a result without one.
+function outline (results: PaletteResult[]) {
+  return results.map((result) => `${'level' in result ? result.level : '-'} ${result.type} ${result.label}`)
 }
 
 // The effects of one type, in the order they were emitted.
