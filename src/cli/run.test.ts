@@ -122,31 +122,35 @@ describe('blind install', () => {
   })
 })
 
+describe('blind link', () => {
+  const link = { command: 'npm', args: ['link'], cwd: repoRoot }
+
+  it('runs npm link in the repo, saying so once it has', async () => {
+    const { code, events, stdout } = await cli(['link'])
+    expect(events).toEqual([link])
+    expect(stdout).toBe('Linked.\n')
+    expect(code).toBe(0)
+  })
+
+  it('exits with npm link\'s exit code when it fails, adding nothing to npm\'s own output', async () => {
+    const { code, events, stdout, stderr } = await cli(['link'], { exitCode: 5 })
+    expect(events).toEqual([link])
+    expect(stdout).toBe('')
+    expect(stderr).toBe('')
+    expect(code).toBe(5)
+  })
+})
+
 describe('the usage line', () => {
-  it('is printed for an unknown install option', async () => {
-    const { code, events, stderr } = await cli(['install', '--frobnicate'])
-    expect(stderr).toBe('usage: blind settings [open] | blind dev | blind install\n')
-    expect(code).toBe(2)
-    expect(events).toEqual([])
-  })
-
-  it('is printed when no command is given', async () => {
-    const { code, events, stderr } = await cli([])
-    expect(stderr).toBe('usage: blind settings [open] | blind dev | blind install\n')
-    expect(code).toBe(2)
-    expect(events).toEqual([])
-  })
-
-  it('is printed for an unknown command', async () => {
-    const { code, events, stderr } = await cli(['frobnicate'])
-    expect(stderr).toBe('usage: blind settings [open] | blind dev | blind install\n')
-    expect(code).toBe(2)
-    expect(events).toEqual([])
-  })
-
-  it('is printed for an unknown settings subcommand', async () => {
-    const { code, events, stderr } = await cli(['settings', 'frobnicate'])
-    expect(stderr).toBe('usage: blind settings [open] | blind dev | blind install\n')
+  it.each([
+    ['when no command is given', []],
+    ['for an unknown command', ['frobnicate']],
+    ['for an unknown settings subcommand', ['settings', 'frobnicate']],
+    ['for an unknown install option', ['install', '--frobnicate']],
+    ['for an argument after link', ['link', 'extra']],
+  ])('is printed %s, running nothing', async (_, argv) => {
+    const { code, events, stderr } = await cli(argv)
+    expect(stderr).toBe('usage: blind settings [open] | blind dev | blind install | blind link\n')
     expect(code).toBe(2)
     expect(events).toEqual([])
   })

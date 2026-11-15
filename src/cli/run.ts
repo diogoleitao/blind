@@ -1,6 +1,6 @@
 import { editSettings, type SettingsEditorDependencies } from './settings-editor'
 
-const usage = 'usage: blind settings [open] | blind dev | blind install\n'
+const usage = 'usage: blind settings [open] | blind dev | blind install | blind link\n'
 
 export interface CliDependencies extends SettingsEditorDependencies {
   // The repo the CLI was built from.
@@ -27,8 +27,17 @@ export async function runCli (argv: string[], deps: CliDependencies): Promise<nu
   if (command === 'settings' && subcommand === 'open') return openSettings(deps)
   const force = subcommand === '--force'
   if (command === 'install' && (subcommand === undefined || force)) return install(deps, { force })
+  if (command === 'link' && subcommand === undefined) return link(deps)
   deps.stderr(usage)
   return 2
+}
+
+// Links the repo's `blind` command again, which npm rebuilds first, as `npm link` runs the `prepare` script. Run from
+// the repo's own `blind`, so it refreshes an existing link but can't make the first one.
+async function link ({ repoRoot, run, stdout }: CliDependencies) {
+  const exitCode = await run('npm', ['link'], repoRoot)
+  if (exitCode === 0) stdout('Linked.\n')
+  return exitCode
 }
 
 // Where `npm run install-app` puts Blind.
