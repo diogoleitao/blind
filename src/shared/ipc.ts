@@ -41,6 +41,7 @@ export const channels = {
   reportScrollback: 'pane:scrollback',
   reportNotification: 'pane:notification',
   reportProgramStatus: 'pane:status',
+  reportTitle: 'pane:title',
   flushScrollback: 'scrollback:flush',
   scrollbackFlushed: 'scrollback:flushed',
   openPalette: 'palette:open',
@@ -84,6 +85,8 @@ export interface BlindApi {
   reportNotification(paneId: PaneId): void;
   // A program in the Pane reported one of its status records.
   reportProgramStatus(paneId: PaneId, report: ProgramStatusReport): void;
+  // The Pane's program, or its Shell, set a title with OSC 0 or 2.
+  reportTitle(paneId: PaneId, title: string): void;
   // Called before the app quits. The listener reports every Pane's scrollback before it returns.
   onFlushScrollback(listener: () => void): void;
   // Called when the Command Palette's shortcut asks for it.

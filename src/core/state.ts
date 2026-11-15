@@ -47,6 +47,8 @@ export interface Pane {
   workingDirectory: string;
   // Absent while the Shell is idle at a prompt.
   runningProgram?: string;
+  // The Program Title, absent until the running program sets one.
+  programTitle?: string;
 }
 
 // Every Pane, Session by Session and Tab by Tab.

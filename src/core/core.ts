@@ -196,6 +196,14 @@ interface PaneActivity {
 // How many other Sessions a Session's Tab bar names by their Activity before it only says there are more.
 const maximumActivityChips = 3
 
+// The running program Claude Code shows as: it names its process `claude`, unless told not to set titles at all.
+const claudeCodeProgram = 'claude'
+
+// Claude Code starts its title with `✳`, or with `◐` and `◑` in turn while it works, which say nothing of the title.
+function withoutStatusGlyph (title: string) {
+  return title.replace(/^[✳◐◑] /u, '')
+}
+
 export interface CoreDependencies {
   shellHost: ShellHost;
   stateStore: StateStore;
@@ -599,7 +607,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       ...session,
       tabs: session.tabs.map((tab) => ({
         ...tab,
-        panes: tab.panes.map(({ runningProgram: _stopped, ...pane }) => {
+        panes: tab.panes.map(({ runningProgram: _stopped, programTitle: _gone, ...pane }) => {
           startShell(pane)
           return pane
         }),
@@ -858,6 +866,14 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return tab.title ?? paneTitle(focusedPane(tab))
   }
 
+  // What Rename Tab offers: the focused Pane's Program Title when the tab.renameSuggestion setting takes it from the
+  // running program, or else the Tab's title.
+  function renameSuggestionOf (tab: Tab) {
+    const pane = focusedPane(tab)
+    const takesProgramTitle = settings.tab.renameSuggestion === 'all' || pane.runningProgram === claudeCodeProgram
+    return (takesProgramTitle ? pane.programTitle : undefined) ?? titleOf(tab)
+  }
+
   function clearTitle (tab: Tab): Tab {
     if (tab.title === undefined) return tab
     const { title: _cleared, ...cleared } = tab
@@ -1064,8 +1080,22 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     if (event.type === 'workingDirectoryChanged') {
       updatePane(event.paneId, (pane) => ({ ...pane, workingDirectory: event.workingDirectory }))
     }
+    // The Program Title belongs to the program that set it.
     if (event.type === 'runningProgramChanged') {
-      updatePane(event.paneId, (pane) => ({ ...pane, runningProgram: event.runningProgram }))
+      updatePane(event.paneId, ({ programTitle: _stopped, ...pane }) => ({
+        ...pane,
+        runningProgram: event.runningProgram,
+      }))
+    }
+    // A title set while the Shell is idle is the Shell's own, such as a prompt theme's, not a program's. Claude Code
+    // sets its title again each time its status glyph turns, which changes nothing here.
+    if (event.type === 'titleChanged') {
+      const pane = findPane(event.paneId)
+      const programTitle = withoutStatusGlyph(event.title) || undefined
+      if (pane?.runningProgram === undefined || programTitle === pane.programTitle) return
+      updatePane(event.paneId, ({ programTitle: _replaced, ...unchanged }) =>
+        programTitle === undefined ? unchanged : { ...unchanged, programTitle }
+      )
     }
   })
 
@@ -1087,7 +1117,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     newTab: (sessionId) => core.newTab(sessionId),
     renameTab: (sessionId) => {
       const tab = focusedTabOf(sessionId)
-      if (tab) emit({ type: 'askTabTitle', sessionId, tabId: tab.id, suggestion: titleOf(tab) })
+      if (tab) emit({ type: 'askTabTitle', sessionId, tabId: tab.id, suggestion: renameSuggestionOf(tab) })
     },
     clearTabTitle: (sessionId) => {
       const tab = focusedTabOf(sessionId)

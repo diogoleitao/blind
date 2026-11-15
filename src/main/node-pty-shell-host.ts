@@ -18,6 +18,8 @@ export interface NodePtyShellHost extends ShellHost {
   attach(paneId: PaneId, onData: (data: string) => void): void;
   write(paneId: PaneId, data: string): void;
   resize(paneId: PaneId, size: TerminalSize): void;
+  // A title the Pane's terminal read from its output, passed on once the running program has been read after it.
+  reportTitle(paneId: PaneId, title: string): void;
 }
 
 interface RunningShell {
@@ -28,6 +30,8 @@ interface RunningShell {
   // Last reported to the core.
   workingDirectory: string;
   runningProgram?: string;
+  // The last title reported since the running program was last read, held until it's read again.
+  pendingTitle?: string;
   inspecting: boolean;
   outputSinceInspection: boolean;
 }
@@ -71,13 +75,17 @@ export function createNodePtyShellHost ({ loginShell }: { loginShell: string }):
     for (const listener of listeners) listener(event)
   }
 
-  // Reports working directory and running program changes until no output arrived during the last read.
+  // Reports working directory and running program changes until no output arrived during the last read. A title
+  // reported before a read is passed on after it, so the core judges it by the program running once it was set: a
+  // program can set its title before it's seen running, and the Shell can set its own once the program has exited.
   async function inspect (running: RunningShell) {
     const { paneId } = running
     running.inspecting = true
     while (running.outputSinceInspection && shells.get(paneId) === running) {
       running.outputSinceInspection = false
       await delay(inspectionDelayMilliseconds)
+      const title = running.pendingTitle
+      running.pendingTitle = undefined
       try {
         const [workingDirectory, runningProgram] = await Promise.all([
           workingDirectoryOf(running.pty.pid),
@@ -92,11 +100,18 @@ export function createNodePtyShellHost ({ loginShell }: { loginShell: string }):
           running.runningProgram = runningProgram
           emit({ type: 'runningProgramChanged', paneId, runningProgram })
         }
+        if (title !== undefined) emit({ type: 'titleChanged', paneId, title })
       } catch {
         // The Shell exited while it was being read; its exit is reported separately.
       }
     }
     running.inspecting = false
+  }
+
+  // Reads the Shell again after the delay, or once more after the read under way.
+  function inspectSoon (running: RunningShell) {
+    running.outputSinceInspection = true
+    if (!running.inspecting) inspect(running)
   }
 
   return {
@@ -120,8 +135,7 @@ export function createNodePtyShellHost ({ loginShell }: { loginShell: string }):
       pty.onData((data) => {
         if (running.onData) running.onData(data)
         else running.buffered.push(data)
-        running.outputSinceInspection = true
-        if (!running.inspecting) inspect(running)
+        inspectSoon(running)
       })
       pty.onExit(() => {
         shells.delete(paneId)
@@ -145,6 +159,12 @@ export function createNodePtyShellHost ({ loginShell }: { loginShell: string }):
     },
     resize (paneId, { cols, rows }) {
       shells.get(paneId)?.pty.resize(cols, rows)
+    },
+    reportTitle (paneId, title) {
+      const running = shells.get(paneId)
+      if (!running) return
+      running.pendingTitle = title
+      inspectSoon(running)
     },
   }
 }

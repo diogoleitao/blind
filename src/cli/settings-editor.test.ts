@@ -237,6 +237,12 @@ describe('blind settings', () => {
       expect((await editSettings([...downTo('sessionBanner'), 'right', 'left'])).file).toContain('"sessionBanner": true')
     })
 
+    it('picks whose title Rename Tab suggests, from claude to all', async () => {
+      const { file, screen } = await editSettings([...downTo('tab.renameSuggestion'), 'right'])
+      expect(file).toContain('"renameSuggestion": "all"')
+      expect(screen).toMatch(/renameSuggestion +all/)
+    })
+
     it('picks the theme from the Themes there are', async () => {
       const { file } = await editSettings([...downTo('theme'), 'right'], { themeNames: ['Default', 'Mine', 'Dracula'] })
       expect(file).toContain('"theme": "Mine"')

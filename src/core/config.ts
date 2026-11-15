@@ -53,6 +53,11 @@ const startDirectories = ['root', 'current', 'home'] as const
 // the current Pane's working directory; or the home directory.
 export type StartDirectory = (typeof startDirectories)[number]
 
+const tabRenameSuggestions = ['claude', 'all'] as const
+
+// Whose Program Title Rename Tab suggests, from the current Pane: Claude Code's alone, or any program's.
+export type TabRenameSuggestion = (typeof tabRenameSuggestions)[number]
+
 export const menuBarIcons = ['monochrome', 'colour'] as const
 
 // The menu bar icon's look: one colour that follows the menu bar's, light or dark, or the icon's own colours.
@@ -91,6 +96,7 @@ export interface Settings {
   };
   tab: {
     startDirectory: StartDirectory;
+    renameSuggestion: TabRenameSuggestion;
   };
   pane: {
     // How many lines of each Pane's scrollback are kept, `unlimited` read as `unlimitedScrollbackLines`.
@@ -135,6 +141,7 @@ export const defaultSettings: Settings = {
   },
   tab: {
     startDirectory: 'root',
+    renameSuggestion: 'claude',
   },
   pane: {
     scrollbackLines: 10_000,
@@ -208,6 +215,7 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers<Settings>
   }),
   tab: groupOf(defaultSettings.tab, {
     startDirectory: oneOf(startDirectories),
+    renameSuggestion: oneOf(tabRenameSuggestions),
   }),
   pane: groupOf(defaultSettings.pane, {
     scrollbackLines: (value) => {
@@ -293,7 +301,7 @@ export const configSchema = {
       },
     },
     tab: {
-      description: 'Where new Tabs start.',
+      description: 'Where new Tabs start, and what renaming one suggests.',
       type: 'object',
       additionalProperties: false,
       properties: {
@@ -302,6 +310,12 @@ export const configSchema = {
             "Where a new Tab starts: root is the Session's Root directory, or the current Pane's working directory without one; current is the current Pane's working directory; home is the home directory. A Session reopened with no Tabs starts its Tab at the home directory for home, and otherwise at its Root directory, or the home directory without one.",
           enum: startDirectories,
           default: defaultSettings.tab.startDirectory,
+        },
+        renameSuggestion: {
+          description:
+            "Whose Program Title Rename Tab suggests, from the program running in the current Pane: claude suggests Claude Code's, which follows its /rename; all suggests any program's. When the program has none, Rename Tab suggests the Tab's current title.",
+          enum: tabRenameSuggestions,
+          default: defaultSettings.tab.renameSuggestion,
         },
       },
     },

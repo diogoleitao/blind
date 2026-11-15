@@ -53,7 +53,7 @@ describe('the schema written next to the config file', () => {
     expect(schema.additionalProperties).toBe(false)
     expect(Object.fromEntries(groups.map(([name, group]) => [name, Object.keys(group.properties!)]))).toMatchObject({
       session: ['cycleOrder', 'withoutNameOrRootOnClose'],
-      tab: ['startDirectory'],
+      tab: ['startDirectory', 'renameSuggestion'],
       pane: ['scrollbackLines', 'startDirectory', 'padding', 'scrollBar'],
       loginLaunch: ['start', 'withNoOpenSessions'],
       commandPalette: ['sessionSearchOrder', 'tabSearchScope', 'paneSearchScope', 'nesting'],
@@ -68,7 +68,7 @@ describe('the schema written next to the config file', () => {
       Object.fromEntries(Object.entries(properties[group].properties as Record<string, { default: unknown }>)
         .map(([name, setting]) => [name, setting.default]))
     expect(defaults('session')).toEqual({ cycleOrder: 'alphabetical', withoutNameOrRootOnClose: 'keep' })
-    expect(defaults('tab')).toEqual({ startDirectory: 'root' })
+    expect(defaults('tab')).toEqual({ startDirectory: 'root', renameSuggestion: 'claude' })
     expect(defaults('pane')).toEqual({ scrollbackLines: 10_000, startDirectory: 'current', padding: 'padded', scrollBar: 'none' })
     expect(defaults('loginLaunch')).toEqual({ start: 'hidden', withNoOpenSessions: 'hotkey' })
     expect(defaults('commandPalette')).toEqual({

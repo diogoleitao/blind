@@ -1222,6 +1222,145 @@ describe('renaming a Tab', () => {
   })
 })
 
+describe("the Rename Tab suggestion from a Pane's Program Title", () => {
+  // A Session whose only Pane runs the program.
+  function startRunning (program: string, config?: string) {
+    const started = startCore(undefined, config)
+    const sessionId = started.core.state().sessions[0].id
+    const tab = started.core.state().sessions[0].tabs[0]
+    started.shellHost.changeRunningProgram(tab.panes[0].id, program)
+    return { ...started, sessionId, tabId: tab.id, paneId: tab.panes[0].id }
+  }
+
+  it("suggests Claude Code's title, without its status glyph", () => {
+    const { core, shellHost, effects, sessionId, tabId, paneId } = startRunning('claude')
+
+    shellHost.setTitle(paneId, '✳ triage-39')
+    chooseAction(core, 'Rename Tab')
+
+    expect(effects).toEqual([{ type: 'askTabTitle', sessionId, tabId, suggestion: 'triage-39' }])
+  })
+
+  it("leaves out any other program's title by default", () => {
+    const { core, shellHost, effects, sessionId, tabId, paneId } = startRunning('nvim')
+
+    shellHost.setTitle(paneId, 'notes.md')
+    chooseAction(core, 'Rename Tab')
+
+    expect(effects).toEqual([{ type: 'askTabTitle', sessionId, tabId, suggestion: 'nvim' }])
+  })
+
+  it("set to all, suggests any program's title", () => {
+    const { core, shellHost, effects, sessionId, tabId, paneId } = startRunning(
+      'nvim',
+      '{ "tab": { "renameSuggestion": "all" } }'
+    )
+
+    shellHost.setTitle(paneId, 'notes.md')
+    chooseAction(core, 'Rename Tab')
+
+    expect(effects).toEqual([{ type: 'askTabTitle', sessionId, tabId, suggestion: 'notes.md' }])
+  })
+
+  it('is claude by default', () => {
+    const { core } = startCore()
+
+    expect(core.settings().tab.renameSuggestion).toBe('claude')
+  })
+
+  it('rejects anything else, keeping claude', () => {
+    const { core, effects } = startCore(undefined, '{ "tab": { "renameSuggestion": "nvim" } }')
+
+    expect(core.settings().tab.renameSuggestion).toBe('claude')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['tab.renameSuggestion'] }])
+  })
+
+  it('ignores a title set while the Shell is idle at its prompt, such as a zsh theme sets', () => {
+    const { core, shellHost, effects } = startCore(undefined, '{ "tab": { "renameSuggestion": "all" } }')
+    const session = core.state().sessions[0]
+    const tab = session.tabs[0]
+
+    shellHost.setTitle(tab.panes[0].id, 'me@mac: ~')
+    shellHost.changeRunningProgram(tab.panes[0].id, 'htop')
+    chooseAction(core, 'Rename Tab')
+
+    expect(effects).toEqual([{ type: 'askTabTitle', sessionId: session.id, tabId: tab.id, suggestion: 'htop' }])
+  })
+
+  it('drops the title once its program stops, even when the same program starts again', () => {
+    const { core, shellHost, effects, sessionId, tabId, paneId } = startRunning('claude')
+
+    shellHost.setTitle(paneId, '✳ triage-39')
+    shellHost.changeRunningProgram(paneId, undefined)
+    shellHost.changeRunningProgram(paneId, 'claude')
+    chooseAction(core, 'Rename Tab')
+
+    expect(effects).toEqual([{ type: 'askTabTitle', sessionId, tabId, suggestion: 'claude' }])
+  })
+
+  it('drops the title the program clears', () => {
+    const { core, shellHost, effects, sessionId, tabId, paneId } = startRunning('claude')
+
+    shellHost.setTitle(paneId, '✳ triage-39')
+    shellHost.setTitle(paneId, '')
+    chooseAction(core, 'Rename Tab')
+
+    expect(effects).toEqual([{ type: 'askTabTitle', sessionId, tabId, suggestion: 'claude' }])
+  })
+
+  it("changes no state when only Claude Code's status glyph turns", () => {
+    const { core, shellHost, paneId } = startRunning('claude')
+    shellHost.setTitle(paneId, '◐ triage-39')
+    const changes: unknown[] = []
+    core.onStateChange((state) => changes.push(state))
+
+    shellHost.setTitle(paneId, '◑ triage-39')
+
+    expect(changes).toEqual([])
+  })
+
+  it("leaves the Tab's title as it was, in the Tab bar and the Command Palette", () => {
+    const { core, shellHost, tabId, paneId } = startRunning('claude')
+
+    shellHost.setTitle(paneId, '✳ triage-39')
+
+    expect(core.tabTitle(tabId)).toBe('claude')
+  })
+
+  it('suggests the title over the fixed title the Tab was renamed to', () => {
+    const { core, shellHost, effects, sessionId, tabId, paneId } = startRunning('claude')
+
+    core.renameTab(tabId, 'notes')
+    shellHost.setTitle(paneId, '✳ triage-39')
+    chooseAction(core, 'Rename Tab')
+
+    expect(effects).toEqual([{ type: 'askTabTitle', sessionId, tabId, suggestion: 'triage-39' }])
+  })
+
+  it("takes the focused Pane's title alone", () => {
+    const { core, shellHost, effects, sessionId, tabId, paneId } = startRunning('claude')
+
+    core.splitPane(sessionId, 'vertical')
+    shellHost.setTitle(paneId, '✳ triage-39')
+    chooseAction(core, 'Rename Tab')
+
+    expect(effects).toEqual([{ type: 'askTabTitle', sessionId, tabId, suggestion: 'me' }])
+  })
+
+  it('brings no title back on Restore', () => {
+    const config = '{ "tab": { "renameSuggestion": "all" } }'
+    const before = startRunning('claude', config)
+    before.shellHost.setTitle(before.paneId, '✳ triage-39')
+
+    const after = startCore(before.stateStore, config)
+    chooseAction(after.core, 'Rename Tab')
+
+    expect(after.effects).toEqual([
+      { type: 'askTabTitle', sessionId: before.sessionId, tabId: before.tabId, suggestion: 'me' },
+    ])
+  })
+})
+
 describe('state changes', () => {
   it('are announced for Tab commands and Shell events, with the new state', () => {
     const { core, shellHost } = startCore()

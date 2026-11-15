@@ -451,6 +451,7 @@ app.whenReady().then(() => {
   ipcMain.on(channels.reportProgramStatus, (_event, paneId: PaneId, report: ProgramStatusReport) =>
     core.programStatusReported(paneId, report)
   )
+  ipcMain.on(channels.reportTitle, (_event, paneId: PaneId, title: string) => shellHost.reportTitle(paneId, title))
   ipcMain.on(channels.scrollbackFlushed, (event) => scrollbackFlushes.get(event.sender)?.())
   ipcMain.on(channels.copyText, (_event, text: string) => clipboard.writeText(text))
   ipcMain.handle(channels.openableLinks, (_event, paneId: PaneId, texts: string[]) =>

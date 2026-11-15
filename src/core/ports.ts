@@ -5,6 +5,9 @@ export type ShellEvent =
   | { type: 'workingDirectoryChanged'; paneId: PaneId; workingDirectory: string }
   // `runningProgram` is undefined while the Shell is idle at a prompt.
   | { type: 'runningProgramChanged'; paneId: PaneId; runningProgram: string | undefined }
+  // A title set in the Pane with OSC 0 or 2, by its program or by the Shell itself, empty to clear it. Reported after the
+  // running program as it stood once the title arrived, so a title the idle Shell sets comes with no running program.
+  | { type: 'titleChanged'; paneId: PaneId; title: string }
 
 export interface ShellHost {
   // Runs `shell`, or the user's login shell without one.

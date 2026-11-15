@@ -42,6 +42,7 @@ export function createFakeShellHost () {
       emit({ type: 'workingDirectoryChanged', paneId, workingDirectory }),
     changeRunningProgram: (paneId: PaneId, runningProgram: string | undefined) =>
       emit({ type: 'runningProgramChanged', paneId, runningProgram }),
+    setTitle: (paneId: PaneId, title: string) => emit({ type: 'titleChanged', paneId, title }),
   }
 }
 

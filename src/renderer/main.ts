@@ -169,6 +169,7 @@ function openPane (rect: PaneRect): PaneTerminal {
   fit.fit()
   terminal.onData((data) => blind.writeToPane(paneId, data))
   terminal.onResize((size) => blind.resizePane(paneId, size))
+  terminal.onTitleChange((title) => blind.reportTitle(paneId, title))
   element.addEventListener('mousedown', () => blind.focusPane(paneId))
   blind.attachPane(paneId, { cols: terminal.cols, rows: terminal.rows })
   return { element, terminal, fit, serialize, search }
