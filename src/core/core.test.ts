@@ -705,6 +705,17 @@ describe('key bindings', () => {
     expect(effects).toEqual([{ type: 'openPalette', sessionId }, { type: 'openSettings' }])
   })
 
+  it('leave Reset Command Palette Position unbound until the config file binds it', () => {
+    const { core, effects } = startCore()
+    const sessionId = core.state().sessions[0].id
+
+    expect(core.settings().keyBindings.resetCommandPalettePosition).toBeNull()
+    core.configChanged('{ "keyBindings": { "resetCommandPalettePosition": "Cmd+Shift+P" } }')
+
+    expect(core.keyPressed(sessionId, press('p', 'KeyP', 'meta', 'shift'))).toBe(true)
+    expect(effects).toEqual([{ type: 'resetPalettePosition' }])
+  })
+
   it("match a letter by its key's position while Option turns it into another character", () => {
     const { core, effects } = startCore(undefined, '{ "keyBindings": { "openSettings": "Cmd+Alt+D" } }')
     const sessionId = core.state().sessions[0].id
@@ -3487,6 +3498,7 @@ describe('the Command Palette', () => {
       'action Clear Scrollback',
       'action Change Theme',
       'action Change Menu Bar Icon',
+      'action Reset Command Palette Position',
       'action Open Settings',
       'action Quit Blind',
     ])
@@ -3500,12 +3512,21 @@ describe('the Command Palette', () => {
     expect(effects).toEqual([{ type: 'openSettings' }])
   })
 
+  it('choosing Reset Command Palette Position puts the Command Palette back where it starts', () => {
+    const { core, effects } = startCore()
+
+    chooseAction(core, 'Reset Command Palette Position')
+
+    expect(effects).toEqual([{ type: 'resetPalettePosition' }])
+  })
+
   it("keeps the results whose labels hold the query's letters in order, ignoring case", () => {
     const { core } = startWithPaletteSessions()
 
     expect(summarize(core.paletteResults('SPLI'))).toEqual([
       'action Split Pane Vertically',
       'action Split Pane Horizontally',
+      'action Reset Command Palette Position',
     ])
   })
 
@@ -3533,6 +3554,7 @@ describe('the Command Palette', () => {
       'action Split Pane Vertically',
       'action Focus Pane Left',
       'action Focus Pane Right',
+      'action Reset Command Palette Position',
       'action Open Settings',
     ])
     expect(summarize(core.paletteResults('ab'))).toEqual([

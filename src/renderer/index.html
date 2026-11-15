@@ -201,10 +201,10 @@
         --result-inset: 10px;
         --result-padding-x: 14px;
       }
-      /* Its corners match the window's. */
+      /* Its corners match the window's. The script sets how far down it sits, and its edge, around the input and the
+         results, drags it up or down. */
       #palette {
         position: fixed;
-        top: 15%;
         left: 50%;
         transform: translateX(-50%);
         width: min(640px, 90vw);
@@ -217,6 +217,7 @@
         font: 13px system-ui, sans-serif;
         color: var(--palette-text);
         overflow: hidden;
+        cursor: ns-resize;
       }
       #palette[hidden] {
         display: none;
@@ -234,14 +235,16 @@
         font: inherit;
         font-size: 15px;
         color: inherit;
+        cursor: text;
       }
-      /* The last result ends as far above the dialog's bottom edge as the search text starts below its top edge. */
+      /* The last result ends as far above the dialog's bottom edge as the search text starts below its top edge. The
+         script sets how tall it can grow. */
       #palette-results {
-        max-height: 50vh;
         margin: 0;
         padding: 7px 0 13px;
         list-style: none;
         overflow-y: auto;
+        cursor: default;
       }
       #palette-results:empty {
         display: none;

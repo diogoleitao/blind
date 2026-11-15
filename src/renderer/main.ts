@@ -16,6 +16,7 @@ import type { PaletteResult } from '../core/core'
 import type { KeyPress } from '../core/key-bindings'
 import type { PaneRect } from '../core/layout'
 import { findLinks } from '../core/links'
+import { defaultPalettePosition, palettePositionWithinWindow } from '../core/palette-position'
 import type { PaneId } from '../core/state'
 import { terminalInput } from '../core/terminal-keys'
 import { type Colour, defaultTheme, type Theme } from '../core/themes'
@@ -629,10 +630,60 @@ function searchPalette () {
   })
 }
 
+// The Command Palette's position, as the main process last sent it, which may lie past the window's limits; and the
+// position it is shown at, within them.
+let palettePosition = defaultPalettePosition
+let shownPalettePosition = defaultPalettePosition
+// Set while the user drags the palette by its edge: where the pointer and the shown position were when it started, and
+// the position the pointer has since moved it to, if it has moved.
+let paletteDrag: { pointerY: number; from: number; to?: number } | undefined
+// The palette's lowest position still leaves room for the search field and this many results.
+const resultsAtLowestPosition = 3
+
+// A result's height, measured on a stand-in row, since the palette may list none, or only the nested view's smaller ones.
+function resultHeight () {
+  const probe = document.createElement('li')
+  probe.className = 'result'
+  probe.textContent = 'Result'
+  paletteList.append(probe)
+  const height = probe.offsetHeight
+  probe.remove()
+  return height
+}
+
+// The space the results list's padding takes above and below its results.
+function resultsPadding () {
+  const style = getComputedStyle(paletteList)
+  return parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+}
+
+// Puts the palette at its position, or where a drag has moved it, within the window's limits, measured on the palette
+// as shown, so only while it is. The results list reaches at most half the window's height, and no further than the
+// window's bottom edge.
+function placePalette () {
+  if (palette.hidden) return
+  const edgeAndSearchField = palette.offsetHeight - paletteList.offsetHeight
+  const padding = resultsPadding()
+  const smallestPaletteHeight = edgeAndSearchField + padding + resultsAtLowestPosition * resultHeight()
+  shownPalettePosition = palettePositionWithinWindow(paletteDrag?.to ?? palettePosition, {
+    windowHeight: innerHeight,
+    smallestPaletteHeight,
+  })
+  const top = shownPalettePosition * innerHeight
+  palette.style.top = `${top}px`
+  paletteList.style.maxHeight = `${Math.max(0, Math.min(innerHeight / 2, innerHeight - top - edgeAndSearchField - padding))}px`
+}
+
+function movePaletteTo (position: number) {
+  palettePosition = position
+  placePalette()
+}
+
 function openPalette () {
   prompt = undefined
   picking = undefined
   palette.hidden = false
+  placePalette()
   paletteInput.placeholder = ''
   paletteInput.value = ''
   paletteInput.focus()
@@ -647,6 +698,7 @@ function openPrompt (asked: PalettePrompt) {
   paletteResults = []
   renderPalette()
   palette.hidden = false
+  placePalette()
   paletteInput.placeholder = promptPlaceholders[asked.type]
   paletteInput.value = asked.suggestion
   paletteInput.focus()
@@ -665,18 +717,20 @@ function openPicker (kind: NonNullable<typeof picking>, inEffect: string) {
   picking = kind
   choiceToSelect = inEffect
   palette.hidden = false
+  placePalette()
   paletteInput.placeholder = pickerPlaceholders[kind]
   paletteInput.value = ''
   paletteInput.focus()
   searchPalette()
 }
 
-// The focused Pane's terminal takes the keyboard back.
+// The focused Pane's terminal takes the keyboard back. A drag under way ends without moving the palette.
 function closePalette () {
   if (palette.hidden) return
   palette.hidden = true
   prompt = undefined
   picking = undefined
+  paletteDrag = undefined
   if (focusedPaneId) terminals.get(focusedPaneId)?.terminal.focus()
 }
 
@@ -725,9 +779,28 @@ paletteInput.addEventListener('keydown', (event) => {
   else return
   event.preventDefault()
 })
-// Clicks inside the palette keep the input focused; clicking a Pane, or the app hiding, closes the palette.
+// Clicks inside the palette keep the input focused; clicking a Pane, or the app hiding, closes the palette. Pressing
+// its edge, around the input and the results, with the primary button starts dragging it up or down.
 palette.addEventListener('mousedown', (event) => {
   if (event.target !== paletteInput) event.preventDefault()
+  if (event.target === palette && event.button === 0) {
+    paletteDrag = { pointerY: event.clientY, from: shownPalettePosition }
+  }
+})
+window.addEventListener('mousemove', (event) => {
+  if (!paletteDrag || event.clientY === paletteDrag.pointerY) return
+  paletteDrag.to = paletteDrag.from + (event.clientY - paletteDrag.pointerY) / innerHeight
+  placePalette()
+})
+// Every Session's window takes the position the drag ended at, as shown. A press that moved nothing keeps the position
+// as it was, which a window too short for it shows higher.
+window.addEventListener('mouseup', () => {
+  if (!paletteDrag) return
+  const moved = paletteDrag.to !== undefined && paletteDrag.to !== paletteDrag.from
+  paletteDrag = undefined
+  if (!moved) return
+  palettePosition = shownPalettePosition
+  blind.movePalette(shownPalettePosition)
 })
 paletteInput.addEventListener('blur', dismissPalette)
 
@@ -739,6 +812,7 @@ blind.onOpenPalette(openPalette)
 blind.onPickTheme(() => openPicker('theme', theme.name))
 blind.onPickMenuBarIcon((icon) => openPicker('menuBarIcon', icon))
 blind.onPalettePrompt(openPrompt)
+blind.onPalettePosition(movePaletteTo)
 blind.onPaneData(writeToTerminal)
 blind.onFlushScrollback(() => terminals.forEach((pane, paneId) => reportScrollback(paneId, pane)))
 blind.onSessionView(render)
@@ -748,4 +822,5 @@ blind.onCopy(copySelection)
 blind.onPaste(paste)
 window.addEventListener('resize', () => {
   for (const pane of terminals.values()) pane.fit.fit()
+  placePalette()
 })

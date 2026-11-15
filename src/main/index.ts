@@ -18,6 +18,7 @@ import type { ProgramStatusReport } from '../core/attention'
 import { blurIssueUrl, shouldWarnBlurUnavailable } from '../core/blur-warning'
 import { type MenuBarIcon, minimumBlurRadius } from '../core/config'
 import { createCore, type Effect, type PaletteResult } from '../core/core'
+import { defaultPalettePosition } from '../core/palette-position'
 import type { PaneId, SessionId } from '../core/state'
 import { channels, type PalettePrompt, type SessionView, type TerminalSize, type WindowSettings } from '../shared/ipc'
 import { createBlurWarningFile } from './blur-warning-file'
@@ -26,6 +27,7 @@ import { fadeWindow } from './fade'
 import { createFileStateStore } from './file-state-store'
 import { createMenuBarIcon } from './menu-bar-icon'
 import { createNodePtyShellHost } from './node-pty-shell-host'
+import { createPalettePositionFile } from './palette-position-file'
 import { createThemeFiles } from './theme-files'
 import { loadWindowEffects } from './window-effects'
 
@@ -79,6 +81,7 @@ app.whenReady().then(() => {
   )
   const blurWarningFile = createBlurWarningFile(dataDirectory)
   let blurWarnedThisLaunch = false
+  const palettePositionFile = createPalettePositionFile(dataDirectory)
 
   // Blind shows only on the primary display, filling its work area, which can change after a window was made: another
   // display becomes primary, or the resolution or the Dock changes.
@@ -197,6 +200,10 @@ app.whenReady().then(() => {
     // The clipboard is read asynchronously; a window that closed meanwhile gets nothing.
     if (effect.type === 'paste') {
       clipboard.readText().then((text) => windows.get(effect.sessionId)?.webContents.send(channels.paste, text))
+    }
+    if (effect.type === 'resetPalettePosition') {
+      palettePositionFile.clear()
+      windows.forEach(sendPalettePosition)
     }
   })
 
@@ -416,6 +423,12 @@ app.whenReady().then(() => {
     if (!window.isDestroyed()) window.webContents.send(channels.applyTheme, core.theme())
   }
 
+  // Every Session's window shares where the user dragged the Command Palette.
+  function sendPalettePosition (window: BrowserWindow) {
+    const position = palettePositionFile.read() ?? defaultPalettePosition
+    if (!window.isDestroyed()) window.webContents.send(channels.palettePosition, position)
+  }
+
   ipcMain.on(channels.focusPane, (_event, paneId: PaneId) => core.focusPane(paneId))
   ipcMain.handle(channels.searchThemes, (_event, query: string) => core.themeResults(query))
   ipcMain.on(channels.previewTheme, (_event, name: string) => core.previewTheme(name))
@@ -427,6 +440,10 @@ app.whenReady().then(() => {
   ipcMain.on(channels.answerPalettePrompt, (_event, prompt: PalettePrompt, answer: string) => {
     if (prompt.type === 'askSessionName') core.renameSession(prompt.sessionId, answer)
     else core.renameTab(prompt.tabId, answer)
+  })
+  ipcMain.on(channels.movePalette, (_event, position: number) => {
+    palettePositionFile.save(position)
+    windows.forEach(sendPalettePosition)
   })
 
   // A restored Pane's terminal gets its saved scrollback first, with no colour or style left over from it. The line the
@@ -494,6 +511,7 @@ app.whenReady().then(() => {
     window.webContents.on('did-finish-load', () => {
       sendWindowSettings(window)
       sendTheme(window)
+      sendPalettePosition(window)
     })
     return window
   }

@@ -39,6 +39,10 @@ const api: BlindApi = {
     ipcRenderer.on(channels.promptPalette, (_event, prompt) => listener(prompt))
   },
   answerPalettePrompt: (prompt, answer) => ipcRenderer.send(channels.answerPalettePrompt, prompt, answer),
+  onPalettePosition: (listener) => {
+    ipcRenderer.on(channels.palettePosition, (_event, position) => listener(position))
+  },
+  movePalette: (position) => ipcRenderer.send(channels.movePalette, position),
   onTheme: (listener) => {
     ipcRenderer.on(channels.applyTheme, (_event, theme) => listener(theme))
   },

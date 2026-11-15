@@ -50,6 +50,8 @@ export const channels = {
   choosePaletteResult: 'palette:choose',
   promptPalette: 'palette:prompt',
   answerPalettePrompt: 'palette:answer',
+  palettePosition: 'palette:position',
+  movePalette: 'palette:move',
   applyTheme: 'theme:apply',
   pickTheme: 'theme:pick',
   searchThemes: 'theme:search',
@@ -98,6 +100,11 @@ export interface BlindApi {
   // Called when an app action needs a name or title typed into the Command Palette.
   onPalettePrompt(listener: (prompt: PalettePrompt) => void): void;
   answerPalettePrompt(prompt: PalettePrompt, answer: string): void;
+  // Called with the Command Palette's position once the page has loaded, and again whenever the user drags it in any
+  // window or resets it.
+  onPalettePosition(listener: (position: number) => void): void;
+  // The user dragged the Command Palette to the position.
+  movePalette(position: number): void;
   // Called once the page has loaded, before its Session view, and again whenever the Theme in effect changes.
   onTheme(listener: (theme: Theme) => void): void;
   // Called when the Command Palette should list the Themes instead of searching.

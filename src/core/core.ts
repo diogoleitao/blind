@@ -88,6 +88,8 @@ export type Effect =
   | { type: 'copy'; sessionId: SessionId }
   // Pastes the clipboard's text where the Session's window takes typing.
   | { type: 'paste'; sessionId: SessionId }
+  // Forgets where the user dragged the Command Palette, so it next opens where it starts.
+  | { type: 'resetPalettePosition' }
 
 // Every app action, in the order the Command Palette offers them, by its label.
 const paletteActionLabels = {
@@ -117,6 +119,7 @@ const paletteActionLabels = {
   clearScrollback: 'Clear Scrollback',
   changeTheme: 'Change Theme',
   changeMenuBarIcon: 'Change Menu Bar Icon',
+  resetCommandPalettePosition: 'Reset Command Palette Position',
   openSettings: 'Open Settings',
   quit: 'Quit Blind',
 } as const
@@ -1101,7 +1104,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
 
   // The app actions on the Current Session, by the core's own commands.
   const sessionActions: Record<
-    Exclude<PaletteAction, 'newSession' | 'openSettings' | 'quit'>,
+    Exclude<PaletteAction, 'newSession' | 'resetCommandPalettePosition' | 'openSettings' | 'quit'>,
     (sessionId: SessionId) => void
   > = {
     renameSession: (sessionId) => {
@@ -1156,6 +1159,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   // Without a Session, only the actions that don't act on one run.
   function runAction (action: BoundAction, sessionId: SessionId | undefined) {
     if (action === 'newSession') return core.newSession()
+    if (action === 'resetCommandPalettePosition') return emit({ type: 'resetPalettePosition' })
     if (action === 'openSettings') return emit({ type: 'openSettings' })
     if (action === 'quit') return core.quitRequested()
     if (sessionId === undefined) return
