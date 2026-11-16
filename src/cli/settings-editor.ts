@@ -110,10 +110,10 @@ function isChar (key: Key, char: string) {
   return typeof key === 'object' && key.char === char
 }
 
-// Edits the settings interactively, resolving to the exit code. Each change is written onto the config file as it is on
-// disk, so what changed there meanwhile stays, and a running Blind applies it at once. A value the file gets wrong
-// shows as the default in effect, marked. The settings whose values differ from when the editor opened are highlighted,
-// and listed on quitting.
+// Edits the settings interactively, resolving to the exit code. The changes are kept until q or escape saves them on
+// quitting, written onto the config file as it is on disk then, so what changed there meanwhile stays, and a running
+// Blind applies them all at once; Ctrl+C quits without saving them. A value the file gets wrong shows as the default in
+// effect, marked. The settings whose values differ from when the editor opened are highlighted, and listed on quitting.
 export async function editSettings (deps: SettingsEditorDependencies): Promise<number> {
   const { configFile, themeNames, terminal, stdout, stderr } = deps
   if (!terminal.interactive) {
@@ -129,32 +129,58 @@ export async function editSettings (deps: SettingsEditorDependencies): Promise<n
   }
   const themes = themeNames()
   let { settings, rejected } = parseConfig(initial.text, themes)!
+  // Each setting's value as the editor opened, to tell what's changed since.
+  const openingValues = new Map(editableSettings.map((name) => [name, settingIn(settings, name)]))
+  // The file's text as last read, which the changes not yet saved are shown on.
+  let onDisk = initial.text
+  // The changes not yet saved: each setting's value in the editor, unless it's the value both when the editor opened
+  // and on disk.
+  const pending = new Map<string, unknown>()
   let selected = 0
   // What's typed for the selected setting, while its value is being typed.
   let typing: string | undefined
   // Why the last change wasn't made, until the next key.
   let refusal: string | undefined
 
-  function show (text: string) {
-    const parsed = parseConfig(text, themes)!
+  // The settings with changes not yet saved, in the editor's order.
+  function pendingNames () {
+    return editableSettings.filter((name) => pending.has(name))
+  }
+
+  // `text` with the changes not yet saved written onto it.
+  function withPending (text: string) {
+    return pendingNames().reduce((written, name) => {
+      const [group, key] = pathOf(name)
+      return setJsoncProperty(written, group === undefined ? key : [group, key], pending.get(name))
+    }, text)
+  }
+
+  function show () {
+    const parsed = parseConfig(withPending(onDisk), themes)!
     settings = parsed.settings
     rejected = parsed.rejected
   }
 
-  function write (name: string, value: unknown) {
+  // A setting changed back to its value when the editor opened has no change left to save, unless the file changed it
+  // meanwhile.
+  function change (name: string, value: unknown) {
+    const unchanged = value === openingValues.get(name) && value === settingIn(parseConfig(onDisk, themes)!.settings, name)
+    if (unchanged) pending.delete(name)
+    else pending.set(name, value)
+    show()
+  }
+
+  // Writes the changes not yet saved onto the file as it is on disk now, so what changed there meanwhile stays.
+  // Answers why they couldn't be, if they couldn't.
+  function save (): string | undefined {
+    if (pending.size === 0) return
     const current = readEditable(configFile)
-    if (!('text' in current)) {
-      refusal = current.problem ?? "Couldn't read config.jsonc"
-      return
-    }
-    const [group, key] = pathOf(name)
-    const text = setJsoncProperty(current.text, group === undefined ? key : [group, key], value)
-    if (configFile.write(text)) {
-      show(text)
-    } else {
-      refusal = "Couldn't save config.jsonc"
-      show(current.text)
-    }
+    if (!('text' in current)) return current.problem ?? "Couldn't read config.jsonc"
+    const text = withPending(current.text)
+    if (!configFile.write(text)) return "Couldn't save config.jsonc"
+    onDisk = text
+    pending.clear()
+    show()
   }
 
   // Steps the selected setting's value through its choices by `step`, going round at either end.
@@ -163,7 +189,7 @@ export async function editSettings (deps: SettingsEditorDependencies): Promise<n
     const choices = choicesOf(name, themes)
     if (!choices) return
     const index = choices.indexOf(settingIn(settings, name))
-    write(name, choices[(index + step + choices.length) % choices.length])
+    change(name, choices[(index + step + choices.length) % choices.length])
   }
 
   function pressWhileTyping (key: Key, typed: string) {
@@ -173,16 +199,18 @@ export async function editSettings (deps: SettingsEditorDependencies): Promise<n
     else if (key === 'enter') {
       typing = undefined
       const result = typedValue(editableSettings[selected], typed)
-      if ('value' in result) write(editableSettings[selected], result.value)
+      if ('value' in result) change(editableSettings[selected], result.value)
       else refusal = result.refusal
     }
   }
 
-  // Shows the file as it is on disk first, so a value picked steps from what's there now.
+  // Shows the file as it is on disk first, with the changes not yet saved on it, so a value picked steps from what's
+  // there now.
   function press (key: Key) {
     refusal = undefined
     const current = readEditable(configFile)
-    if ('text' in current) show(current.text)
+    if ('text' in current) onDisk = current.text
+    show()
     if (typing !== undefined) pressWhileTyping(key, typing)
     else if (key === 'down') selected = Math.min(selected + 1, editableSettings.length - 1)
     else if (key === 'up') selected = Math.max(selected - 1, 0)
@@ -198,11 +226,11 @@ export async function editSettings (deps: SettingsEditorDependencies): Promise<n
     return String(value)
   }
 
-  // Each setting's value as the editor opened, to tell what's changed since.
+  // Each setting's value as the editor opened, as shown, for listing what's changed since.
   const opening = new Map(editableSettings.map((name) => [name, valueOf(name)]))
 
   function changed (name: string) {
-    return valueOf(name) !== opening.get(name)
+    return settingIn(settings, name) !== openingValues.get(name)
   }
 
   // A setting is invalid when the file gets it wrong, or gets its whole group wrong.
@@ -231,20 +259,29 @@ export async function editSettings (deps: SettingsEditorDependencies): Promise<n
       return [...heading, changed(name) ? `\x1b[1;33m${row}\x1b[22;39m` : row]
     })
     const keys = typing === undefined
-      ? '↑↓ move  ←→ change  enter type a value  q quit'
+      ? '↑↓ move  ←→ change  enter type a value  q save and quit  ctrl+c quit without saving'
       : 'enter save  escape leave as it was'
     terminal.draw([...rows, '', schemaOf(editableSettings[selected]).description ?? '', '', refusal ?? keys])
   }
 
-  // Quitting goes first, so Ctrl+C quits even while a value's being typed.
-  function quits (key: Key) {
-    return key === 'interrupt' || (typing === undefined && (key === 'escape' || isChar(key, 'q')))
+  function saves (key: Key) {
+    return typing === undefined && (key === 'escape' || isChar(key, 'q'))
   }
 
+  function list (names: string[]) {
+    return names.map((name) => `${name}: ${opening.get(name)} → ${valueOf(name)}\n`).join('')
+  }
+
+  let saving = false
   try {
     draw()
+    // Quitting goes first, so Ctrl+C quits even while a value's being typed. Keys running out quit without saving too.
     for await (const key of terminal.keys()) {
-      if (quits(key)) break
+      if (key === 'interrupt') break
+      if (saves(key)) {
+        saving = true
+        break
+      }
       press(key)
       draw()
     }
@@ -252,6 +289,16 @@ export async function editSettings (deps: SettingsEditorDependencies): Promise<n
     terminal.close()
   }
   // After the terminal's given back, so the list stays on the shell's screen.
-  for (const name of editableSettings.filter(changed)) stdout(`${name}: ${opening.get(name)} → ${valueOf(name)}\n`)
+  const unsaved = pendingNames()
+  if (!saving) {
+    if (unsaved.length > 0) stdout(`Discarded:\n${list(unsaved)}`)
+    return 0
+  }
+  const problem = save()
+  if (problem) {
+    stderr(`${problem}\nUnsaved:\n${list(unsaved)}`)
+    return 1
+  }
+  stdout(list(editableSettings.filter(changed)))
   return 0
 }
