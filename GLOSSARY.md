@@ -89,7 +89,7 @@ _Avoid_: Unread, alert, output
 ### Appearance
 
 **Theme**:
-A named set of colours covering both the terminal and the app's own chrome (Tab bar, Command Palette, Session Banner, Pane dividers, Bezel).
+A named set of colours covering both the terminal and the app's own chrome (Tab bar, Tab dividers, Command Palette, Session Banner, Pane dividers, Bezel).
 _Avoid_: Colour scheme, profile
 
 **Bezel**:

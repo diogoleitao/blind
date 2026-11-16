@@ -54,7 +54,7 @@
       body.padded-panes .pane {
         padding: var(--pane-padding-y) var(--pane-padding-x);
       }
-      /* Stronger than the Tab bar's lines, in the colour the script mixes for them. */
+      /* Stronger than the Tab bar's borders, in the colour the script mixes for them. */
       .pane.divided-left {
         border-left: 1.5px solid var(--strong-divider);
       }
@@ -146,6 +146,12 @@
       .tab {
         flex: 1;
         min-width: 0;
+      }
+      /* A Tab divider between every two Tabs, as tall as their pills and in the colour of the Pane dividers, drawn in
+         the Tab's padding so the Tabs keep equal widths. The 6px is the Tab's top and bottom padding. */
+      .tab + .tab {
+        background: linear-gradient(var(--strong-divider), var(--strong-divider)) left center / 1px calc(100% - 6px)
+          no-repeat;
       }
       #session-label {
         padding: 3px 6px;

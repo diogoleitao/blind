@@ -61,8 +61,8 @@ let theme: Theme = defaultTheme
 const scrollBarWidth = 8
 document.documentElement.style.setProperty('--scroll-bar-width', `${scrollBarWidth}px`)
 
-// The Theme's divider colour pulled a quarter of the way towards its text colour: the dividers between Panes, the
-// Bezel and the scroll bar's thumb.
+// The Theme's divider colour pulled a quarter of the way towards its text colour: the dividers between Panes, the Tab
+// dividers, the Bezel and the scroll bar's thumb.
 function strongDivider ({ terminal, chrome }: Theme) {
   return mixColours(terminal.foreground, chrome.divider, 0.25)
 }
