@@ -999,6 +999,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   // The results that match the query, in the order they're offered.
   function searchPalette (query: string) {
     if (query === '' && settings.commandPalette.nesting === 'nested') return nestedResults()
+    if (query === '' && settings.commandPalette.nesting === 'hidden') return [...sessionResults(), ...actionResults()]
     const prefix = Object.keys(paletteScopes).find((candidate) => query.startsWith(candidate))
     if (prefix) return paletteScopes[prefix](query.slice(prefix.length))
     return searchResults([...sessionResults(), ...tabResults(), ...paneResults(), ...actionResults()], query)

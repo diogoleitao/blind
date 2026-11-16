@@ -3291,6 +3291,16 @@ describe('the Command Palette', () => {
       expect(core.settings().commandPalette.nesting).toBe('flat')
     })
 
+    it('set to hidden, hides them, going back to flat once the config file is gone', () => {
+      const { core, effects } = startCore(undefined, '{ "commandPalette": { "nesting": "hidden" } }')
+      expect(core.settings().commandPalette.nesting).toBe('hidden')
+      expect(effects).toEqual([])
+
+      core.configChanged(undefined)
+
+      expect(core.settings().commandPalette.nesting).toBe('flat')
+    })
+
     it('rejects anything else, keeping flat, telling the user', () => {
       const { core, effects } = startCore(undefined, '{ "commandPalette": { "nesting": "tree" } }')
 
@@ -3317,6 +3327,41 @@ describe('the Command Palette', () => {
         '0 session Session 1 (~)',
         ...actions,
       ])
+    })
+
+    it('set to hidden, offers every Session, then every app action, with no Tab or Pane', () => {
+      const { core } = startWithPaletteSessions()
+      const flat = core.paletteResults('')
+      const actions = summarize(flat)
+        .filter((result) => result.startsWith('action '))
+        .map((result) => `- ${result}`)
+
+      core.configChanged('{ "commandPalette": { "nesting": "hidden" } }')
+
+      const results = core.paletteResults('')
+      expect(results).toEqual(flat.filter((result) => result.type === 'session' || result.type === 'action'))
+      expect(outline(results)).toEqual([
+        '- session api',
+        '- session old',
+        '- session web',
+        '- session Session 1 (~)',
+        ...actions,
+      ])
+    })
+
+    it('set to hidden, keeps searches and the `ss `, `tt ` and `pp ` prefixes as flat lists them, scopes included', () => {
+      const { core } = startWithPaletteSessions()
+      const queries = ['w', 'ss ', 'tt ', 'pp ', 'pp src']
+      const scoped = '"tabSearchScope": "currentSession", "paneSearchScope": "currentTab"'
+      core.configChanged(`{ "commandPalette": { ${scoped} } }`)
+      const flat = queries.map((query) => core.paletteResults(query))
+      const empty = core.paletteResults('')
+
+      core.configChanged(`{ "commandPalette": { "nesting": "hidden", ${scoped} } }`)
+
+      expect(queries.map((query) => core.paletteResults(query))).toEqual(flat)
+      core.configChanged(`{ "commandPalette": { ${scoped} } }`)
+      expect(core.paletteResults('')).toEqual(empty)
     })
 
     it('set to nested, follows a Tab with two Panes by its Panes, and a Tab with one Pane by none', () => {
@@ -3971,7 +4016,7 @@ describe('Activity', () => {
     })
   })
 
-  it("marks the Command Palette's Session, Tab and Pane results that have it, flat and nested", () => {
+  it("marks the Command Palette's Session, Tab and Pane results that have it, flat, nested and hidden", () => {
     const { core, sessionId, tabId, left, topRight } = startWithThreePanes()
     core.newSession()
     core.notificationReceived(left)
@@ -3989,6 +4034,9 @@ describe('Activity', () => {
 
     core.configChanged('{ "commandPalette": { "nesting": "nested" } }')
     expect(withActivity(core.paletteResults(''))).toEqual([sessionId, left])
+
+    core.configChanged('{ "commandPalette": { "nesting": "hidden" } }')
+    expect(withActivity(core.paletteResults(''))).toEqual([sessionId])
   })
 
   describe("from a program's status reports", () => {

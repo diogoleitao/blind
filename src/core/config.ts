@@ -24,10 +24,10 @@ const paneSearchScopes = ['all', 'currentSession', 'currentTab'] as const
 // Tab's alone.
 export type PaneSearchScope = (typeof paneSearchScopes)[number]
 
-const paletteNestings = ['flat', 'nested'] as const
+const paletteNestings = ['flat', 'nested', 'hidden'] as const
 
-// How the Command Palette lists Tabs and Panes with nothing typed: every Tab and then every Pane after the Sessions, or
-// each Open Session's Tabs under it and each Tab's Panes under the Tab.
+// How the Command Palette lists Tabs and Panes with nothing typed: every Tab and then every Pane after the Sessions,
+// each Open Session's Tabs under it and each Tab's Panes under the Tab, or none, leaving them to a search.
 export type PaletteNesting = (typeof paletteNestings)[number]
 
 const loginLaunchStarts = ['hidden', 'shown'] as const
@@ -406,7 +406,7 @@ export const configSchema = {
         },
         nesting: {
           description:
-            "How the Command Palette lists Tabs and Panes when nothing is typed: flat lists every Tab, then every Pane, after the Sessions; nested lists each Open Session's Tabs under it and each Tab's Panes under the Tab, leaving out a Session's only Tab and a Tab's only Pane. Searching, and the ss, tt and pp prefixes, list them flat either way.",
+            "How the Command Palette lists Tabs and Panes when nothing is typed: flat lists every Tab, then every Pane, after the Sessions; nested lists each Open Session's Tabs under it and each Tab's Panes under the Tab, leaving out a Session's only Tab and a Tab's only Pane; hidden lists none, leaving them to a search. Searching, and the ss, tt and pp prefixes, list them flat either way.",
           enum: paletteNestings,
           default: defaultSettings.commandPalette.nesting,
         },
