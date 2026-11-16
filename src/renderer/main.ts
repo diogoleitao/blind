@@ -591,6 +591,11 @@ function renderPalette () {
       return element
     })
   )
+  scrollToSelectedResult()
+}
+
+// Only scrolls while the palette shows.
+function scrollToSelectedResult () {
   paletteList.children[selectedResult]?.scrollIntoView({ block: 'nearest' })
 }
 
@@ -679,15 +684,31 @@ function movePaletteTo (position: number) {
   placePalette()
 }
 
+// The input takes the keyboard once the palette shows, and the selected result, listed while it was hidden, scrolls
+// into view.
+function showPalette () {
+  palette.hidden = false
+  placePalette()
+  scrollToSelectedResult()
+  paletteInput.focus()
+}
+
+// Searches, and shows the palette once the results are in, so it never shows with the results it had before. Until
+// then the keyboard stays with the focused Pane. A newer search, or a prompt, takes over the showing.
+function searchThenShowPalette () {
+  searchPalette()
+  const search = searchCount
+  latestSearch.then(() => {
+    if (search === searchCount) showPalette()
+  })
+}
+
 function openPalette () {
   prompt = undefined
   picking = undefined
-  palette.hidden = false
-  placePalette()
   paletteInput.placeholder = ''
   paletteInput.value = ''
-  paletteInput.focus()
-  searchPalette()
+  searchThenShowPalette()
 }
 
 // Offers the suggestion selected, so typing replaces it and Enter accepts it. A search still in flight is dropped.
@@ -697,11 +718,9 @@ function openPrompt (asked: PalettePrompt) {
   searchCount += 1
   paletteResults = []
   renderPalette()
-  palette.hidden = false
-  placePalette()
   paletteInput.placeholder = promptPlaceholders[asked.type]
   paletteInput.value = asked.suggestion
-  paletteInput.focus()
+  showPalette()
   paletteInput.select()
 }
 
@@ -716,18 +735,17 @@ function openPicker (kind: NonNullable<typeof picking>, inEffect: string) {
   prompt = undefined
   picking = kind
   choiceToSelect = inEffect
-  palette.hidden = false
-  placePalette()
   paletteInput.placeholder = pickerPlaceholders[kind]
   paletteInput.value = ''
-  paletteInput.focus()
-  searchPalette()
+  searchThenShowPalette()
 }
 
-// The focused Pane's terminal takes the keyboard back. A drag under way ends without moving the palette.
+// The focused Pane's terminal takes the keyboard back. A drag under way ends without moving the palette, and a search
+// still in flight is dropped, so it can't show the palette again.
 function closePalette () {
   if (palette.hidden) return
   palette.hidden = true
+  searchCount += 1
   prompt = undefined
   picking = undefined
   paletteDrag = undefined
