@@ -129,9 +129,15 @@ export type PaletteAction = keyof typeof paletteActionLabels
 // How deep a result sits in the Command Palette's nested view: 0 at the top, 1 under a Session, 2 under a Tab.
 export type PaletteLevel = 0 | 1 | 2
 
+// The mark the Command Palette shows before a Session's, Tab's or Pane's name, by its kind.
+const kindMarkers = { session: 'Ⓢ', tab: 'Ⓣ', pane: 'Ⓟ' } as const
+
+export type KindMarker = (typeof kindMarkers)[keyof typeof kindMarkers]
+
 // One entry the Command Palette offers. `current` marks the Current Session, Current Tab or Current Pane, where the
 // user already is, which the Command Palette lists and lets the user select but not choose. `activity` marks a Session,
-// Tab or Pane with Activity. `level` is set in the nested view alone.
+// Tab or Pane with Activity. `level` is set in the nested view alone. `marker` is set while the
+// commandPalette.kindMarkers setting shows them.
 export type PaletteResult =
   | {
     type: 'session';
@@ -141,6 +147,7 @@ export type PaletteResult =
     current: boolean;
     activity: boolean;
     level?: PaletteLevel;
+    marker?: KindMarker;
   }
   | {
     type: 'tab';
@@ -150,6 +157,7 @@ export type PaletteResult =
     current: boolean;
     activity: boolean;
     level?: PaletteLevel;
+    marker?: KindMarker;
   }
   | {
     type: 'pane';
@@ -160,6 +168,7 @@ export type PaletteResult =
     current: boolean;
     activity: boolean;
     level?: PaletteLevel;
+    marker?: KindMarker;
   }
   | { type: 'action'; action: PaletteAction; label: string; level?: PaletteLevel }
   // A Theme, labelled with its name.
@@ -895,7 +904,15 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       closed: session.status === 'closed',
       current: session.id === state.currentSessionId,
       activity: sessionHasActivity(session),
+      ...markerOf('session'),
     }
+  }
+
+  // The kind's marker, as a result's `marker`, while the commandPalette.kindMarkers setting shows them and the
+  // commandPalette.nesting setting isn't hidden, searches included; else nothing.
+  function markerOf (type: keyof typeof kindMarkers) {
+    const shown = settings.commandPalette.kindMarkers && settings.commandPalette.nesting !== 'hidden'
+    return shown ? { marker: kindMarkers[type] } : {}
   }
 
   function openSessionsInCycleOrder () {
@@ -937,6 +954,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       sessionLabel: labelOf(session),
       current: isCurrentTab(session, tab),
       activity: tabHasActivity(tab),
+      ...markerOf('tab'),
     }))
   }
 
@@ -950,6 +968,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
         sessionLabel: labelOf(session),
         current: isCurrentPane(session, tab, pane),
         activity: pane.id in activity,
+        ...markerOf('pane'),
       }))
     )
   }

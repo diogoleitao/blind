@@ -12,7 +12,7 @@ import '@xterm/xterm/css/xterm.css'
 import { isNotification, notificationOscs, programStatus, programStatusSupported } from '../core/attention'
 import { mixColours, withOpacity } from '../core/colours'
 import { defaultSettings } from '../core/config'
-import type { PaletteResult } from '../core/core'
+import type { KindMarker, PaletteResult } from '../core/core'
 import type { KeyPress } from '../core/key-bindings'
 import type { PaneRect } from '../core/layout'
 import { findLinks } from '../core/links'
@@ -559,6 +559,14 @@ function resultDetail (result: PaletteResult) {
   return ''
 }
 
+// The mark before a Session's, Tab's or Pane's name, e.g. `Ⓣ`, under the commandPalette.kindMarkers setting.
+function kindMarkerElement (marker: KindMarker) {
+  const element = document.createElement('span')
+  element.className = 'kind-marker'
+  element.textContent = marker
+  return element
+}
+
 // How deep the result sits in the nested view; undefined outside it.
 function levelOf (result: PaletteResult | undefined) {
   return result && 'level' in result ? result.level : undefined
@@ -578,6 +586,7 @@ function renderPalette () {
       // A nested Tab or Pane shows its title alone under its Session or Tab.
       const label = document.createElement('span')
       if (level) label.append('↳ ')
+      if ('marker' in result && result.marker) label.append(kindMarkerElement(result.marker))
       if ('activity' in result && result.activity) label.append(activityDot())
       label.append(result.label)
       const detail = document.createElement('span')

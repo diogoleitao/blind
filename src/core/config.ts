@@ -119,6 +119,8 @@ export interface Settings {
     tabSearchScope: TabSearchScope;
     paneSearchScope: PaneSearchScope;
     nesting: PaletteNesting;
+    // Whether Sessions, Tabs and Panes show their kind's marker before their names, while nesting isn't hidden.
+    kindMarkers: boolean;
   };
   // The name of the Theme in effect, built in or from a Theme file.
   theme: string;
@@ -159,6 +161,7 @@ export const defaultSettings: Settings = {
     tabSearchScope: 'all',
     paneSearchScope: 'all',
     nesting: 'flat',
+    kindMarkers: false,
   },
   theme: defaultTheme.name,
   background: {
@@ -239,6 +242,7 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers<Settings>
     tabSearchScope: oneOf(tabSearchScopes),
     paneSearchScope: oneOf(paneSearchScopes),
     nesting: oneOf(paletteNestings),
+    kindMarkers: (value) => (typeof value === 'boolean' ? value : invalid),
   }),
   // Theme names are unique ignoring case, so the setting matches one ignoring case and takes its spelling.
   theme: (value) =>
@@ -409,6 +413,12 @@ export const configSchema = {
             "How the Command Palette lists Tabs and Panes when nothing is typed: flat lists every Tab, then every Pane, after the Sessions; nested lists each Open Session's Tabs under it and each Tab's Panes under the Tab, leaving out a Session's only Tab and a Tab's only Pane; hidden lists none, leaving them to a search. Searching, and the ss, tt and pp prefixes, list them flat either way.",
           enum: paletteNestings,
           default: defaultSettings.commandPalette.nesting,
+        },
+        kindMarkers: {
+          description:
+            'Whether the Command Palette marks Sessions, Tabs and Panes with Ⓢ, Ⓣ and Ⓟ before their names. Only while nesting is flat or nested; hidden shows none, even when searching.',
+          type: 'boolean',
+          default: defaultSettings.commandPalette.kindMarkers,
         },
       },
     },

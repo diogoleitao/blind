@@ -56,7 +56,7 @@ describe('the schema written next to the config file', () => {
       tab: ['startDirectory', 'renameSuggestion'],
       pane: ['scrollbackLines', 'startDirectory', 'padding', 'scrollBar'],
       loginLaunch: ['start', 'withNoOpenSessions'],
-      commandPalette: ['sessionSearchOrder', 'tabSearchScope', 'paneSearchScope', 'nesting'],
+      commandPalette: ['sessionSearchOrder', 'tabSearchScope', 'paneSearchScope', 'nesting', 'kindMarkers'],
       background: ['transparency', 'effect', 'blurRadius'],
     })
     for (const [, group] of groups) expect(group.additionalProperties).toBe(false)
@@ -72,7 +72,7 @@ describe('the schema written next to the config file', () => {
     expect(defaults('pane')).toEqual({ scrollbackLines: 10_000, startDirectory: 'current', padding: 'padded', scrollBar: 'none' })
     expect(defaults('loginLaunch')).toEqual({ start: 'hidden', withNoOpenSessions: 'hotkey' })
     expect(defaults('commandPalette')).toEqual({
-      sessionSearchOrder: 'openFirst', tabSearchScope: 'all', paneSearchScope: 'all', nesting: 'flat',
+      sessionSearchOrder: 'openFirst', tabSearchScope: 'all', paneSearchScope: 'all', nesting: 'flat', kindMarkers: false,
     })
     expect(defaults('background')).toEqual({ transparency: 25, effect: 'blur', blurRadius: 15 })
   })

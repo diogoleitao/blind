@@ -3442,6 +3442,93 @@ describe('the Command Palette', () => {
     })
   })
 
+  describe('the palette kind markers setting', () => {
+    it('is off by default, and on once set, going back to off once the config file is gone', () => {
+      const { core, effects } = startCore(undefined, '{ "commandPalette": { "kindMarkers": true } }')
+      expect(core.settings().commandPalette.kindMarkers).toBe(true)
+      expect(effects).toEqual([])
+
+      core.configChanged(undefined)
+
+      expect(core.settings().commandPalette.kindMarkers).toBe(false)
+    })
+
+    it('rejects anything but true or false, keeping off, telling the user', () => {
+      const { core, effects } = startCore(undefined, '{ "commandPalette": { "kindMarkers": "yes" } }')
+
+      expect(core.settings().commandPalette.kindMarkers).toBe(false)
+      expect(effects).toEqual([{ type: 'settingsRejected', settings: ['commandPalette.kindMarkers'] }])
+    })
+
+    it('set on, marks each Session with Ⓢ, Tab with Ⓣ and Pane with Ⓟ, the Current ones too, and no app action', () => {
+      const { core } = startWithPaletteSessions()
+
+      core.configChanged('{ "commandPalette": { "kindMarkers": true } }')
+
+      const results = core.paletteResults('')
+      expect(outline(results.filter((result) => result.type !== 'action'), 'marker')).toEqual([
+        'Ⓢ session api',
+        'Ⓢ session old',
+        'Ⓢ session web',
+        'Ⓢ session Session 1 (~)',
+        'Ⓣ tab api',
+        'Ⓣ tab web',
+        'Ⓣ tab vim',
+        'Ⓣ tab me',
+        'Ⓟ pane api',
+        'Ⓟ pane web',
+        'Ⓟ pane src',
+        'Ⓟ pane vim',
+        'Ⓟ pane me',
+      ])
+      expect(results.filter((result) => result.type === 'action').every((result) => !('marker' in result))).toBe(true)
+    })
+
+    it('set on with the palette nesting setting hidden, marks nothing, searches and prefixes included', () => {
+      const { core } = startWithPaletteSessions()
+      const queries = ['', 'w', 'ss ', 'tt ', 'pp ', 'pp src']
+
+      core.configChanged('{ "commandPalette": { "kindMarkers": true, "nesting": "hidden" } }')
+
+      for (const query of queries) {
+        expect(core.paletteResults(query).filter((result) => 'marker' in result)).toEqual([])
+      }
+    })
+
+    it('set on with the palette nesting setting nested, marks the nested Tabs and Panes too', () => {
+      const { core } = startWithPaletteSessions()
+
+      core.configChanged('{ "commandPalette": { "kindMarkers": true, "nesting": "nested" } }')
+
+      expect(outline(core.paletteResults('').filter((result) => result.type !== 'action'), 'marker')).toEqual([
+        'Ⓢ session api',
+        'Ⓢ session old',
+        'Ⓢ session web',
+        'Ⓣ tab web',
+        'Ⓣ tab vim',
+        'Ⓟ pane src',
+        'Ⓟ pane vim',
+        'Ⓢ session Session 1 (~)',
+      ])
+    })
+
+    it('set on with the palette nesting setting flat or nested, marks searches and the `ss `, `tt ` and `pp ` prefixes', () => {
+      const { core } = startWithPaletteSessions()
+      const expected: Record<string, string> = { session: 'Ⓢ', tab: 'Ⓣ', pane: 'Ⓟ', action: '-' }
+
+      for (const nesting of ['flat', 'nested']) {
+        core.configChanged(`{ "commandPalette": { "kindMarkers": true, "nesting": "${nesting}" } }`)
+
+        const searched = core.paletteResults('w')
+        expect(new Set(searched.map((result) => result.type))).toEqual(new Set(['session', 'tab', 'pane', 'action']))
+        expect(outline(searched, 'marker')).toEqual(searched.map((result) => `${expected[result.type]} ${result.type} ${result.label}`))
+        expect(outline(core.paletteResults('ss o'), 'marker')).toEqual(['Ⓢ session Session 1 (~)', 'Ⓢ session old'])
+        expect(outline(core.paletteResults('tt vim'), 'marker')).toEqual(['Ⓣ tab vim'])
+        expect(outline(core.paletteResults('pp vim'), 'marker')).toEqual(['Ⓟ pane vim'])
+      }
+    })
+  })
+
   describe('the Tab search scope setting', () => {
     it('set to currentSession, narrows with `tt ` to the Tabs of the Current Session alone', () => {
       const { core } = startWithPaletteSessions()
@@ -4110,9 +4197,13 @@ function summarize (results: PaletteResult[]) {
   return results.map((result) => `${result.type} ${result.label}`)
 }
 
-// Each result as its level in the nested view, its type and its label, e.g. `2 pane vim`; `-` for a result without one.
-function outline (results: PaletteResult[]) {
-  return results.map((result) => `${'level' in result ? result.level : '-'} ${result.type} ${result.label}`)
+// Each result as its level in the nested view, or else the field asked for, then its type and its label, e.g.
+// `2 pane vim`, or `Ⓟ pane vim` for its kind's marker; `-` for a result without the field.
+function outline (results: PaletteResult[], field: 'level' | 'marker' = 'level') {
+  return results.map((result) => {
+    const shown = field in result ? (result as Partial<Record<typeof field, string | number>>)[field] : '-'
+    return `${shown} ${result.type} ${result.label}`
+  })
 }
 
 // The effects of one type, in the order they were emitted.
