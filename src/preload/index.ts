@@ -56,6 +56,11 @@ const api: BlindApi = {
   },
   searchMenuBarIcons: (query) => ipcRenderer.invoke(channels.searchMenuBarIcons, query),
   previewMenuBarIcon: (icon) => ipcRenderer.send(channels.previewMenuBarIcon, icon),
+  onPickActivitySound: (listener) => {
+    ipcRenderer.on(channels.pickActivitySound, (_event, sound) => listener(sound))
+  },
+  searchActivitySounds: (query) => ipcRenderer.invoke(channels.searchActivitySounds, query),
+  previewActivitySound: (sound) => ipcRenderer.send(channels.previewActivitySound, sound),
   onFindInPane: (listener) => {
     ipcRenderer.on(channels.findInPane, (_event, paneId) => listener(paneId))
   },

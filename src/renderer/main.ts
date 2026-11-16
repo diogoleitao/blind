@@ -522,10 +522,13 @@ let searchCount = 0
 let latestSearch = Promise.resolve()
 // Set while the palette asks for a name or title instead of searching.
 let prompt: PalettePrompt | undefined
-// Set while the palette lists the Themes or the menu bar icons instead of searching, each selected one previewed.
-let picking: 'theme' | 'menuBarIcon' | undefined
+// Set while the palette lists the Themes, the menu bar icons or the Activity sounds instead of searching, each selected
+// one previewed.
+let picking: 'theme' | 'menuBarIcon' | 'activitySound' | undefined
 // The choice the next results select, once: the one in effect when the palette started listing them.
 let choiceToSelect: string | undefined
+// The choice the picker last previewed, starting at the one in effect.
+let previewedChoice: string | undefined
 
 const promptPlaceholders: Record<PalettePrompt['type'], string> = {
   askSessionName: 'Session name',
@@ -539,6 +542,7 @@ const resultKinds: Record<PaletteResult['type'], string> = {
   action: 'Action',
   theme: 'Theme',
   menuBarIcon: 'Menu Bar Icon',
+  activitySound: 'Activity Sound',
 }
 
 // Whether the result is the Current Session, Current Tab or Current Pane, which can be selected but not chosen.
@@ -608,23 +612,31 @@ function scrollToSelectedResult () {
   paletteList.children[selectedResult]?.scrollIntoView({ block: 'nearest' })
 }
 
-// The Theme's name or the menu bar icon a result is; absent for any other result.
+// The Theme's name, the menu bar icon or the Activity sound a result is; absent for any other result.
 function choiceOf (result: PaletteResult) {
   if (result.type === 'theme') return result.name
   if (result.type === 'menuBarIcon') return result.icon
+  if (result.type === 'activitySound') return result.sound
   return undefined
 }
 
-// Puts the selected Theme or menu bar icon in effect while the palette lists them.
+// Puts the selected Theme or menu bar icon in effect, or plays the selected Activity sound, while the palette lists them.
+// Only a selection moved to another choice previews it, so opening the picker or typing that leaves the selection where
+// it was plays no sound.
 function previewSelectedChoice () {
   const result = paletteResults[selectedResult]
+  const choice = result && choiceOf(result)
+  if (choice === undefined || choice === previewedChoice) return
+  previewedChoice = choice
   if (picking === 'theme' && result?.type === 'theme') blind.previewTheme(result.name)
   if (picking === 'menuBarIcon' && result?.type === 'menuBarIcon') blind.previewMenuBarIcon(result.icon)
+  if (picking === 'activitySound' && result?.type === 'activitySound') blind.previewActivitySound(result.sound)
 }
 
 const pickerSearches = {
   theme: blind.searchThemes,
   menuBarIcon: blind.searchMenuBarIcons,
+  activitySound: blind.searchActivitySounds,
 }
 
 function searchPalette () {
@@ -736,14 +748,16 @@ function openPrompt (asked: PalettePrompt) {
 const pickerPlaceholders = {
   theme: 'Theme',
   menuBarIcon: 'Menu bar icon',
+  activitySound: 'Activity sound',
 }
 
-// Lists the Themes or the menu bar icons with the one in effect selected. Choosing one keeps it; dismissing restores
-// the one from before.
+// Lists the Themes, the menu bar icons or the Activity sounds with the one in effect selected. Choosing one keeps it;
+// dismissing restores the one from before.
 function openPicker (kind: NonNullable<typeof picking>, inEffect: string) {
   prompt = undefined
   picking = kind
   choiceToSelect = inEffect
+  previewedChoice = inEffect
   paletteInput.placeholder = pickerPlaceholders[kind]
   paletteInput.value = ''
   searchThenShowPalette()
@@ -838,6 +852,7 @@ blind.onTheme(applyTheme)
 blind.onOpenPalette(openPalette)
 blind.onPickTheme(() => openPicker('theme', theme.name))
 blind.onPickMenuBarIcon((icon) => openPicker('menuBarIcon', icon))
+blind.onPickActivitySound((sound) => openPicker('activitySound', sound))
 blind.onPalettePrompt(openPrompt)
 blind.onPalettePosition(movePaletteTo)
 blind.onPaneData(writeToTerminal)

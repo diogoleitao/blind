@@ -1,5 +1,5 @@
 import type { ProgramStatusReport } from '../core/attention'
-import type { MenuBarIcon, Settings } from '../core/config'
+import type { ActivitySound, MenuBarIcon, Settings } from '../core/config'
 import type { Effect, PaletteResult } from '../core/core'
 import type { PaneRect } from '../core/layout'
 import type { PaneId, TabId } from '../core/state'
@@ -59,6 +59,9 @@ export const channels = {
   pickMenuBarIcon: 'menuBarIcon:pick',
   searchMenuBarIcons: 'menuBarIcon:search',
   previewMenuBarIcon: 'menuBarIcon:preview',
+  pickActivitySound: 'activitySound:pick',
+  searchActivitySounds: 'activitySound:search',
+  previewActivitySound: 'activitySound:preview',
   findInPane: 'pane:find',
   clearScrollback: 'pane:clear',
   copy: 'clipboard:copy',
@@ -117,6 +120,12 @@ export interface BlindApi {
   searchMenuBarIcons(query: string): Promise<PaletteResult[]>;
   // The menu bar icon the Command Palette's selection moved to.
   previewMenuBarIcon(icon: MenuBarIcon): void;
+  // Called with the sound the activity.sound setting names when the Command Palette should list the Activity sounds
+  // instead of searching.
+  onPickActivitySound(listener: (sound: ActivitySound) => void): void;
+  searchActivitySounds(query: string): Promise<PaletteResult[]>;
+  // The Activity sound the Command Palette's selection moved to.
+  previewActivitySound(sound: ActivitySound): void;
   // Called when the Pane's scrollback should be searched.
   onFindInPane(listener: (paneId: PaneId) => void): void;
   // Called when the Pane's scrollback should be cleared.

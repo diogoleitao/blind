@@ -9,6 +9,8 @@ import {
   successorOf,
 } from './layout'
 import {
+  type ActivitySound,
+  activitySounds,
   defaultSettings,
   type MenuBarIcon,
   menuBarIcons,
@@ -72,12 +74,16 @@ export type Effect =
   | { type: 'applyTheme'; theme: Theme }
   // The menu bar icon in effect changed.
   | { type: 'applyMenuBarIcon'; icon: MenuBarIcon }
+  // Plays the sound, for a Pane gaining Activity or for the Command Palette's selection moving to it.
+  | { type: 'playActivitySound'; sound: ActivitySound }
   // Replaces the config file's text, e.g. to set the theme setting to the Theme chosen in the Command Palette.
   | { type: 'writeConfig'; text: string }
   // Has the Command Palette list the Themes over the Session's window.
   | { type: 'pickTheme'; sessionId: SessionId }
   // Has the Command Palette list the menu bar icons, like `pickTheme`.
   | { type: 'pickMenuBarIcon'; sessionId: SessionId }
+  // Has the Command Palette list the Activity sounds, like `pickTheme`.
+  | { type: 'pickActivitySound'; sessionId: SessionId }
   // Tells the user the Theme files, or their fields, that were rejected, as `loadThemes` names them.
   | { type: 'themesRejected'; rejected: string[] }
   // Opens a search over the Pane's scrollback in the Session's window.
@@ -119,6 +125,7 @@ const paletteActionLabels = {
   clearScrollback: 'Clear Scrollback',
   changeTheme: 'Change Theme',
   changeMenuBarIcon: 'Change Menu Bar Icon',
+  changeActivitySound: 'Change Activity Sound',
   resetCommandPalettePosition: 'Reset Command Palette Position',
   openSettings: 'Open Settings',
   quit: 'Quit Blind',
@@ -174,6 +181,8 @@ export type PaletteResult =
   // A Theme, labelled with its name.
   | { type: 'theme'; name: string; label: string }
   | { type: 'menuBarIcon'; icon: MenuBarIcon; label: string }
+  // An Activity sound, labelled with its name.
+  | { type: 'activitySound'; sound: ActivitySound; label: string }
 
 const menuBarIconLabels: Record<MenuBarIcon, string> = {
   monochrome: 'Monochrome',
@@ -261,6 +270,10 @@ export interface Core {
   menuBarIconResults(query: string): PaletteResult[];
   // Like `previewTheme`, for the menu bar icon.
   previewMenuBarIcon(icon: MenuBarIcon): void;
+  // The Activity sounds the Command Palette offers for a query, by name.
+  activitySoundResults(query: string): PaletteResult[];
+  // Plays the Activity sound the Command Palette's selection moved to, whatever the activity.ring setting says.
+  previewActivitySound(sound: ActivitySound): void;
   // Opens an Unnamed Session with one Tab at the home directory and makes it the Current Session.
   newSession(): void;
   // Opens a Closed Session again as the Current Session, restoring it as Restore does. One closed through its last Tab
@@ -404,8 +417,11 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return findTheme(previewedTheme) ?? findTheme(settings.theme) ?? defaultTheme
   }
 
-  // Sets the setting in the config file too, unless the file can't be read as it is now.
-  function writeSetting (name: keyof Settings, value: string) {
+  // Sets the setting, or the setting in a group, in the config file too, unless the file can't be read as it is now.
+  function writeSetting<Group extends keyof Settings> (
+    name: keyof Settings | readonly [group: Group, name: keyof Settings[Group] & string],
+    value: string
+  ) {
     if (!configReadable) return emit({ type: 'configUnreadable' })
     configText = setJsoncProperty(configText ?? starterConfig, name, value)
     emit({ type: 'writeConfig', text: configText })
@@ -428,6 +444,12 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     settings = { ...settings, menuBarIcon: icon }
     applyMenuBarIconInEffect()
     writeSetting('menuBarIcon', icon)
+  }
+
+  // Sets the activity.sound setting to the sound chosen.
+  function chooseActivitySound (sound: ActivitySound) {
+    settings = { ...settings, activity: { ...settings.activity, sound } }
+    writeSetting(['activity', 'sound'], sound)
   }
 
   // Noting whether the theme setting names no Theme loaded.
@@ -487,13 +509,22 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return findSessionWithPane(paneId)?.status === 'open' && paneId !== currentPaneId()
   }
 
-  // A Pane left with no reason for Activity has none.
+  // A Pane left with no reason for Activity has none. A Pane gaining Activity plays the Activity sound.
   function updatePaneActivity (paneId: PaneId, update: (pane: PaneActivity) => PaneActivity) {
     const current = activity[paneId] ?? { notified: false, records: [] }
     const updated = update(current)
     if (updated === current) return
     const { [paneId]: _replaced, ...others } = activity
-    setActivity(updated.notified || updated.records.length > 0 ? { ...others, [paneId]: updated } : others)
+    const hasActivity = updated.notified || updated.records.length > 0
+    const gained = hasActivity && !(paneId in activity)
+    setActivity(hasActivity ? { ...others, [paneId]: updated } : others)
+    if (gained && ringsNow()) emit({ type: 'playActivitySound', sound: settings.activity.sound })
+  }
+
+  // Whether the activity.ring setting lets a Pane gaining Activity play the Activity sound now.
+  function ringsNow () {
+    const { ring } = settings.activity
+    return ring === 'always' || (ring === 'whileHidden' && !appShown)
   }
 
   // The Current Pane's Activity clears as it becomes the Current Pane, and a Pane's goes when it closes or its Session
@@ -1174,6 +1205,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     },
     changeTheme: (sessionId) => emit({ type: 'pickTheme', sessionId }),
     changeMenuBarIcon: (sessionId) => emit({ type: 'pickMenuBarIcon', sessionId }),
+    changeActivitySound: (sessionId) => emit({ type: 'pickActivitySound', sessionId }),
   }
 
   // Without a Session, only the actions that don't act on one run.
@@ -1435,6 +1467,13 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       )
       return searchResults(results, query)
     },
+    previewActivitySound: command((sound) => {
+      if (activitySounds.includes(sound)) emit({ type: 'playActivitySound', sound })
+    }),
+    activitySoundResults (query) {
+      const results = activitySounds.map((sound): PaletteResult => ({ type: 'activitySound', sound, label: sound }))
+      return searchResults(results, query)
+    },
     choosePaletteResult: command((result) => {
       if (result.type === 'session') jumpToSession(result.sessionId)
       if (result.type === 'tab') jumpToTab(result.tabId)
@@ -1442,6 +1481,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       if (result.type === 'action') runAction(result.action, state.currentSessionId)
       if (result.type === 'theme') chooseTheme(result.name)
       if (result.type === 'menuBarIcon') chooseMenuBarIcon(result.icon)
+      if (result.type === 'activitySound') chooseActivitySound(result.sound)
     }),
     paneRects (tabId) {
       const tab = findTab(tabId)

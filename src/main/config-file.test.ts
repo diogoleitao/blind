@@ -47,8 +47,8 @@ describe('the schema written next to the config file', () => {
     const groups = Object.entries(schema.properties as Record<string, { type?: string; properties?: object; additionalProperties?: boolean }>)
       .filter(([, property]) => property.type === 'object' && property.properties)
     expect(Object.keys(schema.properties)).toEqual([
-      '$schema', 'session', 'tab', 'pane', 'shell', 'loginLaunch', 'sessionBanner', 'commandPalette', 'theme',
-      'background', 'menuBarIcon', 'keyBindings',
+      '$schema', 'session', 'tab', 'pane', 'shell', 'loginLaunch', 'sessionBanner', 'commandPalette', 'activity',
+      'theme', 'background', 'menuBarIcon', 'keyBindings',
     ])
     expect(schema.additionalProperties).toBe(false)
     expect(Object.fromEntries(groups.map(([name, group]) => [name, Object.keys(group.properties!)]))).toMatchObject({
@@ -57,6 +57,7 @@ describe('the schema written next to the config file', () => {
       pane: ['scrollbackLines', 'startDirectory', 'padding', 'scrollBar'],
       loginLaunch: ['start', 'withNoOpenSessions'],
       commandPalette: ['sessionSearchOrder', 'tabSearchScope', 'paneSearchScope', 'nesting', 'kindMarkers'],
+      activity: ['sound', 'ring'],
       background: ['transparency', 'effect', 'blurRadius'],
     })
     for (const [, group] of groups) expect(group.additionalProperties).toBe(false)

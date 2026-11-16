@@ -3630,6 +3630,7 @@ describe('the Command Palette', () => {
       'action Clear Scrollback',
       'action Change Theme',
       'action Change Menu Bar Icon',
+      'action Change Activity Sound',
       'action Reset Command Palette Position',
       'action Open Settings',
       'action Quit Blind',
@@ -3686,6 +3687,7 @@ describe('the Command Palette', () => {
       'action Split Pane Vertically',
       'action Focus Pane Left',
       'action Focus Pane Right',
+      'action Change Activity Sound',
       'action Reset Command Palette Position',
       'action Open Settings',
     ])
@@ -4177,6 +4179,199 @@ describe('Activity', () => {
 
       expect(core.tabHasActivity(tabId)).toBe(true)
     })
+  })
+})
+
+describe('the Activity sound', () => {
+  it('plays Purr by default when a Pane gains Activity while the app is hidden', () => {
+    const { core, effects, left } = startWithThreePanes()
+    core.hotkeyPressed()
+
+    core.notificationReceived(left)
+
+    expect(effectsOfType(effects, 'playActivitySound')).toEqual([{ type: 'playActivitySound', sound: 'Purr' }])
+  })
+
+  it('plays by default while the app is hidden by losing focus, or by starting hidden at login', () => {
+    const lostFocus = startWithThreePanes()
+    lostFocus.core.focusLost()
+    lostFocus.core.notificationReceived(lostFocus.left)
+
+    const atLogin = startCore(undefined, '{ "loginLaunch": { "withNoOpenSessions": "new" } }', true)
+    const sessionId = atLogin.core.state().sessions[0].id
+    atLogin.core.splitPane(sessionId, 'vertical')
+    const [left] = atLogin.core.state().sessions[0].tabs[0].panes.map((pane) => pane.id)
+    atLogin.core.notificationReceived(left)
+
+    expect(effectsOfType(lostFocus.effects, 'playActivitySound')).toEqual([{ type: 'playActivitySound', sound: 'Purr' }])
+    expect(effectsOfType(atLogin.effects, 'playActivitySound')).toEqual([{ type: 'playActivitySound', sound: 'Purr' }])
+  })
+
+  it('takes an activity.sound setting ignoring case, as the sound is spelled', () => {
+    const { core, effects, left } = startWithThreePanes()
+    core.hotkeyPressed()
+
+    core.configChanged('{ "activity": { "sound": "glass" } }')
+    core.notificationReceived(left)
+
+    expect(core.settings().activity.sound).toBe('Glass')
+    expect(effectsOfType(effects, 'settingsRejected')).toEqual([])
+    expect(effectsOfType(effects, 'playActivitySound')).toEqual([{ type: 'playActivitySound', sound: 'Glass' }])
+  })
+
+  it('plays nothing by default while the app is shown, leaving Activity to show on its own', () => {
+    const { core, effects, tabId, left } = startWithThreePanes()
+
+    core.notificationReceived(left)
+
+    expect(core.tabHasActivity(tabId)).toBe(true)
+    expect(effectsOfType(effects, 'playActivitySound')).toEqual([])
+  })
+
+  it('plays the sound the activity.sound setting names, shown or hidden, with activity.ring set to always', () => {
+    const { core, effects, left, topRight } = startWithThreePanes()
+    core.configChanged('{ "activity": { "sound": "Glass", "ring": "always" } }')
+
+    core.notificationReceived(left)
+    core.hotkeyPressed()
+    core.notificationReceived(topRight)
+
+    expect(effectsOfType(effects, 'playActivitySound')).toEqual([
+      { type: 'playActivitySound', sound: 'Glass' },
+      { type: 'playActivitySound', sound: 'Glass' },
+    ])
+  })
+
+  it('plays nothing with activity.ring set to never', () => {
+    const { core, effects, tabId, left } = startWithThreePanes()
+    core.configChanged('{ "activity": { "ring": "never" } }')
+    core.hotkeyPressed()
+
+    core.notificationReceived(left)
+
+    expect(core.tabHasActivity(tabId)).toBe(true)
+    expect(effectsOfType(effects, 'playActivitySound')).toEqual([])
+  })
+
+  it('plays once per Pane gaining Activity, and again only once its Activity has cleared', () => {
+    const { core, effects, left, topRight, bottomRight } = startWithThreePanes()
+    core.hotkeyPressed()
+
+    core.notificationReceived(left)
+    core.notificationReceived(left)
+    core.notificationReceived(topRight)
+    expect(effectsOfType(effects, 'playActivitySound')).toHaveLength(2)
+
+    core.hotkeyPressed()
+    core.focusPane(left)
+    core.focusPane(bottomRight)
+    core.hotkeyPressed()
+    core.notificationReceived(left)
+    expect(effectsOfType(effects, 'playActivitySound')).toHaveLength(3)
+  })
+
+  it("plays for a program's status record that wants the user, but not for more records on a Pane that has Activity", () => {
+    const { core, effects, left } = startWithThreePanes()
+    core.hotkeyPressed()
+
+    core.programStatusReported(left, { id: 'a', state: 'working' })
+    core.programStatusReported(left, { id: 'a', state: 'blocked' })
+    core.programStatusReported(left, { id: 'b', state: 'done' })
+    core.notificationReceived(left)
+
+    expect(effectsOfType(effects, 'playActivitySound')).toEqual([{ type: 'playActivitySound', sound: 'Purr' }])
+  })
+
+  it('plays nothing for the Current Pane, which never gains Activity, even with activity.ring set to always', () => {
+    const { core, effects, bottomRight } = startWithThreePanes()
+    core.configChanged('{ "activity": { "ring": "always" } }')
+
+    core.notificationReceived(bottomRight)
+    core.hotkeyPressed()
+    core.notificationReceived(bottomRight)
+
+    expect(effectsOfType(effects, 'playActivitySound')).toEqual([])
+  })
+
+  it('falls back to Purr for an activity.sound setting naming no sound, telling the user', () => {
+    const { core, effects, left } = startWithThreePanes()
+    core.hotkeyPressed()
+
+    core.configChanged('{ "activity": { "sound": "Gong" } }')
+    core.notificationReceived(left)
+
+    expect(effectsOfType(effects, 'settingsRejected')).toEqual([{ type: 'settingsRejected', settings: ['activity.sound'] }])
+    expect(effectsOfType(effects, 'playActivitySound')).toEqual([{ type: 'playActivitySound', sound: 'Purr' }])
+  })
+
+  it("choosing Change Activity Sound asks for a sound over the Current Session's window", () => {
+    const { core, effects } = startCore()
+    const sessionId = core.state().sessions[0].id
+
+    chooseAction(core, 'Change Activity Sound')
+
+    expect(effects).toEqual([{ type: 'pickActivitySound', sessionId }])
+  })
+
+  it('lists the sounds, playing each one browsed even with activity.ring set to never, and keeps the setting when the Command Palette is dismissed', () => {
+    const { core, effects } = startCore(undefined, '{ "activity": { "sound": "Glass", "ring": "never" } }')
+    effects.length = 0
+
+    expect(summarize(core.activitySoundResults(''))).toEqual([
+      'activitySound Basso',
+      'activitySound Blow',
+      'activitySound Bottle',
+      'activitySound Frog',
+      'activitySound Funk',
+      'activitySound Glass',
+      'activitySound Hero',
+      'activitySound Morse',
+      'activitySound Ping',
+      'activitySound Pop',
+      'activitySound Purr',
+      'activitySound Sosumi',
+      'activitySound Submarine',
+      'activitySound Tink',
+    ])
+    expect(summarize(core.activitySoundResults('sub'))).toEqual(['activitySound Submarine'])
+    core.previewActivitySound('Tink')
+    core.previewActivitySound('Frog')
+    core.paletteDismissed()
+
+    expect(core.settings().activity.sound).toBe('Glass')
+    expect(effects).toEqual([
+      { type: 'playActivitySound', sound: 'Tink' },
+      { type: 'playActivitySound', sound: 'Frog' },
+    ])
+  })
+
+  it("choosing a sound keeps it, setting activity.sound in the config file with the file's comments and other settings kept", () => {
+    const { core, effects, left } = startWithThreePanes()
+    core.configChanged('{\n  // Mine.\n  "session": { "cycleOrder": "created" }\n}\n')
+    effects.length = 0
+
+    core.choosePaletteResult(core.activitySoundResults('tink')[0])
+    core.hotkeyPressed()
+    core.notificationReceived(left)
+
+    const written =
+      '{\n  // Mine.\n  "session": { "cycleOrder": "created" },\n  "activity": {\n    "sound": "Tink"\n  }\n}\n'
+    expect(effects).toEqual([
+      { type: 'writeConfig', text: written },
+      { type: 'hideApp' },
+      { type: 'playActivitySound', sound: 'Tink' },
+    ])
+  })
+
+  it("choosing a sound while the config file can't be read keeps it without writing the file, telling the user", () => {
+    const { core, effects } = startCore()
+    core.configUnreadable()
+    effects.length = 0
+
+    core.choosePaletteResult(core.activitySoundResults('tink')[0])
+
+    expect(core.settings().activity.sound).toBe('Tink')
+    expect(effects).toEqual([{ type: 'configUnreadable' }])
   })
 })
 

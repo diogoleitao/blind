@@ -63,6 +63,33 @@ export const menuBarIcons = ['monochrome', 'colour'] as const
 // The menu bar icon's look: one colour that follows the menu bar's, light or dark, or the icon's own colours.
 export type MenuBarIcon = (typeof menuBarIcons)[number]
 
+// The macOS system sounds, by their names in /System/Library/Sounds.
+export const activitySounds = [
+  'Basso',
+  'Blow',
+  'Bottle',
+  'Frog',
+  'Funk',
+  'Glass',
+  'Hero',
+  'Morse',
+  'Ping',
+  'Pop',
+  'Purr',
+  'Sosumi',
+  'Submarine',
+  'Tink',
+] as const
+
+// The sound played when a Pane gains Activity.
+export type ActivitySound = (typeof activitySounds)[number]
+
+const activityRings = ['always', 'whileHidden', 'never'] as const
+
+// When a Pane gaining Activity plays the Activity sound: whether the app is shown or hidden, only while it's hidden, or
+// never.
+export type ActivityRing = (typeof activityRings)[number]
+
 const panePaddings = ['padded', 'none'] as const
 
 // Whether each Pane keeps its terminal's text off its edges and dividers, by a fixed amount, or lets it run up to them.
@@ -122,6 +149,10 @@ export interface Settings {
     // Whether Sessions, Tabs and Panes show their kind's marker before their names, while nesting isn't hidden.
     kindMarkers: boolean;
   };
+  activity: {
+    sound: ActivitySound;
+    ring: ActivityRing;
+  };
   // The name of the Theme in effect, built in or from a Theme file.
   theme: string;
   background: {
@@ -162,6 +193,10 @@ export const defaultSettings: Settings = {
     paneSearchScope: 'all',
     nesting: 'flat',
     kindMarkers: false,
+  },
+  activity: {
+    sound: 'Purr',
+    ring: 'whileHidden',
   },
   theme: defaultTheme.name,
   background: {
@@ -243,6 +278,13 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers<Settings>
     paneSearchScope: oneOf(paneSearchScopes),
     nesting: oneOf(paletteNestings),
     kindMarkers: (value) => (typeof value === 'boolean' ? value : invalid),
+  }),
+  activity: groupOf(defaultSettings.activity, {
+    // Matched ignoring case, taking the sound's spelling.
+    sound: (value) =>
+      activitySounds.find((sound) => typeof value === 'string' && sound.toLowerCase() === value.toLowerCase()) ??
+      invalid,
+    ring: oneOf(activityRings),
   }),
   // Theme names are unique ignoring case, so the setting matches one ignoring case and takes its spelling.
   theme: (value) =>
@@ -419,6 +461,25 @@ export const configSchema = {
             'Whether the Command Palette marks Sessions, Tabs and Panes with Ⓢ, Ⓣ and Ⓟ before their names. Only while nesting is flat or nested; hidden shows none, even when searching.',
           type: 'boolean',
           default: defaultSettings.commandPalette.kindMarkers,
+        },
+      },
+    },
+    activity: {
+      description: 'The sound played when a Pane gains Activity, and when it plays.',
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        sound: {
+          description:
+            "The macOS system sound played when a Pane gains Activity. The Command Palette's Change Activity Sound sets it too, playing each sound as it's browsed.",
+          enum: activitySounds,
+          default: defaultSettings.activity.sound,
+        },
+        ring: {
+          description:
+            "When a Pane gaining Activity plays activity.sound: always plays it whether Blind is shown or hidden; whileHidden only while Blind is hidden; never doesn't play it. A Pane plays it once as it gains Activity, and again only once its Activity has cleared.",
+          enum: activityRings,
+          default: defaultSettings.activity.ring,
         },
       },
     },

@@ -16,11 +16,12 @@ import {
 } from 'electron'
 import type { ProgramStatusReport } from '../core/attention'
 import { blurIssueUrl, shouldWarnBlurUnavailable } from '../core/blur-warning'
-import { type MenuBarIcon, minimumBlurRadius } from '../core/config'
+import { type ActivitySound, type MenuBarIcon, minimumBlurRadius } from '../core/config'
 import { createCore, type Effect, type PaletteResult } from '../core/core'
 import { defaultPalettePosition } from '../core/palette-position'
 import type { PaneId, SessionId } from '../core/state'
 import { channels, type PalettePrompt, type SessionView, type TerminalSize, type WindowSettings } from '../shared/ipc'
+import { createActivitySoundPlayer } from './activity-sound'
 import { createBlurWarningFile } from './blur-warning-file'
 import { type ConfigRead, createConfigFile } from './config-file'
 import { fadeWindow } from './fade'
@@ -82,6 +83,7 @@ app.whenReady().then(() => {
   const blurWarningFile = createBlurWarningFile(dataDirectory)
   let blurWarnedThisLaunch = false
   const palettePositionFile = createPalettePositionFile(dataDirectory)
+  const activitySoundPlayer = createActivitySoundPlayer()
 
   // Blind shows only on the primary display, filling its work area, which can change after a window was made: another
   // display becomes primary, or the resolution or the Dock changes.
@@ -182,6 +184,10 @@ app.whenReady().then(() => {
     if (effect.type === 'applyMenuBarIcon') menuBarIcon.show(effect.icon)
     if (effect.type === 'pickMenuBarIcon') {
       windows.get(effect.sessionId)?.webContents.send(channels.pickMenuBarIcon, core.menuBarIcon())
+    }
+    if (effect.type === 'playActivitySound') activitySoundPlayer.play(effect.sound)
+    if (effect.type === 'pickActivitySound') {
+      windows.get(effect.sessionId)?.webContents.send(channels.pickActivitySound, core.settings().activity.sound)
     }
     if (effect.type === 'themesRejected') {
       // A file named alone was skipped; a field rejected in a file takes the Default Theme's value.
@@ -434,6 +440,8 @@ app.whenReady().then(() => {
   ipcMain.on(channels.previewTheme, (_event, name: string) => core.previewTheme(name))
   ipcMain.handle(channels.searchMenuBarIcons, (_event, query: string) => core.menuBarIconResults(query))
   ipcMain.on(channels.previewMenuBarIcon, (_event, icon: MenuBarIcon) => core.previewMenuBarIcon(icon))
+  ipcMain.handle(channels.searchActivitySounds, (_event, query: string) => core.activitySoundResults(query))
+  ipcMain.on(channels.previewActivitySound, (_event, sound: ActivitySound) => core.previewActivitySound(sound))
   ipcMain.handle(channels.searchPalette, (_event, query: string) => core.paletteResults(query))
   ipcMain.on(channels.choosePaletteResult, (_event, result: PaletteResult) => core.choosePaletteResult(result))
   ipcMain.on(channels.dismissPalette, () => core.paletteDismissed())
