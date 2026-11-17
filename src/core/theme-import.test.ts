@@ -37,31 +37,27 @@ const builtInsOnly: ThemeImportTarget = {
   fileNames: [],
 }
 
-// An iTerm2 colour preset: a plist with each colour's components from 0 to 1, as iTerm2 exports it.
-function itermcolors (colours: Colours) {
-  const names: Record<string, string> = {
-    foreground: 'Foreground Color',
-    background: 'Background Color',
-    cursor: 'Cursor Color',
-    cursorText: 'Cursor Text Color',
-    selection: 'Selection Color',
-    selectionText: 'Selected Text Color',
-    ...Object.fromEntries(ansiColourNames.map((name, index) => [name, `Ansi ${index} Color`])),
-  }
-  const component = (colour: string, start: number) => String(Number.parseInt(colour.slice(start, start + 2), 16) / 255)
-  const entries = Object.entries(colours).map(([name, colour]) => `
-  <key>${names[name]}</key>
+type Components = readonly [red: number, green: number, blue: number]
+
+// An iTerm2 colour preset's plist: each colour, by iTerm2's name for it, with its components from 0 to 1, in the colour
+// space named by its `Color Space` key, or without the key when `colourSpace` is undefined.
+function itermcolorsPlist (colours: Record<string, Components>, colourSpace: string | undefined) {
+  const colourSpaceKey = colourSpace === undefined
+    ? ''
+    : `
+    <key>Color Space</key>
+    <string>${colourSpace}</string>`
+  const entries = Object.entries(colours).map(([name, [red, green, blue]]) => `
+  <key>${name}</key>
   <dict>
     <key>Alpha Component</key>
     <real>1</real>
     <key>Blue Component</key>
-    <real>${component(colour, 5)}</real>
-    <key>Color Space</key>
-    <string>sRGB</string>
+    <real>${blue}</real>${colourSpaceKey}
     <key>Green Component</key>
-    <real>${component(colour, 3)}</real>
+    <real>${green}</real>
     <key>Red Component</key>
-    <real>${component(colour, 1)}</real>
+    <real>${red}</real>
   </dict>`)
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -70,6 +66,29 @@ function itermcolors (colours: Colours) {
 </dict>
 </plist>
 `
+}
+
+// iTerm2's name for each of blind's colours.
+const itermcolorsNames: Record<string, string> = {
+  foreground: 'Foreground Color',
+  background: 'Background Color',
+  cursor: 'Cursor Color',
+  cursorText: 'Cursor Text Color',
+  selection: 'Selection Color',
+  selectionText: 'Selected Text Color',
+  ...Object.fromEntries(ansiColourNames.map((name, index) => [name, `Ansi ${index} Color`])),
+}
+
+// An iTerm2 colour preset with the colours in sRGB, as iTerm2 exports it.
+function itermcolors (colours: Colours) {
+  const component = (colour: string, start: number) => Number.parseInt(colour.slice(start, start + 2), 16) / 255
+  return itermcolorsPlist(
+    Object.fromEntries(Object.entries(colours).map(([name, colour]) => [
+      itermcolorsNames[name],
+      [component(colour, 1), component(colour, 3), component(colour, 5)],
+    ])),
+    'sRGB'
+  )
 }
 
 // A Ghostty theme: `key = value` lines, the ANSI colours as the palette's.
@@ -229,6 +248,132 @@ describe("an imported Theme's colours", () => {
       cursor: '#f8f8f2',
       cursorText: '#282a36',
     })
+  })
+})
+
+// The components of altercation/solarized's `iterm2-colors-solarized/Solarized Dark.itermcolors`, which has no
+// `Color Space` key.
+const solarizedDark: Record<string, Components> = {
+  'Foreground Color': [0.44058024883270264, 0.50962930917739868, 0.51685798168182373],
+  'Background Color': [0, 0.11783610284328461, 0.15170273184776306],
+  'Ansi 0 Color': [0, 0.15575926005840302, 0.19370138645172119],
+  'Ansi 1 Color': [0.81926977634429932, 0.10840655118227005, 0.14145714044570923],
+  'Ansi 2 Color': [0.44977453351020813, 0.54115492105484009, 0.020208755508065224],
+  'Ansi 3 Color': [0.6474647521972656, 0.46751424670219421, 0.023484811186790466],
+  'Ansi 4 Color': [0.12754884362220764, 0.46265947818756104, 0.78231418132781982],
+  'Ansi 5 Color': [0.77738940715789795, 0.10802463442087173, 0.43516635894775391],
+  'Ansi 6 Color': [0.14679534733295441, 0.57082360982894897, 0.52502274513244629],
+  'Ansi 7 Color': [0.91611063480377197, 0.89001238346099854, 0.79781103134155273],
+  'Ansi 8 Color': [0, 0.11783610284328461, 0.15170273184776306],
+  'Ansi 9 Color': [0.74176257848739624, 0.21325300633907318, 0.073530435562133789],
+  'Ansi 10 Color': [0.27671992778778076, 0.35665956139564514, 0.38298487663269043],
+  'Ansi 11 Color': [0.32436618208885193, 0.40717673301696777, 0.43850564956665039],
+  'Ansi 12 Color': [0.44058024883270264, 0.50962930917739868, 0.51685798168182373],
+  'Ansi 13 Color': [0.34798634052276611, 0.33896297216415405, 0.72908437252044678],
+  'Ansi 14 Color': [0.50599193572998047, 0.56485837697982788, 0.56363654136657715],
+  'Ansi 15 Color': [0.98943418264389038, 0.95794391632080078, 0.86405980587005615],
+}
+
+describe("an iTerm2 colour preset's colour spaces", () => {
+  it("read a colour without a Color Space as iTerm2 does, as Generic RGB, giving Solarized's published colours", () => {
+    const imported = importTheme(
+      { fileName: 'Solarized Dark.itermcolors', text: itermcolorsPlist(solarizedDark, undefined) },
+      builtInsOnly
+    )
+
+    // Solarized's README gives each colour's hex. The background, black and brightMagenta come out as macOS converts
+    // them instead, so as iTerm2 shows them, since the file itself drifts from the README there.
+    expect(imported.type === 'ready' && imported.theme.terminal).toMatchObject({
+      foreground: '#839496',
+      background: '#002833',
+      black: '#003541',
+      red: '#dc322f',
+      green: '#859900',
+      yellow: '#b58900',
+      blue: '#268bd2',
+      magenta: '#d33682',
+      cyan: '#2aa198',
+      white: '#eee8d5',
+      brightBlack: '#002833',
+      brightRed: '#cb4b16',
+      brightGreen: '#586e75',
+      brightYellow: '#657b83',
+      brightBlue: '#839496',
+      brightMagenta: '#6c6ec6',
+      brightCyan: '#93a1a1',
+      brightWhite: '#fdf6e3',
+    })
+  })
+
+  it("read Solarized Light, whose foreground and background are Solarized Dark's colours 11 and 15, likewise", () => {
+    const solarizedLight = {
+      ...solarizedDark,
+      'Foreground Color': solarizedDark['Ansi 11 Color'],
+      'Background Color': solarizedDark['Ansi 15 Color'],
+    }
+
+    const imported = importTheme(
+      { fileName: 'Solarized Light.itermcolors', text: itermcolorsPlist(solarizedLight, undefined) },
+      builtInsOnly
+    )
+
+    expect(imported.type === 'ready' && imported.theme.terminal).toMatchObject({
+      foreground: '#657b83',
+      background: '#fdf6e3',
+    })
+  })
+
+  it('read a Calibrated colour as one without a Color Space', () => {
+    const calibrated = importTheme(
+      { fileName: 'Solarized Dark.itermcolors', text: itermcolorsPlist(solarizedDark, 'Calibrated') },
+      builtInsOnly
+    )
+    const withoutColourSpace = importTheme(
+      { fileName: 'Solarized Dark.itermcolors', text: itermcolorsPlist(solarizedDark, undefined) },
+      builtInsOnly
+    )
+
+    expect(calibrated.type === 'ready' && calibrated.theme.terminal.blue).toBe('#268bd2')
+    expect(calibrated).toEqual(withoutColourSpace)
+  })
+
+  // A preset whose foreground is `foreground` and whose every other colour it must set is black.
+  function withForeground (foreground: Components, colourSpace: string | undefined) {
+    const black: Components = [0, 0, 0]
+    return itermcolorsPlist({
+      ...Object.fromEntries(Object.keys(solarizedDark).map((name) => [name, black])),
+      'Foreground Color': foreground,
+    }, colourSpace)
+  }
+
+  it.each(['sRGB', 'Calibrated', 'P3', undefined])('keep black and white as they are in %s', (colourSpace) => {
+    const imported = importTheme(
+      { fileName: 'Mono.itermcolors', text: withForeground([1, 1, 1], colourSpace) },
+      builtInsOnly
+    )
+
+    expect(imported.type === 'ready' && imported.theme.terminal).toMatchObject({
+      foreground: '#ffffff',
+      background: '#000000',
+    })
+  })
+
+  it.each(['Calibrated', 'P3', undefined])('clamp a component below 0 in %s to 0', (colourSpace) => {
+    const imported = importTheme(
+      { fileName: 'Mono.itermcolors', text: withForeground([-0.001, 0, 0], colourSpace) },
+      builtInsOnly
+    )
+
+    expect(imported.type === 'ready' && imported.theme.terminal.foreground).toBe('#000000')
+  })
+
+  it.each([
+    ["a grey, since P3 shares sRGB's white and tone curve", [128 / 255, 128 / 255, 128 / 255], '#808080'],
+    ['a red outside sRGB, clipped to its nearest', [1, 0, 0], '#ff0000'],
+  ] as const)('read a P3 colour, %s', (_, foreground, expected) => {
+    const imported = importTheme({ fileName: 'Wide.itermcolors', text: withForeground(foreground, 'P3') }, builtInsOnly)
+
+    expect(imported.type === 'ready' && imported.theme.terminal.foreground).toBe(expected)
   })
 })
 

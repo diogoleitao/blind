@@ -1,4 +1,4 @@
-import { mixColours, opaque, rgbColour } from './colours'
+import { convertedColour, displayP3, genericRgb, mixColours, opaque, rgbColour } from './colours'
 import { readJsonc } from './jsonc'
 import {
   type ChromeColours,
@@ -91,8 +91,9 @@ function * settingLines (text: string, separator: RegExp): Generator<[string, st
   }
 }
 
-// An `.itermcolors` plist: a dict of colours, each a dict of its red, green and blue components from 0 to 1. Read token
-// by token, since the plist holds nothing deeper, each colour given as `#rrggbb`.
+// An `.itermcolors` plist: a dict of colours, each a dict of its red, green and blue components from 0 to 1, and the
+// colour space they're in: sRGB, P3, or, for any other `Color Space` or none, Generic RGB, as iTerm2 reads them. Read
+// token by token, since the plist holds nothing deeper, each colour given as `#rrggbb` in sRGB.
 const itermcolors: SourceFormat = {
   holds: (text) => /^\s*(<\?xml|<!DOCTYPE plist|<plist)/.test(text),
   * settings (text) {
@@ -124,8 +125,14 @@ const itermcolors: SourceFormat = {
       const channels = ['Red Component', 'Green Component', 'Blue Component'].map((channel) =>
         Number.parseFloat(components.get(channel) ?? '')
       )
-      const [red, green, blue] = channels.map((value) => Math.min(1, Math.max(0, value)) * 255)
-      if (channels.every(Number.isFinite)) yield [name, rgbColour(red, green, blue)]
+      if (!channels.every(Number.isFinite)) continue
+      const colourSpace = components.get('Color Space')
+      if (colourSpace === 'sRGB') {
+        const [red, green, blue] = channels.map((value) => Math.min(1, Math.max(0, value)) * 255)
+        yield [name, rgbColour(red, green, blue)]
+      } else {
+        yield [name, convertedColour(channels, colourSpace === 'P3' ? displayP3 : genericRgb)]
+      }
     }
   },
   colourNames: {
