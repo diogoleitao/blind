@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { loadThemes } from '../core/themes'
 import { createConfigFile } from '../main/config-file'
-import { createThemeFiles } from '../main/theme-files'
+import { createThemeFiles, readThemeSource } from '../main/theme-files'
 import { installedApp, runCli } from './run'
 import { createTerminal } from './terminal'
 
@@ -15,12 +15,18 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 // Always the installed app's, never the dev app's.
 const configDirectory = join(homedir(), '.config', 'blind')
+// A failure shows its error's message, e.g. `EACCES: permission denied, open '...'`, rather than its stack.
+const themeFiles = createThemeFiles(join(configDirectory, 'themes'), (message, error) => {
+  process.stderr.write(`${message} ${error instanceof Error ? error.message : String(error)}\n`)
+})
 
 process.exitCode = await runCli(process.argv.slice(2), {
   repoRoot,
   editor: process.env.EDITOR,
   configFile: createConfigFile(configDirectory),
-  themeNames: () => loadThemes(createThemeFiles(join(configDirectory, 'themes')).read()).themes.map((theme) => theme.name),
+  themeNames: () => loadThemes(themeFiles.read()).themes.map((theme) => theme.name),
+  themeFiles,
+  readThemeSource,
   terminal: createTerminal(),
   run,
   runningBlindPid,

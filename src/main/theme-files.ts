@@ -22,8 +22,12 @@ export function readThemeSource (path: string): ThemeSource {
   }
 }
 
-// The Theme files `*.jsonc` in `directory`, with the Theme schema written next to them.
-export function createThemeFiles (directory: string) {
+// The Theme files `*.jsonc` in `directory`, with the Theme schema written next to them. Each failure is reported with
+// its error, e.g. to the console.
+export function createThemeFiles (
+  directory: string,
+  reportError: (message: string, error: unknown) => void = (message, error) => console.error(message, error)
+) {
   // Every Theme file that could be read. Without the folder there are none.
   function read (): ThemeFile[] {
     let fileNames: string[]
@@ -36,13 +40,14 @@ export function createThemeFiles (directory: string) {
       try {
         return [{ fileName, text: readFileSync(join(directory, fileName), 'utf8') }]
       } catch (error) {
-        console.error(`Couldn't read the Theme file ${join(directory, fileName)}:`, error)
+        reportError(`Couldn't read the Theme file ${join(directory, fileName)}:`, error)
         return []
       }
     })
   }
 
   return {
+    directory,
     read,
     // A new Theme file, made with the folder if need be. Never written over one already there, which answers false, as
     // does any other failure.
@@ -52,7 +57,7 @@ export function createThemeFiles (directory: string) {
         writeFileSync(join(directory, fileName), text, { flag: 'wx' })
         return true
       } catch (error) {
-        console.error(`Couldn't write the Theme file ${join(directory, fileName)}:`, error)
+        reportError(`Couldn't write the Theme file ${join(directory, fileName)}:`, error)
         return false
       }
     },
@@ -62,7 +67,7 @@ export function createThemeFiles (directory: string) {
         mkdirSync(directory, { recursive: true })
         writeFileSync(join(directory, themeSchemaFileName), `${JSON.stringify(themeSchema, null, 2)}\n`)
       } catch (error) {
-        console.error(`Couldn't write the Theme schema to ${directory}:`, error)
+        reportError(`Couldn't write the Theme schema to ${directory}:`, error)
       }
     },
     watch (onChange: (files: ThemeFile[]) => void) {
@@ -72,9 +77,9 @@ export function createThemeFiles (directory: string) {
           if (fileName !== null && !fileName.endsWith(themeFileExtension)) return
           clearTimeout(timer)
           timer = setTimeout(() => onChange(read()), settleDelayMilliseconds)
-        }).on('error', (error) => console.error(`Stopped watching ${directory} for Theme changes:`, error))
+        }).on('error', (error) => reportError(`Stopped watching ${directory} for Theme changes:`, error))
       } catch (error) {
-        console.error(`Couldn't watch ${directory} for Theme changes:`, error)
+        reportError(`Couldn't watch ${directory} for Theme changes:`, error)
       }
     },
   }

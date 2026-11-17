@@ -1,8 +1,11 @@
+import { basename } from 'node:path'
 import { starterConfig } from '../core/config'
 import type { CliDependencies } from './run'
 import type { Key } from './settings-editor'
 
 export const fakeConfigPath = '/home/.config/blind/config.jsonc'
+
+export const fakeThemesFolder = '/home/.config/blind/themes'
 
 // Dependencies that do as little as they can, for a test to override what it looks at.
 export function createFakeDependencies (overrides: Partial<CliDependencies> = {}): CliDependencies {
@@ -16,6 +19,13 @@ export function createFakeDependencies (overrides: Partial<CliDependencies> = {}
       write: () => true,
     },
     themeNames: () => ['Default'],
+    themeFiles: {
+      directory: fakeThemesFolder,
+      read: () => [],
+      write: () => true,
+      writeSchema: () => {},
+    },
+    readThemeSource: (path) => ({ fileName: basename(path), text: undefined }),
     terminal: createFakeTerminal([]),
     run: async () => 0,
     runningBlindPid: async () => undefined,

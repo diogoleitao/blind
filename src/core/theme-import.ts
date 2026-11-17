@@ -4,8 +4,10 @@ import {
   type ChromeColours,
   type Colour,
   defaultTheme,
+  type LoadedThemes,
   type TerminalColours,
   type Theme,
+  type ThemeFile,
   themeSchemaFileName,
 } from './themes'
 
@@ -47,6 +49,15 @@ export interface ReadyThemeImport {
 export type RefusedThemeImport = { type: 'refused'; sourceFileName: string; name: string } & ThemeImportRefusal
 
 export type ThemeImport = ReadyThemeImport | RefusedThemeImport
+
+// What an Import checks against, from the themes folder's files and the Themes loaded from them.
+export function themeImportTargetFor (files: readonly ThemeFile[], loaded: LoadedThemes): ThemeImportTarget {
+  return {
+    themeNames: loaded.themes.map((theme) => theme.name),
+    fileNamesByTheme: loaded.fileNamesByTheme,
+    fileNames: files.map((file) => file.fileName),
+  }
+}
 
 // The 16 ANSI colours, in order: `color0` to `color15`, as other terminals number them.
 export const ansiColourNames = [

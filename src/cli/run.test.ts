@@ -1,5 +1,8 @@
+import { basename } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createFakeDependencies, fakeConfigPath } from './fakes'
+import { readJsonc } from '../core/jsonc'
+import type { Theme, ThemeFile } from '../core/themes'
+import { createFakeDependencies, fakeConfigPath, fakeThemesFolder } from './fakes'
 import { runCli } from './run'
 
 const repoRoot = '/repos/blind'
@@ -148,10 +151,128 @@ describe('the usage line', () => {
     ['for an unknown settings subcommand', ['settings', 'frobnicate']],
     ['for an unknown install option', ['install', '--frobnicate']],
     ['for an argument after link', ['link', 'extra']],
+    ['for themes alone', ['themes']],
+    ['for an unknown themes subcommand', ['themes', 'frobnicate']],
+    ['for themes import without a file', ['themes', 'import']],
+    ['for themes import with two files', ['themes', 'import', 'Dracula.conf', 'Nord.conf']],
   ])('is printed %s, running nothing', async (_, argv) => {
     const { code, events, stderr } = await cli(argv)
-    expect(stderr).toBe('usage: blind settings [open] | blind dev | blind install | blind link\n')
+    expect(stderr).toBe(
+      'usage: blind settings [open] | blind themes import <file> | blind dev | blind install | blind link\n'
+    )
     expect(code).toBe(2)
     expect(events).toEqual([])
+  })
+})
+
+describe('blind themes import', () => {
+  // A Kitty theme with Dracula's foreground, background and ANSI colours.
+  const draculaKitty = [
+    'foreground #f8f8f2',
+    'background #282a36',
+    ...['#21222c', '#ff5555', '#50fa7b', '#f1fa8c', '#bd93f9', '#ff79c6', '#8be9fd', '#f8f8f2', '#6272a4', '#ff6e6e',
+      '#69ff94', '#ffffa5', '#d6acff', '#ff92df', '#a4ffff', '#ffffff'].map((colour, index) => `color${index} ${colour}`),
+  ].join('\n')
+
+  // Runs the CLI with `sources` as the files there are to Import, by path, and `themeFiles` in the themes folder, which
+  // takes every write unless `writable` is false. Writes are recorded in order.
+  async function importing (argv: string[], { sources = {}, themeFiles = [], writable = true }: {
+    sources?: Record<string, string>;
+    themeFiles?: ThemeFile[];
+    writable?: boolean;
+  } = {}) {
+    const written: unknown[] = []
+    let stdout = ''
+    let stderr = ''
+    const code = await runCli(argv, createFakeDependencies({
+      themeFiles: {
+        directory: fakeThemesFolder,
+        read: () => themeFiles,
+        write: (fileName, text) => {
+          if (writable) written.push({ fileName, text })
+          return writable
+        },
+        writeSchema: () => { written.push('schema') },
+      },
+      readThemeSource: (path) => ({ fileName: basename(path), text: sources[path] }),
+      stdout: (text) => { stdout += text },
+      stderr: (text) => { stderr += text },
+    }))
+    return { code, written, stdout, stderr }
+  }
+
+  it('writes the Theme file, named after the file, to the themes folder and says where', async () => {
+    const { code, written, stdout } = await importing(['themes', 'import', 'kitty/Dracula.conf'], {
+      sources: { 'kitty/Dracula.conf': draculaKitty },
+    })
+    expect(written[0]).toMatchObject({ fileName: 'Dracula.jsonc' })
+    const theme = readJsonc((written[0] as ThemeFile).text) as unknown as Theme
+    expect(theme.name).toBe('Dracula')
+    expect(theme.terminal).toMatchObject({ background: '#282a36', foreground: '#f8f8f2', blue: '#bd93f9' })
+    expect(stdout).toBe(`Imported Dracula to ${fakeThemesFolder}/Dracula.jsonc.\n`)
+    expect(code).toBe(0)
+  })
+
+  it('writes the Theme schema next to it, for a Theme file written before Blind has launched', async () => {
+    const { written } = await importing(['themes', 'import', 'Dracula.conf'], {
+      sources: { 'Dracula.conf': draculaKitty },
+    })
+    expect(written).toEqual([expect.objectContaining({ fileName: 'Dracula.jsonc' }), 'schema'])
+  })
+
+  it.each([
+    [
+      'a file that can\'t be read',
+      'Dracula.conf',
+      {},
+      "Couldn't import Dracula.conf. It isn't an iTerm2, Ghostty, Kitty, Alacritty or Windows Terminal theme.\n",
+    ],
+    [
+      'a file that isn\'t a theme',
+      'Dracula.conf',
+      { sources: { 'Dracula.conf': 'font_family JetBrains Mono\nfont_size 14\n' } },
+      "Couldn't import Dracula.conf. It isn't an iTerm2, Ghostty, Kitty, Alacritty or Windows Terminal theme.\n",
+    ],
+    [
+      'a theme leaving out a colour',
+      'Dracula.conf',
+      { sources: { 'Dracula.conf': draculaKitty.replace(/^color8 .*$/m, '') } },
+      "Couldn't import Dracula.conf. It leaves out color8.\n",
+    ],
+    [
+      'a built-in Theme\'s name, ignoring case',
+      'gruvbox.conf',
+      { sources: { 'gruvbox.conf': draculaKitty } },
+      "Couldn't import gruvbox.conf. Gruvbox is a built-in Theme. Rename gruvbox.conf and import it again.\n",
+    ],
+    [
+      'a name a Theme file\'s Theme has, ignoring case',
+      'Dracula.conf',
+      { sources: { 'Dracula.conf': draculaKitty }, themeFiles: [{ fileName: 'Vampire.jsonc', text: '{ "name": "dracula" }' }] },
+      "Couldn't import Dracula.conf. The Theme file Vampire.jsonc already has the name dracula. Rename Dracula.conf and import it again.\n",
+    ],
+    [
+      'a file name the themes folder has, ignoring case',
+      'Dracula.conf',
+      { sources: { 'Dracula.conf': draculaKitty }, themeFiles: [{ fileName: 'dracula.jsonc', text: '{ "name": "Vampire" }' }] },
+      "Couldn't import Dracula.conf. The themes folder already has dracula.jsonc. Rename Dracula.conf and import it again.\n",
+    ],
+  ])('refuses %s, saying why, exiting 1 and writing nothing', async (_, file, options, message) => {
+    const { code, written, stdout, stderr } = await importing(['themes', 'import', file], options)
+    expect(stderr).toBe(message)
+    expect(stdout).toBe('')
+    expect(written).toEqual([])
+    expect(code).toBe(1)
+  })
+
+  it('exits 1 when the Theme file can\'t be written, which the Theme files report, writing no schema', async () => {
+    const { code, written, stdout, stderr } = await importing(['themes', 'import', 'Dracula.conf'], {
+      sources: { 'Dracula.conf': draculaKitty },
+      writable: false,
+    })
+    expect(stderr).toBe('')
+    expect(stdout).toBe('')
+    expect(written).toEqual([])
+    expect(code).toBe(1)
   })
 })

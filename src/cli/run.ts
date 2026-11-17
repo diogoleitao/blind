@@ -1,6 +1,9 @@
+import { join } from 'node:path'
+import { importTheme, themeImportRefusalMessage, themeImportTargetFor, type ThemeSource } from '../core/theme-import'
+import { loadThemes, type ThemeFile } from '../core/themes'
 import { editSettings, type SettingsEditorDependencies } from './settings-editor'
 
-const usage = 'usage: blind settings [open] | blind dev | blind install | blind link\n'
+const usage = 'usage: blind settings [open] | blind themes import <file> | blind dev | blind install | blind link\n'
 
 export interface CliDependencies extends SettingsEditorDependencies {
   // The repo the CLI was built from.
@@ -17,6 +20,17 @@ export interface CliDependencies extends SettingsEditorDependencies {
   relaunchAfterExit(pid: number): void;
   // Asks the process to stop, which Blind does by saving and quitting without asking.
   terminate(pid: number): void;
+  // The Theme files in the installed app's themes folder. A failure is reported to stderr with its error.
+  themeFiles: {
+    directory: string;
+    read(): ThemeFile[];
+    // Writes a new Theme file, making the folder if need be, never over one already there; answers whether it did.
+    write(fileName: string, text: string): boolean;
+    // Writes the Theme schema next to the Theme files.
+    writeSchema(): void;
+  };
+  // The file at `path`, relative to the current directory, to Import a Theme from.
+  readThemeSource(path: string): ThemeSource;
 }
 
 // Runs the command `argv` names, resolving to the exit code: 2, after the usage line, for a missing or unknown one.
@@ -25,6 +39,7 @@ export async function runCli (argv: string[], deps: CliDependencies): Promise<nu
   if (command === 'dev') return deps.run('npm', ['run', 'dev'], deps.repoRoot)
   if (command === 'settings' && subcommand === undefined) return editSettings(deps)
   if (command === 'settings' && subcommand === 'open') return openSettings(deps)
+  if (command === 'themes' && subcommand === 'import' && argv.length === 3) return importThemeFile(deps, argv[2])
   const force = subcommand === '--force'
   if (command === 'install' && (subcommand === undefined || force)) return install(deps, { force })
   if (command === 'link' && subcommand === undefined) return link(deps)
@@ -65,6 +80,23 @@ async function install (deps: CliDependencies, { force }: { force: boolean }) {
   if (askExitCode === 0) stdout('Installed. Blind restarts once you confirm quitting.\n')
   else stderr("Installed, but Blind couldn't be asked to restart; quit it and open it again to use the new copy.\n")
   return askExitCode
+}
+
+// Imports a Theme into the themes folder, checked against the Themes and files there, as the Command Palette's Import
+// Theme does, though without showing the Theme before saving it. A file that couldn't be written, already reported, gets
+// no schema.
+function importThemeFile ({ themeFiles, readThemeSource, stdout, stderr }: CliDependencies, path: string) {
+  const files = themeFiles.read()
+  const themeImport = importTheme(readThemeSource(path), themeImportTargetFor(files, loadThemes(files)))
+  if (themeImport.type === 'refused') {
+    const { title, detail } = themeImportRefusalMessage(themeImport)
+    stderr(`${title}. ${detail}\n`)
+    return 1
+  }
+  if (!themeFiles.write(themeImport.fileName, themeImport.text)) return 1
+  themeFiles.writeSchema()
+  stdout(`Imported ${themeImport.name} to ${join(themeFiles.directory, themeImport.fileName)}.\n`)
+  return 0
 }
 
 // $EDITOR goes through the shell, as it may carry its own arguments, e.g. `code --wait`. Without one, the file opens in

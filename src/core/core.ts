@@ -33,6 +33,7 @@ import {
   type ReadyThemeImport,
   type ThemeImport,
   type ThemeImportTarget,
+  themeImportTargetFor,
   type ThemeSource,
 } from './theme-import'
 import { builtInThemes, defaultTheme, loadThemes, type Theme, type ThemeFile } from './themes'
@@ -1309,11 +1310,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     themeFilesChanged: command((files) => {
       const loaded = loadThemes(files)
       themes = loaded.themes
-      themeImportTarget = {
-        themeNames: themeNames(),
-        fileNamesByTheme: loaded.fileNamesByTheme,
-        fileNames: files.map((file) => file.fileName),
-      }
+      themeImportTarget = themeImportTargetFor(files, loaded)
       if (loaded.rejected.length > 0) emit({ type: 'themesRejected', rejected: loaded.rejected })
       if (configReadable) {
         const parsed = parseConfig(configText, themeNames())!
