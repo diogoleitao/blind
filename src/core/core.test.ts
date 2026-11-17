@@ -2237,6 +2237,116 @@ describe('Themes', () => {
   })
 })
 
+// Dracula as a Kitty theme.
+const kittyDracula = `foreground #f8f8f2
+background #282a36
+color0 #21222c
+color1 #ff5555
+color2 #50fa7b
+color3 #f1fa8c
+color4 #bd93f9
+color5 #ff79c6
+color6 #8be9fd
+color7 #f8f8f2
+color8 #6272a4
+color9 #ff6e6e
+color10 #69ff94
+color11 #ffffa5
+color12 #d6acff
+color13 #ff92df
+color14 #a4ffff
+color15 #ffffff
+`
+
+describe('importing a Theme', () => {
+  it("choosing Import Theme asks for a file over the Current Session's window", () => {
+    const { core, effects } = startCore()
+    const sessionId = core.state().sessions[0].id
+
+    chooseAction(core, 'Import Theme')
+
+    expect(effects).toEqual([{ type: 'pickThemeImport', sessionId }])
+  })
+
+  it("shows the Theme file a picked file makes in the Session's window, to be saved", () => {
+    const { core, effects } = startCore()
+    const sessionId = core.state().sessions[0].id
+
+    core.themeImportPicked(sessionId, { fileName: 'dracula.conf', text: kittyDracula })
+
+    expect(effects).toEqual([
+      {
+        type: 'showThemeImport',
+        sessionId,
+        themeImport: expect.objectContaining({ type: 'ready', name: 'dracula', fileName: 'dracula.jsonc' }),
+      },
+    ])
+  })
+
+  it('saving writes the Theme file, leaving the Theme in effect and the theme setting alone', () => {
+    const { core, effects } = startCore(undefined, '{ "theme": "Gruvbox" }')
+    core.themeImportPicked(core.state().sessions[0].id, { fileName: 'dracula.conf', text: kittyDracula })
+    effects.length = 0
+
+    core.themeImportSaved()
+
+    expect(effects).toEqual([
+      { type: 'writeThemeFile', fileName: 'dracula.jsonc', text: expect.stringContaining('"name": "dracula"') },
+    ])
+    expect(core.theme().name).toBe('Gruvbox')
+    expect(core.settings().theme).toBe('Gruvbox')
+  })
+
+  it('dismissing the Command Palette cancels the Import, so nothing is saved', () => {
+    const { core, effects } = startCore()
+    core.themeImportPicked(core.state().sessions[0].id, { fileName: 'dracula.conf', text: kittyDracula })
+    effects.length = 0
+
+    core.paletteDismissed()
+    core.themeImportSaved()
+
+    expect(effects).toEqual([])
+  })
+
+  it("refuses the name of a Theme file's Theme, and the name of any file in the themes folder", () => {
+    const { core, effects } = startCore()
+    const sessionId = core.state().sessions[0].id
+    core.themeFilesChanged([
+      { fileName: 'nord.jsonc', text: '{ "name": "Nord" }' },
+      { fileName: 'broken.jsonc', text: 'not a Theme' },
+    ])
+    effects.length = 0
+
+    core.themeImportPicked(sessionId, { fileName: 'nord.conf', text: kittyDracula })
+    core.themeImportPicked(sessionId, { fileName: 'broken.conf', text: kittyDracula })
+
+    expect(effects).toEqual([
+      {
+        type: 'showThemeImport',
+        sessionId,
+        themeImport: expect.objectContaining({ reason: 'nameTaken', takenBy: 'Nord', themeFile: 'nord.jsonc' }),
+      },
+      {
+        type: 'showThemeImport',
+        sessionId,
+        themeImport: expect.objectContaining({ reason: 'fileTaken', existingFile: 'broken.jsonc' }),
+      },
+    ])
+  })
+
+  it('saves nothing for a refused Import, nor for the one before it', () => {
+    const { core, effects } = startCore()
+    const sessionId = core.state().sessions[0].id
+    core.themeImportPicked(sessionId, { fileName: 'dracula.conf', text: kittyDracula })
+    core.themeImportPicked(sessionId, { fileName: 'notes.txt', text: 'Buy milk.' })
+    effects.length = 0
+
+    core.themeImportSaved()
+
+    expect(effects).toEqual([])
+  })
+})
+
 // Relaunches from the saved snapshot with each Session changed by `update`, standing in for what later commands do,
 // such as closing a Session with its Tabs or setting its Root directory.
 function relaunchWith (stateStore: StateStore, update: (session: Session) => Session) {
@@ -3629,6 +3739,7 @@ describe('the Command Palette', () => {
       'action Find in Pane',
       'action Clear Scrollback',
       'action Change Theme',
+      'action Import Theme',
       'action Change Menu Bar Icon',
       'action Change Activity Sound',
       'action Reset Command Palette Position',

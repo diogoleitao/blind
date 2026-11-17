@@ -19,6 +19,13 @@ import { findLinks } from '../core/links'
 import { defaultPalettePosition, palettePositionWithinWindow } from '../core/palette-position'
 import type { PaneId } from '../core/state'
 import { terminalInput } from '../core/terminal-keys'
+import {
+  ansiColourNames,
+  type ReadyThemeImport,
+  type RefusedThemeImport,
+  type ThemeImport,
+  themeImportRefusalMessage,
+} from '../core/theme-import'
 import { type Colour, defaultTheme, type Theme } from '../core/themes'
 import type { BlindApi, PalettePrompt, SessionView, WindowSettings } from '../shared/ipc'
 
@@ -514,6 +521,7 @@ function render (view: SessionView) {
 const palette = document.getElementById('palette')!
 const paletteInput = document.getElementById('palette-input') as HTMLInputElement
 const paletteList = document.getElementById('palette-results')!
+const paletteImport = document.getElementById('palette-import')!
 let paletteResults: PaletteResult[] = []
 let selectedResult = 0
 // Counts searches, so that results arriving after a newer search's are dropped.
@@ -525,6 +533,8 @@ let prompt: PalettePrompt | undefined
 // Set while the palette lists the Themes, the menu bar icons or the Activity sounds instead of searching, each selected
 // one previewed.
 let picking: 'theme' | 'menuBarIcon' | 'activitySound' | undefined
+// Set while the palette shows the Theme file an Import makes, to be saved, or why the Import was refused.
+let themeImport: ThemeImport | undefined
 // The choice the next results select, once: the one in effect when the palette started listing them.
 let choiceToSelect: string | undefined
 // The choice the picker last previewed, starting at the one in effect.
@@ -727,6 +737,7 @@ function searchThenShowPalette () {
 function openPalette () {
   prompt = undefined
   picking = undefined
+  leaveThemeImport()
   paletteInput.placeholder = ''
   paletteInput.value = ''
   searchThenShowPalette()
@@ -736,6 +747,7 @@ function openPalette () {
 function openPrompt (asked: PalettePrompt) {
   prompt = asked
   picking = undefined
+  leaveThemeImport()
   searchCount += 1
   paletteResults = []
   renderPalette()
@@ -756,11 +768,141 @@ const pickerPlaceholders = {
 function openPicker (kind: NonNullable<typeof picking>, inEffect: string) {
   prompt = undefined
   picking = kind
+  leaveThemeImport()
   choiceToSelect = inEffect
   previewedChoice = inEffect
   paletteInput.placeholder = pickerPlaceholders[kind]
   paletteInput.value = ''
   searchThenShowPalette()
+}
+
+// The input takes typing again, and the Import's panel goes.
+function leaveThemeImport () {
+  themeImport = undefined
+  paletteInput.readOnly = false
+  paletteImport.hidden = true
+  paletteImport.replaceChildren()
+}
+
+// A run of text in a colour, e.g. a prompt's folder in the Theme's blue.
+function colouredText (text: string, colour: string) {
+  const element = document.createElement('span')
+  element.textContent = text
+  element.style.color = colour
+  return element
+}
+
+// The keys that answer the Import's panel, each also clickable: `⏎ Save`, or `⏎ Pick another file`, and Escape.
+function themeImportKeys (enterLabel: string, escapeLabel: string) {
+  const keys = document.createElement('div')
+  keys.className = 'import-keys'
+  for (const [key, label, answer] of [
+    ['⏎', enterLabel, () => answerThemeImport()],
+    ['esc', escapeLabel, dismissPalette],
+  ] as const) {
+    const button = document.createElement('span')
+    button.className = 'import-key'
+    const kbd = document.createElement('kbd')
+    kbd.textContent = key
+    button.append(kbd, label)
+    button.addEventListener('mousedown', answer)
+    keys.append(button)
+  }
+  return keys
+}
+
+// A small sample of the Theme in its own colours, its 16 ANSI colours, and its main chrome colours, then the name of
+// the file it will be saved as.
+function themeImportPreview ({ theme, fileName }: ReadyThemeImport) {
+  const { terminal, chrome } = theme
+  const sample = document.createElement('div')
+  sample.className = 'import-sample'
+  sample.style.background = terminal.background
+  sample.style.color = terminal.foreground
+  sample.style.fontFamily = `"${theme.font.family}", monospace`
+  const tabs = document.createElement('div')
+  const focusedTab = colouredText('zsh', chrome.accentText)
+  focusedTab.className = 'import-tab'
+  focusedTab.style.background = chrome.accent
+  const otherTab = colouredText('npm test', chrome.tabText)
+  otherTab.className = 'import-tab'
+  tabs.append(focusedTab, otherTab)
+  const prompt = document.createElement('div')
+  prompt.append(
+    colouredText('~/code', terminal.blue),
+    ' ',
+    colouredText('main', terminal.magenta),
+    ' ',
+    colouredText('❯', terminal.green),
+    ' ls'
+  )
+  sample.append(tabs, prompt)
+  const swatches = document.createElement('div')
+  swatches.className = 'import-swatches'
+  for (const name of ansiColourNames) {
+    const swatch = document.createElement('span')
+    swatch.title = name
+    swatch.style.background = terminal[name]
+    swatches.append(swatch)
+  }
+  const chips = document.createElement('div')
+  chips.className = 'import-chips'
+  for (const [label, colour] of [
+    ['Accent', chrome.accent],
+    ['Divider', chrome.divider],
+    ['Activity', chrome.activity],
+    ['Session Banner', chrome.sessionBannerBackground],
+    ['Command Palette', chrome.paletteBackground],
+  ]) {
+    const chip = document.createElement('span')
+    const swatch = document.createElement('i')
+    swatch.style.background = colour
+    chip.append(swatch, label)
+    chips.append(chip)
+  }
+  const savedAs = document.createElement('div')
+  const name = document.createElement('b')
+  name.textContent = fileName
+  savedAs.append('Will be saved as ', name)
+  return [sample, swatches, chips, savedAs, themeImportKeys('Save', 'Cancel')]
+}
+
+// Why the Import was refused, and what to do about it.
+function themeImportRefusal (refused: RefusedThemeImport) {
+  const { title, detail } = themeImportRefusalMessage(refused)
+  const titleElement = document.createElement('div')
+  titleElement.className = 'import-title'
+  titleElement.textContent = title
+  const detailElement = document.createElement('div')
+  detailElement.className = 'import-detail'
+  detailElement.textContent = detail
+  return [titleElement, detailElement, themeImportKeys('Pick another file', 'Close')]
+}
+
+// Shows the Theme file an Import makes under `Import Theme › name`, Enter saving it; or why the Import was refused,
+// Enter picking another file. Escape cancels either. A search still in flight is dropped.
+function openThemeImport (shown: ThemeImport) {
+  prompt = undefined
+  picking = undefined
+  themeImport = shown
+  searchCount += 1
+  paletteResults = []
+  renderPalette()
+  paletteInput.readOnly = true
+  paletteInput.placeholder = ''
+  paletteInput.value = `Import Theme › ${shown.type === 'ready' ? shown.name : shown.sourceFileName}`
+  paletteImport.replaceChildren(...(shown.type === 'ready' ? themeImportPreview(shown) : themeImportRefusal(shown)))
+  paletteImport.hidden = false
+  showPalette()
+}
+
+// Enter on the Import's panel: saves the Theme file, or picks another file after a refusal.
+function answerThemeImport () {
+  const shown = themeImport
+  if (!shown) return
+  closePalette()
+  if (shown.type === 'ready') blind.saveThemeImport()
+  else blind.choosePaletteResult({ type: 'action', action: 'importTheme', label: 'Import Theme' })
 }
 
 // The focused Pane's terminal takes the keyboard back. A drag under way ends without moving the palette, and a search
@@ -771,6 +913,7 @@ function closePalette () {
   searchCount += 1
   prompt = undefined
   picking = undefined
+  leaveThemeImport()
   paletteDrag = undefined
   if (focusedPaneId) terminals.get(focusedPaneId)?.terminal.focus()
 }
@@ -814,6 +957,8 @@ paletteInput.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') dismissPalette()
   else if (event.key === 'Enter' && prompt) answerPrompt(prompt)
   else if (prompt) return
+  else if (event.key === 'Enter' && themeImport) answerThemeImport()
+  else if (themeImport) return
   else if (event.key === 'ArrowDown') moveSelection(1)
   else if (event.key === 'ArrowUp') moveSelection(-1)
   else if (event.key === 'Enter') latestSearch.then(() => chooseResult(selectedResult))
@@ -854,6 +999,7 @@ blind.onPickTheme(() => openPicker('theme', theme.name))
 blind.onPickMenuBarIcon((icon) => openPicker('menuBarIcon', icon))
 blind.onPickActivitySound((sound) => openPicker('activitySound', sound))
 blind.onPalettePrompt(openPrompt)
+blind.onShowThemeImport(openThemeImport)
 blind.onPalettePosition(movePaletteTo)
 blind.onPaneData(writeToTerminal)
 blind.onFlushScrollback(() => terminals.forEach((pane, paneId) => reportScrollback(paneId, pane)))

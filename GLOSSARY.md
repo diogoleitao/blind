@@ -92,6 +92,14 @@ _Avoid_: Unread, alert, output
 A named set of colours covering both the terminal and the app's own chrome (Tab bar, Tab dividers, Command Palette, Session Banner, Pane dividers, Bezel).
 _Avoid_: Colour scheme, profile
 
+**Theme file**:
+A Theme the user keeps in the themes folder, written by hand or made by Import. Built-in Themes are not Theme files.
+_Avoid_: Custom theme, user theme
+
+**Import**:
+Making a Theme file from a file in which another terminal, such as iTerm2 or Ghostty, keeps its colours. The new Theme's chrome colours come from its terminal colours, and it is named after the file it came from.
+_Avoid_: Upload, convert
+
 **Bezel**:
 The thin border around a Session's window.
 _Avoid_: Frame, outline, window border

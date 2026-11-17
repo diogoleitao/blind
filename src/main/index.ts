@@ -29,7 +29,7 @@ import { createFileStateStore } from './file-state-store'
 import { createMenuBarIcon } from './menu-bar-icon'
 import { createNodePtyShellHost } from './node-pty-shell-host'
 import { createPalettePositionFile } from './palette-position-file'
-import { createThemeFiles } from './theme-files'
+import { createThemeFiles, readThemeSource } from './theme-files'
 import { loadWindowEffects } from './window-effects'
 
 // The installed app's Hotkey is F12; running from the repo uses F7, so both can run side by side.
@@ -189,6 +189,13 @@ app.whenReady().then(() => {
     if (effect.type === 'pickActivitySound') {
       windows.get(effect.sessionId)?.webContents.send(channels.pickActivitySound, core.settings().activity.sound)
     }
+    if (effect.type === 'pickThemeImport') pickThemeImport(effect.sessionId)
+    if (effect.type === 'showThemeImport') {
+      windows.get(effect.sessionId)?.webContents.send(channels.showThemeImport, effect.themeImport)
+    }
+    if (effect.type === 'writeThemeFile' && !themeFiles.write(effect.fileName, effect.text)) {
+      notify(`Couldn't save ${effect.fileName}`, 'The themes folder may have a file by that name already.')
+    }
     if (effect.type === 'themesRejected') {
       // A file named alone was skipped; a field rejected in a file takes the Default Theme's value.
       const rejected = effect.rejected.join(', ')
@@ -216,6 +223,20 @@ app.whenReady().then(() => {
   // A system notification, seen even while Blind is hidden behind the editor the config file was saved from.
   function notify (title: string, body: string) {
     new Notification({ title, body }).show()
+  }
+
+  // Attached to the Session's window, so the file picker shows above the floating panel. Any file can be picked, since
+  // Ghostty's theme files have no extension; one that isn't a theme is refused once read.
+  async function pickThemeImport (sessionId: SessionId) {
+    const window = windows.get(sessionId)
+    if (!window) return
+    const { canceled, filePaths } = await dialog.showOpenDialog(window, {
+      title: 'Import Theme',
+      buttonLabel: 'Import',
+      properties: ['openFile'],
+    })
+    if (canceled || filePaths.length === 0 || window.isDestroyed()) return
+    core.themeImportPicked(sessionId, readThemeSource(filePaths[0]))
   }
 
   // With no app set to open `.jsonc` files, the file is shown in Finder instead.
@@ -442,6 +463,7 @@ app.whenReady().then(() => {
   ipcMain.on(channels.previewMenuBarIcon, (_event, icon: MenuBarIcon) => core.previewMenuBarIcon(icon))
   ipcMain.handle(channels.searchActivitySounds, (_event, query: string) => core.activitySoundResults(query))
   ipcMain.on(channels.previewActivitySound, (_event, sound: ActivitySound) => core.previewActivitySound(sound))
+  ipcMain.on(channels.saveThemeImport, () => core.themeImportSaved())
   ipcMain.handle(channels.searchPalette, (_event, query: string) => core.paletteResults(query))
   ipcMain.on(channels.choosePaletteResult, (_event, result: PaletteResult) => core.choosePaletteResult(result))
   ipcMain.on(channels.dismissPalette, () => core.paletteDismissed())

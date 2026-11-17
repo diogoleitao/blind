@@ -400,10 +400,12 @@ export const themeSchema = {
 } as const
 
 // The Themes loaded, and what of the Theme files was rejected: a file's name alone when the whole file was skipped,
-// else the file's name and the field, e.g. `dracula.jsonc: font.size`.
+// else the file's name and the field, e.g. `dracula.jsonc: font.size`. `fileNamesByTheme` names the file each Theme file's
+// Theme came from, by the Theme's name.
 export interface LoadedThemes {
   themes: Theme[];
   rejected: string[];
+  fileNamesByTheme: Record<string, string>;
 }
 
 // The group's fields from the file, the Default Theme's for each one it leaves out or gives an invalid value.
@@ -427,6 +429,7 @@ function readGroup<Group extends ThemeGroup> (group: Group, value: unknown, reje
 // it.
 export function loadThemes (files: ThemeFile[]): LoadedThemes {
   const rejected: string[] = []
+  const fileNamesByTheme: Record<string, string> = {}
   const themes = [...builtInThemes]
   const taken = new Set(themes.map((theme) => theme.name.toLowerCase()))
   for (const { fileName, text } of files.toSorted((a, b) => a.fileName.localeCompare(b.fileName))) {
@@ -444,7 +447,8 @@ export function loadThemes (files: ThemeFile[]): LoadedThemes {
     }
     taken.add(theme.name.toLowerCase())
     themes.push(theme)
+    fileNamesByTheme[theme.name] = fileName
   }
   const custom = themes.slice(builtInThemes.length).toSorted((a, b) => a.name.localeCompare(b.name))
-  return { themes: [...builtInThemes, ...custom], rejected }
+  return { themes: [...builtInThemes, ...custom], rejected, fileNamesByTheme }
 }

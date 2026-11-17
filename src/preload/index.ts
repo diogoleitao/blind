@@ -61,6 +61,10 @@ const api: BlindApi = {
   },
   searchActivitySounds: (query) => ipcRenderer.invoke(channels.searchActivitySounds, query),
   previewActivitySound: (sound) => ipcRenderer.send(channels.previewActivitySound, sound),
+  onShowThemeImport: (listener) => {
+    ipcRenderer.on(channels.showThemeImport, (_event, themeImport) => listener(themeImport))
+  },
+  saveThemeImport: () => ipcRenderer.send(channels.saveThemeImport),
   onFindInPane: (listener) => {
     ipcRenderer.on(channels.findInPane, (_event, paneId) => listener(paneId))
   },

@@ -28,6 +28,13 @@ import { type BoundAction, type KeyPress, matchesShortcut } from './key-bindings
 import { type LinkTarget, linkTarget } from './links'
 import type { Clock, SavedScrollback, ShellHost, Snapshot, StateStore } from './ports'
 import { capScrollback } from './scrollback'
+import {
+  importTheme,
+  type ReadyThemeImport,
+  type ThemeImport,
+  type ThemeImportTarget,
+  type ThemeSource,
+} from './theme-import'
 import { builtInThemes, defaultTheme, loadThemes, type Theme, type ThemeFile } from './themes'
 import {
   type CoreState,
@@ -84,6 +91,12 @@ export type Effect =
   | { type: 'pickMenuBarIcon'; sessionId: SessionId }
   // Has the Command Palette list the Activity sounds, like `pickTheme`.
   | { type: 'pickActivitySound'; sessionId: SessionId }
+  // Asks for the file to Import a Theme from, over the Session's window.
+  | { type: 'pickThemeImport'; sessionId: SessionId }
+  // Has the Command Palette show the Theme file a picked file makes, to be saved, or why the Import was refused.
+  | { type: 'showThemeImport'; sessionId: SessionId; themeImport: ThemeImport }
+  // Writes a new Theme file to the themes folder, never over one already there.
+  | { type: 'writeThemeFile'; fileName: string; text: string }
   // Tells the user the Theme files, or their fields, that were rejected, as `loadThemes` names them.
   | { type: 'themesRejected'; rejected: string[] }
   // Opens a search over the Pane's scrollback in the Session's window.
@@ -124,6 +137,7 @@ const paletteActionLabels = {
   findInPane: 'Find in Pane',
   clearScrollback: 'Clear Scrollback',
   changeTheme: 'Change Theme',
+  importTheme: 'Import Theme',
   changeMenuBarIcon: 'Change Menu Bar Icon',
   changeActivitySound: 'Change Activity Sound',
   resetCommandPalettePosition: 'Reset Command Palette Position',
@@ -239,7 +253,7 @@ export interface Core {
   state(): CoreState;
   // With no Open Sessions, opens a new Session and shows it.
   hotkeyPressed(): void;
-  // The Command Palette closed without a choice, ending any Theme preview.
+  // The Command Palette closed without a choice, ending any Theme preview and cancelling any Import it showed.
   paletteDismissed(): void;
   // Blind stopped being the active app, e.g. because another app was clicked.
   focusLost(): void;
@@ -266,6 +280,11 @@ export interface Core {
   // Puts the Theme in effect while the Command Palette lists the Themes: choosing a Theme keeps one, and dismissing the
   // palette restores the Theme from before.
   previewTheme(name: string): void;
+  // The file picked to Import a Theme from, over the Session's window.
+  themeImportPicked(sessionId: SessionId, source: ThemeSource): void;
+  // Saves the Theme file the Command Palette shows. It joins the Themes once the themes folder is read again, and
+  // changes neither the Theme in effect nor the theme setting.
+  themeImportSaved(): void;
   // The menu bar icons the Command Palette offers for a query, monochrome first.
   menuBarIconResults(query: string): PaletteResult[];
   // Like `previewTheme`, for the menu bar icon.
@@ -383,10 +402,18 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   // Whether the theme setting names no Theme loaded, so the user hears of it once.
   let themeSettingRejected = false
   let themes: Theme[] = builtInThemes
+  // What an Import checks a new Theme file against: the Themes, and the themes folder's files as last read.
+  let themeImportTarget: ThemeImportTarget = {
+    themeNames: builtInThemes.map((theme) => theme.name),
+    fileNamesByTheme: {},
+    fileNames: [],
+  }
   // The Theme the windows were last told to follow.
   let appliedTheme = defaultTheme
   // The name of the Theme browsed to in the Command Palette, in effect until the palette closes; absent otherwise.
   let previewedTheme: string | undefined
+  // The Theme file an Import shows in the Command Palette, to be saved; absent otherwise.
+  let themeImportToSave: ReadyThemeImport | undefined
   // The icon the menu bar was last told to show.
   let appliedMenuBarIcon = defaultSettings.menuBarIcon
   // The menu bar icon browsed to in the Command Palette, in effect until the palette closes; absent otherwise.
@@ -1204,6 +1231,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       emit({ type: 'clearScrollback', sessionId, paneId: tab.focusedPaneId })
     },
     changeTheme: (sessionId) => emit({ type: 'pickTheme', sessionId }),
+    importTheme: (sessionId) => emit({ type: 'pickThemeImport', sessionId }),
     changeMenuBarIcon: (sessionId) => emit({ type: 'pickMenuBarIcon', sessionId }),
     changeActivitySound: (sessionId) => emit({ type: 'pickActivitySound', sessionId }),
   }
@@ -1240,6 +1268,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       emit({ type: 'showApp', sessionId: state.currentSessionId! })
     }),
     paletteDismissed: command(() => {
+      themeImportToSave = undefined
       previewedTheme = undefined
       previewedMenuBarIcon = undefined
       applyThemeInEffect()
@@ -1280,6 +1309,11 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     themeFilesChanged: command((files) => {
       const loaded = loadThemes(files)
       themes = loaded.themes
+      themeImportTarget = {
+        themeNames: themeNames(),
+        fileNamesByTheme: loaded.fileNamesByTheme,
+        fileNames: files.map((file) => file.fileName),
+      }
       if (loaded.rejected.length > 0) emit({ type: 'themesRejected', rejected: loaded.rejected })
       if (configReadable) {
         const parsed = parseConfig(configText, themeNames())!
@@ -1289,6 +1323,17 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
         takeSettings(parsed)
       }
       applyThemeInEffect()
+    }),
+    themeImportPicked: command((sessionId, source) => {
+      const themeImport = importTheme(source, themeImportTarget)
+      themeImportToSave = themeImport.type === 'ready' ? themeImport : undefined
+      emit({ type: 'showThemeImport', sessionId, themeImport })
+    }),
+    themeImportSaved: command(() => {
+      if (!themeImportToSave) return
+      const { fileName, text } = themeImportToSave
+      themeImportToSave = undefined
+      emit({ type: 'writeThemeFile', fileName, text })
     }),
     newSession: command(() => {
       addSession()

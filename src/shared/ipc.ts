@@ -3,6 +3,7 @@ import type { ActivitySound, MenuBarIcon, Settings } from '../core/config'
 import type { Effect, PaletteResult } from '../core/core'
 import type { PaneRect } from '../core/layout'
 import type { PaneId, TabId } from '../core/state'
+import type { ThemeImport } from '../core/theme-import'
 import type { Theme } from '../core/themes'
 
 export interface TerminalSize {
@@ -62,6 +63,8 @@ export const channels = {
   pickActivitySound: 'activitySound:pick',
   searchActivitySounds: 'activitySound:search',
   previewActivitySound: 'activitySound:preview',
+  showThemeImport: 'themeImport:show',
+  saveThemeImport: 'themeImport:save',
   findInPane: 'pane:find',
   clearScrollback: 'pane:clear',
   copy: 'clipboard:copy',
@@ -126,6 +129,10 @@ export interface BlindApi {
   searchActivitySounds(query: string): Promise<PaletteResult[]>;
   // The Activity sound the Command Palette's selection moved to.
   previewActivitySound(sound: ActivitySound): void;
+  // Called when the Command Palette should show the Theme file an Import makes, to be saved, or why it was refused.
+  onShowThemeImport(listener: (themeImport: ThemeImport) => void): void;
+  // Saves the Theme file the Command Palette showed.
+  saveThemeImport(): void;
   // Called when the Pane's scrollback should be searched.
   onFindInPane(listener: (paneId: PaneId) => void): void;
   // Called when the Pane's scrollback should be cleared.

@@ -10,9 +10,19 @@ function hex (value: number) {
   return Math.round(value).toString(16).padStart(2, '0')
 }
 
+// The colour as `#rrggbb`, without its alpha.
+export function opaque (colour: Colour): Colour {
+  return colour.slice(0, 7)
+}
+
+// A colour from its red, green and blue from 0 to 255, as `#rrggbb`.
+export function rgbColour (red: number, green: number, blue: number): Colour {
+  return `#${hex(red)}${hex(green)}${hex(blue)}`
+}
+
 // The colour with its alpha scaled by `factor`.
 export function withOpacity (colour: Colour, factor: number): Colour {
-  return `${colour.slice(0, 7)}${hex(rgba(colour).alpha * 255 * factor)}`
+  return `${opaque(colour)}${hex(rgba(colour).alpha * 255 * factor)}`
 }
 
 // `colour` mixed into `into`, making up `weight` of the result, from 0 to 1, with each colour weighed by its alpha as
