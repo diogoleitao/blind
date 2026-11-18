@@ -86,10 +86,14 @@ _Avoid_: Cmd+K menu, launcher, quick open
 A Pane's standing request for the user's attention, raised when the program in its Shell asks for it and cleared when the Pane becomes the Current Pane or the program says it no longer needs the user. A Tab or Session has Activity while any of its Panes does.
 _Avoid_: Unread, alert, output
 
+**Activity Sidebar**:
+A list of the Panes with Activity across every Open Session, grouped by Session, that slides over one side of the Current Session's window. Choosing a Pane in it makes that Pane the Current Pane.
+_Avoid_: Inbox, drawer, panel
+
 ### Appearance
 
 **Theme**:
-A named set of colours covering both the terminal and the app's own chrome (Tab bar, Tab dividers, Command Palette, Session Banner, Pane dividers, Bezel).
+A named set of colours covering both the terminal and the app's own chrome (Tab bar, Tab dividers, Command Palette, Activity Sidebar, Session Banner, Pane dividers, Bezel).
 _Avoid_: Colour scheme, profile
 
 **Theme file**:

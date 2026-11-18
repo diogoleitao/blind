@@ -387,6 +387,92 @@
         border-radius: 4px;
         font: 11px ui-monospace, monospace;
       }
+      /* The Activity Sidebar slides over the side of the window the activitySidebar.side setting names, the full height
+         of it, above the Tab bar and the Panes. It is as wide as the Command Palette and takes its colours. While it is
+         open, the backdrop over the rest of the window takes clicks, which close it. */
+      #activity-sidebar-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+      }
+      #activity-sidebar-backdrop[hidden] {
+        display: none;
+      }
+      #activity-sidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        right: 0;
+        z-index: 1;
+        width: min(640px, 90vw);
+        box-sizing: border-box;
+        margin: 0;
+        padding: 7px 0 13px;
+        list-style: none;
+        overflow-y: auto;
+        border-left: 1px solid var(--palette-border);
+        background: var(--palette-background);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+        font: 13px system-ui, sans-serif;
+        color: var(--palette-text);
+        outline: none;
+        cursor: default;
+        transform: translateX(100%);
+        visibility: hidden;
+        transition:
+          transform 150ms ease-out,
+          visibility 150ms;
+      }
+      body.activity-sidebar-left #activity-sidebar {
+        right: auto;
+        left: 0;
+        border-left: none;
+        border-right: 1px solid var(--palette-border);
+        transform: translateX(-100%);
+      }
+      /* Visible at once as it opens, so it can take the keyboard while it slides in; as it closes, it stays visible until
+         it has slid out. */
+      #activity-sidebar.open {
+        transform: none;
+        visibility: visible;
+        transition: transform 150ms ease-out;
+      }
+      /* Closed as the window lost focus, without sliding out. */
+      #activity-sidebar.instant {
+        transition: none;
+      }
+      /* With macOS's Reduce motion on, it appears and disappears without sliding. */
+      @media (prefers-reduced-motion: reduce) {
+        #activity-sidebar,
+        #activity-sidebar.open {
+          transition: none;
+        }
+      }
+      /* A row is spaced like a Command Palette result, indented by its level. Headings, and the line saying there's no
+         Activity, are muted; a Session's heading after the first has space above it. */
+      .activity-row {
+        margin: 0 var(--result-inset);
+        padding: 7px var(--result-padding-x);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .activity-row.selected {
+        border-radius: 14px;
+        background: var(--palette-selection);
+      }
+      .activity-row.heading {
+        color: var(--palette-muted-text);
+      }
+      .activity-row.level-0:not(:first-child) {
+        margin-top: 6px;
+      }
+      .activity-row.level-1 {
+        padding-left: calc(var(--result-padding-x) + 18px);
+      }
+      .activity-row.level-2 {
+        padding-left: calc(var(--result-padding-x) + 36px);
+      }
       /* The find bar takes the Command Palette's colours, and the Pane dividers' for the line before its count. */
       #find {
         position: fixed;
@@ -445,6 +531,8 @@
       <div id="palette-import" hidden></div>
       <ul id="palette-results"></ul>
     </div>
+    <div id="activity-sidebar-backdrop" hidden></div>
+    <ul id="activity-sidebar" tabindex="-1"></ul>
     <div id="find" hidden>
       <input
         id="find-input"

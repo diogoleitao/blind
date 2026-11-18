@@ -1,3 +1,4 @@
+import type { ActivitySidebarRow } from './activity-sidebar'
 import { type ProgramStatusReport, replaces, wantsTheUser } from './attention'
 import {
   type FocusDirection,
@@ -56,6 +57,8 @@ export type Effect =
   | { type: 'showApp'; sessionId: SessionId }
   // Opens the Command Palette over the Session's window.
   | { type: 'openPalette'; sessionId: SessionId }
+  // Opens the Activity Sidebar over the Session's window, or closes it there.
+  | { type: 'toggleActivitySidebar'; sessionId: SessionId }
   | { type: 'hideApp' }
   // Makes the Session the visible one in place of the Session shown before, without a fade.
   | { type: 'showSession'; sessionId: SessionId }
@@ -135,6 +138,7 @@ const paletteActionLabels = {
   focusPaneRight: 'Focus Pane Right',
   focusPaneUp: 'Focus Pane Above',
   focusPaneDown: 'Focus Pane Below',
+  toggleActivitySidebar: 'Toggle Activity Sidebar',
   findInPane: 'Find in Pane',
   clearScrollback: 'Clear Scrollback',
   changeTheme: 'Change Theme',
@@ -223,10 +227,12 @@ export interface MenuBar {
   actions: { action: MenuBarAction; label: string }[];
 }
 
-// Why a Pane has Activity: a notification, or its program's status records in a state that wants the user, by id.
+// Why a Pane has Activity: a notification, or its program's status records in a state that wants the user, by id; and
+// where its gaining Activity falls among every Pane's, counting up.
 interface PaneActivity {
   notified: boolean;
   records: string[];
+  gainOrder: number;
 }
 
 // How many other Sessions a Session's Tab bar names by their Activity before it only says there are more.
@@ -383,6 +389,10 @@ export interface Core {
   // What the Session's Tab bar shows after its label: the other Sessions with Activity in cycle order, by their Tab bar
   // labels, up to three of them; past three, a single `3+`.
   activityChips(sessionId: SessionId): string[];
+  // What the Activity Sidebar lists: the Panes with Activity across every Open Session, under their Sessions.
+  activitySidebarRows(): ActivitySidebarRow[];
+  // Jumps to the Pane a row of the Activity Sidebar stands for, as the Command Palette does, clearing its Activity.
+  activitySidebarPaneChosen(paneId: PaneId): void;
   onEffect(listener: (effect: Effect) => void): void;
   onStateChange(listener: (state: CoreState) => void): void;
 }
@@ -395,6 +405,9 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   let appShown = true
   // The Panes with Activity. Not part of the snapshot: Restore brings back none.
   let activity: Record<PaneId, PaneActivity> = {}
+  // How many times a Pane has gained Activity, which orders the Activity Sidebar: a count rather than the clock's time,
+  // so two gains never tie.
+  let activityGains = 0
   let settings: Settings = defaultSettings
   // The config file's text the settings were last read from, read again when the Themes change.
   let configText: string | undefined
@@ -531,6 +544,41 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return session.tabs.some(tabHasActivity)
   }
 
+  // The Open Sessions with Activity, each with its Tabs with Activity and their Panes with it, each list ordered by when
+  // its Panes gained Activity, latest first.
+  function sessionsByActivity () {
+    const latestFirst = <Item extends { gainOrder: number }>(items: Item[]) =>
+      items.toSorted((a, b) => b.gainOrder - a.gainOrder)
+    const sessions = openSessionsInCycleOrder().map((session) => {
+      const tabs = session.tabs.map((tab) => {
+        const panes = latestFirst(
+          tab.panes.filter((pane) => pane.id in activity).map((pane) => ({ pane, gainOrder: activity[pane.id].gainOrder }))
+        )
+        return { tab, panes: panes.map(({ pane }) => pane), gainOrder: panes[0]?.gainOrder ?? 0 }
+      })
+      const withActivity = latestFirst(tabs.filter(({ panes }) => panes.length > 0))
+      return { session, tabs: withActivity, gainOrder: withActivity[0]?.gainOrder ?? 0 }
+    })
+    return latestFirst(sessions.filter(({ tabs }) => tabs.length > 0))
+  }
+
+  // A Session with Activity is a heading, its Tabs with Activity under it only while there are two or more, and a Tab's
+  // Panes with Activity under it only while there are two or more. A Tab with one such Pane stands for it, under the
+  // Tab's title, as does a Session's only row.
+  function activitySidebarRows (): ActivitySidebarRow[] {
+    return sessionsByActivity().flatMap(({ session, tabs }) => {
+      const tabLevel = tabs.length > 1
+      return [
+        { label: labelOf(session), level: 0 } as const,
+        ...tabs.flatMap(({ tab, panes }): ActivitySidebarRow[] => {
+          if (panes.length === 1) return [{ label: titleOf(tab), level: 1, paneId: panes[0].id }]
+          const paneRows = panes.map((pane) => ({ label: paneTitle(pane), level: tabLevel ? 2 : 1, paneId: pane.id }) as const)
+          return tabLevel ? [{ label: titleOf(tab), level: 1 }, ...paneRows] : paneRows
+        }),
+      ]
+    })
+  }
+
   // Only a Pane of an Open Session that isn't the Current Pane gets Activity: a stopped Shell can still report on its way
   // out.
   function canRaiseActivity (paneId: PaneId) {
@@ -539,13 +587,14 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
 
   // A Pane left with no reason for Activity has none. A Pane gaining Activity plays the Activity sound.
   function updatePaneActivity (paneId: PaneId, update: (pane: PaneActivity) => PaneActivity) {
-    const current = activity[paneId] ?? { notified: false, records: [] }
+    const current = activity[paneId] ?? { notified: false, records: [], gainOrder: 0 }
     const updated = update(current)
     if (updated === current) return
     const { [paneId]: _replaced, ...others } = activity
     const hasActivity = updated.notified || updated.records.length > 0
     const gained = hasActivity && !(paneId in activity)
-    setActivity(hasActivity ? { ...others, [paneId]: updated } : others)
+    if (gained) activityGains += 1
+    setActivity(hasActivity ? { ...others, [paneId]: gained ? { ...updated, gainOrder: activityGains } : updated } : others)
     if (gained && ringsNow()) emit({ type: 'playActivitySound', sound: settings.activity.sound })
   }
 
@@ -1218,6 +1267,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     focusPaneRight: (sessionId) => core.focusPaneInDirection(sessionId, 'right'),
     focusPaneUp: (sessionId) => core.focusPaneInDirection(sessionId, 'up'),
     focusPaneDown: (sessionId) => core.focusPaneInDirection(sessionId, 'down'),
+    toggleActivitySidebar: (sessionId) => emit({ type: 'toggleActivitySidebar', sessionId }),
     findInPane: (sessionId) => {
       const tab = focusedTabOf(sessionId)
       if (tab) emit({ type: 'findInPane', sessionId, paneId: tab.focusedPaneId })
@@ -1566,6 +1616,8 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
         .map(shortLabelOf)
       return labels.length > maximumActivityChips ? [`${maximumActivityChips}+`] : labels
     },
+    activitySidebarRows,
+    activitySidebarPaneChosen: command(jumpToPane),
     onEffect (listener) {
       effectListeners.push(listener)
     },

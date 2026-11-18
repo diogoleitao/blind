@@ -43,6 +43,10 @@ const api: BlindApi = {
     ipcRenderer.on(channels.palettePosition, (_event, position) => listener(position))
   },
   movePalette: (position) => ipcRenderer.send(channels.movePalette, position),
+  onToggleActivitySidebar: (listener) => {
+    ipcRenderer.on(channels.toggleActivitySidebar, () => listener())
+  },
+  chooseActivitySidebarPane: (paneId) => ipcRenderer.send(channels.chooseActivitySidebarPane, paneId),
   onTheme: (listener) => {
     ipcRenderer.on(channels.applyTheme, (_event, theme) => listener(theme))
   },

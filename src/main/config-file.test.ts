@@ -48,7 +48,7 @@ describe('the schema written next to the config file', () => {
       .filter(([, property]) => property.type === 'object' && property.properties)
     expect(Object.keys(schema.properties)).toEqual([
       '$schema', 'session', 'tab', 'pane', 'shell', 'loginLaunch', 'sessionBanner', 'commandPalette', 'activity',
-      'theme', 'background', 'menuBarIcon', 'keyBindings',
+      'activitySidebar', 'theme', 'background', 'menuBarIcon', 'keyBindings',
     ])
     expect(schema.additionalProperties).toBe(false)
     expect(Object.fromEntries(groups.map(([name, group]) => [name, Object.keys(group.properties!)]))).toMatchObject({
@@ -58,6 +58,7 @@ describe('the schema written next to the config file', () => {
       loginLaunch: ['start', 'withNoOpenSessions'],
       commandPalette: ['sessionSearchOrder', 'tabSearchScope', 'paneSearchScope', 'nesting', 'kindMarkers'],
       activity: ['sound', 'ring'],
+      activitySidebar: ['side'],
       background: ['transparency', 'effect', 'blurRadius'],
     })
     for (const [, group] of groups) expect(group.additionalProperties).toBe(false)

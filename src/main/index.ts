@@ -163,6 +163,9 @@ app.whenReady().then(() => {
     if (effect.type === 'closeWindow') closeWindow(effect.sessionId)
     if (effect.type === 'showApp') showWindow(windowFor(effect.sessionId))
     if (effect.type === 'openPalette') windows.get(effect.sessionId)?.webContents.send(channels.openPalette)
+    if (effect.type === 'toggleActivitySidebar') {
+      windows.get(effect.sessionId)?.webContents.send(channels.toggleActivitySidebar)
+    }
     if (effect.type === 'hideApp') hideApp()
     if (effect.type === 'showSession') swapToWindow(effect.sessionId)
     if (effect.type === 'showSessionBanner') showSessionBanner(effect.sessionId)
@@ -426,6 +429,7 @@ app.whenReady().then(() => {
         activity: core.tabHasActivity(tab.id),
       })),
       focusedTabId: session.focusedTabId,
+      activitySidebar: core.activitySidebarRows(),
     }
   }
 
@@ -438,10 +442,11 @@ app.whenReady().then(() => {
 
   function sendWindowSettings (window: BrowserWindow) {
     if (window.isDestroyed()) return
-    const { pane, background } = core.settings()
+    const { pane, background, activitySidebar } = core.settings()
     const settings: WindowSettings = {
       pane: { scrollbackLines: pane.scrollbackLines, padding: pane.padding, scrollBar: pane.scrollBar },
       background: { transparency: background.transparency },
+      activitySidebar,
     }
     window.webContents.send(channels.windowSettings, settings)
   }
@@ -467,6 +472,7 @@ app.whenReady().then(() => {
   ipcMain.handle(channels.searchPalette, (_event, query: string) => core.paletteResults(query))
   ipcMain.on(channels.choosePaletteResult, (_event, result: PaletteResult) => core.choosePaletteResult(result))
   ipcMain.on(channels.dismissPalette, () => core.paletteDismissed())
+  ipcMain.on(channels.chooseActivitySidebarPane, (_event, paneId: PaneId) => core.activitySidebarPaneChosen(paneId))
   ipcMain.on(channels.answerPalettePrompt, (_event, prompt: PalettePrompt, answer: string) => {
     if (prompt.type === 'askSessionName') core.renameSession(prompt.sessionId, answer)
     else core.renameTab(prompt.tabId, answer)

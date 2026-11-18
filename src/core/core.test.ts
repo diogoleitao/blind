@@ -3736,6 +3736,7 @@ describe('the Command Palette', () => {
       'action Focus Pane Right',
       'action Focus Pane Above',
       'action Focus Pane Below',
+      'action Toggle Activity Sidebar',
       'action Find in Pane',
       'action Clear Scrollback',
       'action Change Theme',
@@ -3810,6 +3811,7 @@ describe('the Command Palette', () => {
       'action Next Tab',
       'action Previous Tab',
       'action Focus Pane Below',
+      'action Toggle Activity Sidebar',
       'action Change Menu Bar Icon',
       'action Clear Scrollback',
     ])
@@ -4213,6 +4215,169 @@ describe('Activity', () => {
       for (const paneId of [web, second, api, fourth]) core.notificationReceived(paneId)
 
       expect(core.activityChips(current)).toEqual(['3+'])
+    })
+  })
+
+  describe('the Activity Sidebar', () => {
+    // Open Sessions `blind`, with Tabs `editor` (Panes `vim` and `zsh`) and `tests` (Pane `vitest`), and `infra`, with
+    // Tabs `terraform` (Panes `plan` and `apply`) and `logs` (Pane `tail`), each Pane titled by its running program. The
+    // Current Session is a third one, so none of their Panes is the Current Pane.
+    function startWithTwoBusySessions () {
+      const started = startCore()
+      const { core, shellHost } = started
+      const paneIds: Record<string, string> = {}
+      // Names the Current Session and gives it the Tabs, its first Tab being the one it opened with.
+      function fill (name: string, tabs: [title: string, programs: string[]][]) {
+        const sessionId = core.state().currentSessionId!
+        core.renameSession(sessionId, name)
+        tabs.forEach(([title, programs], position) => {
+          if (position > 0) core.newTab(sessionId)
+          const tab = core.state().sessions.find((session) => session.id === sessionId)!.tabs[position]
+          for (let count = 1; count < programs.length; count += 1) core.splitPane(sessionId, 'vertical')
+          const panes = core.state().sessions.flatMap((session) => session.tabs).find(({ id }) => id === tab.id)!.panes
+          panes.forEach((pane, index) => {
+            shellHost.changeRunningProgram(pane.id, programs[index])
+            paneIds[programs[index]] = pane.id
+          })
+          core.renameTab(tab.id, title)
+        })
+        return sessionId
+      }
+      const blind = fill('blind', [['editor', ['vim', 'zsh']], ['tests', ['vitest']]])
+      core.newSession()
+      const infra = fill('infra', [['terraform', ['plan', 'apply']], ['logs', ['tail']]])
+      core.newSession()
+      const programOf = (paneId: string) => Object.keys(paneIds).find((program) => paneIds[program] === paneId)
+      // Each row indented by its level, a row standing for a Pane followed by the Pane's program.
+      const sidebar = () =>
+        core.activitySidebarRows().map((row) => {
+          const indent = '  '.repeat(row.level)
+          return row.paneId === undefined ? `${indent}${row.label}` : `${indent}${row.label} → ${programOf(row.paneId)}`
+        })
+      const raise = (...programs: string[]) => programs.forEach((program) => core.notificationReceived(paneIds[program]))
+      return { ...started, blind, infra, paneIds, sidebar, raise }
+    }
+
+    it('lists nothing while no Pane has Activity', () => {
+      const { sidebar } = startWithTwoBusySessions()
+
+      expect(sidebar()).toEqual([])
+    })
+
+    it("lists a Session's one Pane with Activity as one row under the Session, labelled with its Tab's title", () => {
+      const { sidebar, raise } = startWithTwoBusySessions()
+
+      raise('zsh')
+
+      expect(sidebar()).toEqual(['blind', '  editor → zsh'])
+    })
+
+    it("lists a Tab's two Panes with Activity under the Session by their titles, when no other Tab has any", () => {
+      const { sidebar, raise } = startWithTwoBusySessions()
+
+      raise('vim', 'zsh')
+
+      expect(sidebar()).toEqual(['blind', '  zsh → zsh', '  vim → vim'])
+    })
+
+    it("lists two Tabs with Activity under the Session, each standing for its one Pane under the Tab's title", () => {
+      const { sidebar, raise } = startWithTwoBusySessions()
+
+      raise('zsh', 'vitest')
+
+      expect(sidebar()).toEqual(['blind', '  tests → vitest', '  editor → zsh'])
+    })
+
+    it("labels an Unnamed Session as the Command Palette does, with its focused Pane's working directory", () => {
+      const { core, left } = startWithThreePanes()
+
+      core.notificationReceived(left)
+
+      expect(core.activitySidebarRows()).toEqual([
+        { label: 'Session 1 (~)', level: 0 },
+        { label: 'me', level: 1, paneId: left },
+      ])
+    })
+
+    it("is toggled over the Session's window by Cmd+B by default, and by the Command Palette's Toggle Activity Sidebar", () => {
+      const { core, effects } = startCore()
+      const sessionId = core.state().sessions[0].id
+
+      expect(core.keyPressed(sessionId, press('b', 'KeyB', 'meta'))).toBe(true)
+      chooseAction(core, 'Toggle Activity Sidebar')
+
+      expect(effects).toEqual([
+        { type: 'toggleActivitySidebar', sessionId },
+        { type: 'toggleActivitySidebar', sessionId },
+      ])
+    })
+
+    it('slides over the right by default, or the side activitySidebar.side names, falling back to the right for any other', () => {
+      const { core, effects } = startCore()
+      expect(core.settings().activitySidebar.side).toBe('right')
+
+      core.configChanged('{ "activitySidebar": { "side": "left" } }')
+      expect(core.settings().activitySidebar.side).toBe('left')
+
+      core.configChanged('{ "activitySidebar": { "side": "top" } }')
+      expect(core.settings().activitySidebar.side).toBe('right')
+      expect(effectsOfType(effects, 'settingsRejected')).toEqual([
+        { type: 'settingsRejected', settings: ['activitySidebar.side'] },
+      ])
+    })
+
+    it('is toggled by the shortcut keyBindings gives toggleActivitySidebar instead', () => {
+      const { core, effects } = startCore(undefined, '{ "keyBindings": { "toggleActivitySidebar": "Cmd+Shift+A" } }')
+      const sessionId = core.state().sessions[0].id
+
+      expect(core.keyPressed(sessionId, press('b', 'KeyB', 'meta'))).toBe(false)
+      expect(core.keyPressed(sessionId, press('A', 'KeyA', 'meta', 'shift'))).toBe(true)
+
+      expect(effects).toEqual([{ type: 'toggleActivitySidebar', sessionId }])
+    })
+
+    it("choosing a row makes its Pane the Current Pane, in its Session and Tab, clearing the Pane's Activity", () => {
+      const { core, effects, sidebar, raise, infra, paneIds } = startWithTwoBusySessions()
+      raise('plan', 'vitest')
+      effects.length = 0
+
+      core.activitySidebarPaneChosen(paneIds.plan)
+
+      const session = core.state().sessions.find(({ id }) => id === infra)!
+      expect(core.state().currentSessionId).toBe(infra)
+      expect(session.focusedTabId).toBe(session.tabs[0].id)
+      expect(session.tabs[0].focusedPaneId).toBe(paneIds.plan)
+      expect(effects).toEqual([{ type: 'showSession', sessionId: infra }])
+      expect(sidebar()).toEqual(['blind', '  tests → vitest'])
+    })
+
+    it('lists the Session whose Pane gained Activity last first, whatever the cycle order', () => {
+      const { sidebar, raise } = startWithTwoBusySessions()
+
+      raise('vitest', 'tail')
+
+      expect(sidebar()).toEqual(['infra', '  logs → tail', 'blind', '  tests → vitest'])
+    })
+
+    it('lists Tabs and Panes by when they gained Activity too, latest first', () => {
+      const { sidebar, raise } = startWithTwoBusySessions()
+
+      raise('plan', 'tail', 'apply')
+
+      expect(sidebar()).toEqual(['infra', '  terraform', '    apply → apply', '    plan → plan', '  logs → tail'])
+    })
+
+    it("keeps a Pane's place when it asks again while it has Activity, and moves it up once it regains it", () => {
+      const { core, sidebar, raise, paneIds } = startWithTwoBusySessions()
+      core.programStatusReported(paneIds.vitest, { id: 'a', state: 'done' })
+      raise('tail')
+
+      core.programStatusReported(paneIds.vitest, { id: 'b', state: 'blocked' })
+      expect(sidebar()).toEqual(['infra', '  logs → tail', 'blind', '  tests → vitest'])
+
+      core.programStatusReported(paneIds.vitest, { id: '', state: 'clear' })
+      core.programStatusReported(paneIds.vitest, { id: '', state: 'done' })
+      expect(sidebar()).toEqual(['blind', '  tests → vitest', 'infra', '  logs → tail'])
     })
   })
 

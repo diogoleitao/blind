@@ -9,6 +9,7 @@ import {
   Terminal,
 } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
+import { type ActivitySidebarRow, movedSelection, selectionAfter } from '../core/activity-sidebar'
 import { isNotification, notificationOscs, programStatus, programStatusSupported } from '../core/attention'
 import { mixColours, withOpacity } from '../core/colours'
 import { defaultSettings } from '../core/config'
@@ -60,6 +61,7 @@ let focusedPaneId: PaneId | undefined
 let windowSettings: WindowSettings = {
   pane: defaultSettings.pane,
   background: defaultSettings.background,
+  activitySidebar: defaultSettings.activitySidebar,
 }
 let theme: Theme = defaultTheme
 
@@ -405,7 +407,7 @@ function reportScrollback (paneId: PaneId, pane: PaneTerminal) {
 
 // Open terminals keep their scrollback up to the new number of lines from now on. The background takes the new
 // transparency at once. Padding the Panes, or not, hiding their scroll bars, or not, and having scrollback, or not,
-// change the space their terminals have, which the stylesheet works out.
+// change the space their terminals have, which the stylesheet works out. The Activity Sidebar moves to its side.
 function applyWindowSettings (settings: WindowSettings) {
   windowSettings = settings
   for (const pane of terminals.values()) pane.terminal.options.scrollback = settings.pane.scrollbackLines
@@ -413,6 +415,7 @@ function applyWindowSettings (settings: WindowSettings) {
   document.body.classList.toggle('padded-panes', settings.pane.padding === 'padded')
   document.body.classList.toggle('scroll-bar-hidden', settings.pane.scrollBar === 'none')
   document.body.classList.toggle('has-scrollback', settings.pane.scrollbackLines > 0)
+  document.body.classList.toggle('activity-sidebar-left', settings.activitySidebar.side === 'left')
   for (const pane of terminals.values()) pane.fit.fit()
 }
 
@@ -492,6 +495,7 @@ window.addEventListener('blur', hideSessionBanner)
 // Every Pane's terminal stays open, hidden but laid out, so switching Tabs keeps its scrollback and size.
 function render (view: SessionView) {
   renderTabBar(view)
+  updateActivitySidebar(view.activitySidebar)
   const panes = view.tabs.flatMap((tab) => tab.panes.map((rect) => ({ tab, rect })))
   const paneIds = new Set(panes.map(({ rect }) => rect.paneId))
   for (const [paneId, pane] of terminals) {
@@ -511,10 +515,11 @@ function render (view: SessionView) {
   // Splits, closed Panes, and the Tab bar appearing or disappearing all change the space the Panes have.
   for (const pane of terminals.values()) pane.fit.fit()
   if (focusedTab && focusedTab.focusedPaneId !== focusedPaneId) {
-    // The find bar searches the focused Pane only.
+    // The find bar searches the focused Pane only. An open Activity Sidebar keeps the keyboard, and hands it to the
+    // newly focused Pane as it closes.
     closeFind()
     focusedPaneId = focusedTab.focusedPaneId
-    terminals.get(focusedPaneId)?.terminal.focus()
+    if (!activitySidebarIsOpen()) terminals.get(focusedPaneId)?.terminal.focus()
   }
 }
 
@@ -735,6 +740,7 @@ function searchThenShowPalette () {
 }
 
 function openPalette () {
+  closeActivitySidebar()
   prompt = undefined
   picking = undefined
   leaveThemeImport()
@@ -990,11 +996,121 @@ window.addEventListener('mouseup', () => {
 })
 paletteInput.addEventListener('blur', dismissPalette)
 
+const activitySidebar = document.getElementById('activity-sidebar')!
+const activitySidebarBackdrop = document.getElementById('activity-sidebar-backdrop')!
+// What the Activity Sidebar lists, as the Session's view last said, open or not.
+let activitySidebarRows: ActivitySidebarRow[] = []
+// The Pane the selected row stands for, while the Activity Sidebar is open and lists any.
+let selectedActivityPane: PaneId | undefined
+
+function activitySidebarIsOpen () {
+  return activitySidebar.classList.contains('open')
+}
+
+function renderActivitySidebar () {
+  if (activitySidebarRows.length === 0) {
+    const empty = document.createElement('li')
+    empty.className = 'activity-row heading'
+    empty.textContent = 'No Activity'
+    activitySidebar.replaceChildren(empty)
+    return
+  }
+  activitySidebar.replaceChildren(
+    ...activitySidebarRows.map(({ label, level, paneId }) => {
+      const element = document.createElement('li')
+      element.className = `activity-row level-${level}`
+      element.classList.toggle('heading', paneId === undefined)
+      element.classList.toggle('selected', paneId !== undefined && paneId === selectedActivityPane)
+      element.textContent = label
+      element.title = label
+      if (paneId !== undefined) element.addEventListener('mousedown', () => chooseActivitySidebarPane(paneId))
+      return element
+    })
+  )
+  activitySidebar.querySelector('.selected')?.scrollIntoView({ block: 'nearest' })
+}
+
+// Takes the keyboard, with its first row selected, closing the Command Palette. It slides in, however it last closed.
+function openActivitySidebar () {
+  dismissPalette()
+  selectedActivityPane = selectionAfter([], activitySidebarRows, undefined)
+  renderActivitySidebar()
+  activitySidebar.classList.remove('instant')
+  activitySidebar.classList.add('open')
+  activitySidebarBackdrop.hidden = false
+  activitySidebar.focus()
+}
+
+// Leaves the keyboard where it went, e.g. to the Command Palette or the find bar.
+function hideActivitySidebar () {
+  activitySidebar.classList.remove('open')
+  activitySidebarBackdrop.hidden = true
+}
+
+// The focused Pane's terminal takes the keyboard back.
+function closeActivitySidebar () {
+  if (!activitySidebarIsOpen()) return
+  hideActivitySidebar()
+  if (focusedPaneId) terminals.get(focusedPaneId)?.terminal.focus()
+}
+
+// Without sliding out, as the window loses focus: it may be hidden by then, and would finish sliding once shown again.
+function closeActivitySidebarAtOnce () {
+  activitySidebar.classList.add('instant')
+  closeActivitySidebar()
+}
+
+function toggleActivitySidebar () {
+  if (activitySidebarIsOpen()) closeActivitySidebar()
+  else openActivitySidebar()
+}
+
+// Closes first, so the jump finds the keyboard with the Pane's terminal.
+function chooseActivitySidebarPane (paneId: PaneId | undefined) {
+  if (paneId === undefined || !activitySidebarIsOpen()) return
+  closeActivitySidebar()
+  blind.chooseActivitySidebarPane(paneId)
+}
+
+// Kept while closed, for the next opening. While open, the rows change in place and the selection follows its Pane, or
+// the nearest row left when its Pane's Activity clears.
+function updateActivitySidebar (rows: ActivitySidebarRow[]) {
+  const previous = activitySidebarRows
+  activitySidebarRows = rows
+  if (!activitySidebarIsOpen()) return
+  selectedActivityPane = selectionAfter(previous, rows, selectedActivityPane)
+  renderActivitySidebar()
+}
+
+activitySidebar.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    selectedActivityPane = movedSelection(activitySidebarRows, selectedActivityPane, event.key === 'ArrowDown' ? 1 : -1)
+    renderActivitySidebar()
+  } else if (event.key === 'Enter') chooseActivitySidebarPane(selectedActivityPane)
+  else return
+  event.preventDefault()
+})
+// Clicks inside keep the keyboard with the sidebar. A click outside lands on the backdrop, which only closes it.
+activitySidebar.addEventListener('mousedown', (event) => event.preventDefault())
+activitySidebarBackdrop.addEventListener('mousedown', (event) => {
+  event.preventDefault()
+  closeActivitySidebar()
+})
+// The keyboard going elsewhere closes it: to the Command Palette or the find bar, which keep it, or out of the window,
+// as the app hides, another Session's window takes its place, or another app is clicked, which leaves the focused
+// Pane's terminal to take it back when the window does.
+activitySidebar.addEventListener('focusout', (event) => {
+  if (event.relatedTarget === null) closeActivitySidebarAtOnce()
+  else hideActivitySidebar()
+})
+window.addEventListener('blur', closeActivitySidebarAtOnce)
+
 applyChromeColours(theme)
 blind.onWindowSettings(applyWindowSettings)
 blind.onShowSessionBanner(showSessionBanner)
 blind.onTheme(applyTheme)
 blind.onOpenPalette(openPalette)
+blind.onToggleActivitySidebar(toggleActivitySidebar)
 blind.onPickTheme(() => openPicker('theme', theme.name))
 blind.onPickMenuBarIcon((icon) => openPicker('menuBarIcon', icon))
 blind.onPickActivitySound((sound) => openPicker('activitySound', sound))

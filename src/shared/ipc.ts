@@ -1,3 +1,4 @@
+import type { ActivitySidebarRow } from '../core/activity-sidebar'
 import type { ProgramStatusReport } from '../core/attention'
 import type { ActivitySound, MenuBarIcon, Settings } from '../core/config'
 import type { Effect, PaletteResult } from '../core/core'
@@ -12,19 +13,21 @@ export interface TerminalSize {
 }
 
 // What a Session's window draws: the Session's label, followed by the chips naming the other Sessions with Activity,
-// and its Tabs, in order, each with where its Panes sit and whether it has Activity.
+// its Tabs, in order, each with where its Panes sit and whether it has Activity, and what its Activity Sidebar lists.
 export interface SessionView {
   sessionLabel: string;
   activityChips: string[];
   tabs: { id: TabId; title: string; panes: PaneRect[]; focusedPaneId: PaneId; activity: boolean }[];
   focusedTabId?: TabId;
+  activitySidebar: ActivitySidebarRow[];
 }
 
-// The settings a window follows: its terminals' scrollback, whether its Panes are padded and show a scroll bar, and how
-// transparent its background is.
+// The settings a window follows: its terminals' scrollback, whether its Panes are padded and show a scroll bar, how
+// transparent its background is, and which side its Activity Sidebar slides over.
 export interface WindowSettings {
   pane: Pick<Settings['pane'], 'scrollbackLines' | 'padding' | 'scrollBar'>;
   background: Pick<Settings['background'], 'transparency'>;
+  activitySidebar: Settings['activitySidebar'];
 }
 
 // What the Command Palette asks for in place of a search: a Session's name or a Tab's title.
@@ -53,6 +56,8 @@ export const channels = {
   answerPalettePrompt: 'palette:answer',
   palettePosition: 'palette:position',
   movePalette: 'palette:move',
+  toggleActivitySidebar: 'activitySidebar:toggle',
+  chooseActivitySidebarPane: 'activitySidebar:choose',
   applyTheme: 'theme:apply',
   pickTheme: 'theme:pick',
   searchThemes: 'theme:search',
@@ -111,6 +116,10 @@ export interface BlindApi {
   onPalettePosition(listener: (position: number) => void): void;
   // The user dragged the Command Palette to the position.
   movePalette(position: number): void;
+  // Called when the Activity Sidebar's shortcut, or its Command Palette action, asks for it to open or close.
+  onToggleActivitySidebar(listener: () => void): void;
+  // A row of the Activity Sidebar was chosen, standing for the Pane.
+  chooseActivitySidebarPane(paneId: PaneId): void;
   // Called once the page has loaded, before its Session view, and again whenever the Theme in effect changes.
   onTheme(listener: (theme: Theme) => void): void;
   // Called when the Command Palette should list the Themes instead of searching.

@@ -90,6 +90,11 @@ const activityRings = ['always', 'whileHidden', 'never'] as const
 // never.
 export type ActivityRing = (typeof activityRings)[number]
 
+const activitySidebarSides = ['right', 'left'] as const
+
+// The side of the Current Session's window the Activity Sidebar slides over.
+export type ActivitySidebarSide = (typeof activitySidebarSides)[number]
+
 const panePaddings = ['padded', 'none'] as const
 
 // Whether each Pane keeps its terminal's text off its edges and dividers, by a fixed amount, or lets it run up to them.
@@ -153,6 +158,9 @@ export interface Settings {
     sound: ActivitySound;
     ring: ActivityRing;
   };
+  activitySidebar: {
+    side: ActivitySidebarSide;
+  };
   // The name of the Theme in effect, built in or from a Theme file.
   theme: string;
   background: {
@@ -197,6 +205,9 @@ export const defaultSettings: Settings = {
   activity: {
     sound: 'Purr',
     ring: 'whileHidden',
+  },
+  activitySidebar: {
+    side: 'right',
   },
   theme: defaultTheme.name,
   background: {
@@ -285,6 +296,9 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers<Settings>
       activitySounds.find((sound) => typeof value === 'string' && sound.toLowerCase() === value.toLowerCase()) ??
       invalid,
     ring: oneOf(activityRings),
+  }),
+  activitySidebar: groupOf(defaultSettings.activitySidebar, {
+    side: oneOf(activitySidebarSides),
   }),
   // Theme names are unique ignoring case, so the setting matches one ignoring case and takes its spelling.
   theme: (value) =>
@@ -480,6 +494,19 @@ export const configSchema = {
             "When a Pane gaining Activity plays activity.sound: always plays it whether Blind is shown or hidden; whileHidden only while Blind is hidden; never doesn't play it. A Pane plays it once as it gains Activity, and again only once its Activity has cleared.",
           enum: activityRings,
           default: defaultSettings.activity.ring,
+        },
+      },
+    },
+    activitySidebar: {
+      description:
+        "The list of the Panes with Activity across every Open Session, which the toggleActivitySidebar key binding, Cmd+B by default, or the Command Palette's Toggle Activity Sidebar slides over the Current Session's window.",
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        side: {
+          description: "The side of the Current Session's window the Activity Sidebar slides over.",
+          enum: activitySidebarSides,
+          default: defaultSettings.activitySidebar.side,
         },
       },
     },
