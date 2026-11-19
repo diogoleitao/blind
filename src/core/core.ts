@@ -125,6 +125,7 @@ const paletteActionLabels = {
   newTab: 'New Tab',
   renameTab: 'Rename Tab',
   clearTabTitle: 'Clear Tab Title',
+  hideTab: 'Hide Tab',
   splitPaneVertically: 'Split Pane Vertically',
   splitPaneHorizontally: 'Split Pane Horizontally',
   closePane: 'Close Pane',
@@ -162,8 +163,8 @@ export type KindMarker = (typeof kindMarkers)[keyof typeof kindMarkers]
 
 // One entry the Command Palette offers. `current` marks the Current Session, Current Tab or Current Pane, where the
 // user already is, which the Command Palette lists and lets the user select but not choose. `activity` marks a Session,
-// Tab or Pane with Activity. `level` is set in the nested view alone. `marker` is set while the
-// commandPalette.kindMarkers setting shows them.
+// Tab or Pane with Activity. `hiddenTab` marks a Hidden Tab and its Panes. `level` is set in the nested view alone.
+// `marker` is set while the commandPalette.kindMarkers setting shows them.
 export type PaletteResult =
   | {
     type: 'session';
@@ -182,6 +183,7 @@ export type PaletteResult =
     sessionLabel: string;
     current: boolean;
     activity: boolean;
+    hiddenTab?: true;
     level?: PaletteLevel;
     marker?: KindMarker;
   }
@@ -193,6 +195,7 @@ export type PaletteResult =
     sessionLabel: string;
     current: boolean;
     activity: boolean;
+    hiddenTab?: true;
     level?: PaletteLevel;
     marker?: KindMarker;
   }
@@ -329,15 +332,18 @@ export interface Core {
   focusNextSession(): void;
   // Opens a Tab after the others and focuses it, in the directory the tab.startDirectory setting picks.
   newTab(sessionId: SessionId): void;
-  // Focuses the Tab at a zero-based position, if there is one.
+  // Focuses the shown Tab at a zero-based position among the shown Tabs, if there is one.
   focusTab(sessionId: SessionId, position: number): void;
-  // Both wrap around between the first and last Tab.
+  // Both wrap around between the first and last shown Tab, passing over the Hidden Tabs.
   focusPreviousTab(sessionId: SessionId): void;
   focusNextTab(sessionId: SessionId): void;
   // Fixes the Tab's title until it's cleared; a blank title clears it.
   renameTab(tabId: TabId, title: string): void;
   // The Tab's title follows its focused Pane again.
   clearTabTitle(tabId: TabId): void;
+  // Makes the Session's focused Tab a Hidden Tab, focusing the shown Tab that takes its place, or the new last shown
+  // Tab. The Session's only shown Tab stays shown.
+  hideTab(sessionId: SessionId): void;
   // Splits the focused Pane in two, starting the new half's Shell in the directory the pane.startDirectory setting
   // picks, and focuses it.
   splitPane(sessionId: SessionId, direction: SplitDirection): void;
@@ -386,6 +392,8 @@ export interface Core {
   programStatusReported(paneId: PaneId, report: ProgramStatusReport): void;
   // Whether any of the Tab's Panes has Activity.
   tabHasActivity(tabId: TabId): boolean;
+  // How many of the Session's Hidden Tabs have Activity, which the Tab bar shows after its shown Tabs while there are any.
+  hiddenTabsWithActivity(sessionId: SessionId): number;
   // What the Session's Tab bar shows after its label: the other Sessions with Activity in cycle order, by their Tab bar
   // labels, up to three of them; past three, a single `3+`.
   activityChips(sessionId: SessionId): string[];
@@ -571,9 +579,12 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       return [
         { label: labelOf(session), level: 0 } as const,
         ...tabs.flatMap(({ tab, panes }): ActivitySidebarRow[] => {
-          if (panes.length === 1) return [{ label: titleOf(tab), level: 1, paneId: panes[0].id }]
-          const paneRows = panes.map((pane) => ({ label: paneTitle(pane), level: tabLevel ? 2 : 1, paneId: pane.id }) as const)
-          return tabLevel ? [{ label: titleOf(tab), level: 1 }, ...paneRows] : paneRows
+          const mark = hiddenTabMark(tab)
+          if (panes.length === 1) return [{ label: titleOf(tab), level: 1, paneId: panes[0].id, ...mark }]
+          const paneRows = panes.map(
+            (pane) => ({ label: paneTitle(pane), level: tabLevel ? 2 : 1, paneId: pane.id, ...mark }) as const
+          )
+          return tabLevel ? [{ label: titleOf(tab), level: 1, ...mark }, ...paneRows] : paneRows
         }),
       ]
     })
@@ -700,6 +711,23 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     })
   }
 
+  // The Tabs the Tab bar shows: every Tab but the Hidden Tabs, in order.
+  function shownTabs (tabs: Tab[]) {
+    return tabs.filter((tab) => !tab.hidden)
+  }
+
+  // The shown Tab among the Session's new `tabs` that takes the place of its focused Tab, which closed or was hidden: the
+  // one at its position among the shown Tabs, or the new last shown Tab. Absent with no shown Tab left.
+  function shownTabTakingPlace (session: Session, tabs: Tab[]) {
+    const shown = shownTabs(tabs)
+    const position = shownTabs(session.tabs).findIndex((tab) => tab.id === session.focusedTabId)
+    return shown[Math.min(position, shown.length - 1)]
+  }
+
+  function withTabReplaced (tabs: Tab[], tab: Tab, replacement: Tab) {
+    return tabs.map((candidate) => (candidate === tab ? replacement : candidate))
+  }
+
   function focusedTabPosition (session: Session) {
     return session.tabs.findIndex((tab) => tab.id === session.focusedTabId)
   }
@@ -758,18 +786,21 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return { id: nextId('tab'), panes: [pane], layout: { type: 'pane', paneId: pane.id }, focusedPaneId: pane.id }
   }
 
+  // Moves through the shown Tabs, passing over the Hidden Tabs.
   function focusTabBy (sessionId: SessionId, offset: number) {
     updateSession(sessionId, (session) => {
-      const count = session.tabs.length
+      const shown = shownTabs(session.tabs)
+      const count = shown.length
       if (count === 0) return session
-      const position = focusedTabPosition(session)
-      return { ...session, focusedTabId: session.tabs[(position + offset + count) % count].id }
+      const position = shown.findIndex((tab) => tab.id === session.focusedTabId)
+      return { ...session, focusedTabId: shown[(position + offset + count) % count].id }
     })
   }
 
   // The Pane's sibling fills its space; closing the last Pane closes its Tab, and closing the last Tab closes the Session.
   // When the focused Pane closes, the Pane nearest to it in that sibling is focused. When the focused Tab closes, the
-  // Tab that takes its place is focused, or the new last Tab.
+  // shown Tab that takes its place is focused, or the new last shown Tab; with only Hidden Tabs left, the one that takes
+  // its place is shown again and focused.
   function removePaneFromSession (paneId: PaneId) {
     const session = findSessionWithPane(paneId)
     if (!session) return
@@ -787,8 +818,10 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     updateSession(session.id, (session) => {
       if (tabs.length === 0) return { ...session, status: 'closed', tabs, focusedTabId: undefined }
       if (tabs.some((tab) => tab.id === session.focusedTabId)) return { ...session, tabs }
-      const position = focusedTabPosition(session)
-      return { ...session, tabs, focusedTabId: tabs[Math.min(position, tabs.length - 1)].id }
+      const next = shownTabTakingPlace(session, tabs)
+      if (next) return { ...session, tabs, focusedTabId: next.id }
+      const hidden = tabs[Math.min(focusedTabPosition(session), tabs.length - 1)]
+      return { ...withTabShown({ ...session, tabs }, hidden.id), focusedTabId: hidden.id }
     })
     if (tabs.length > 0) return
     closeWindow(session.id)
@@ -1062,8 +1095,14 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       sessionLabel: labelOf(session),
       current: isCurrentTab(session, tab),
       activity: tabHasActivity(tab),
+      ...hiddenTabMark(tab),
       ...markerOf('tab'),
     }))
+  }
+
+  // A Hidden Tab's mark, as a result's or row's `hiddenTab`, for the Tab and each of its Panes; else nothing.
+  function hiddenTabMark (tab: Tab) {
+    return tab.hidden ? { hiddenTab: true as const } : {}
   }
 
   function paneResults (tabs = tabsInScope('all')): PaletteResult[] {
@@ -1076,6 +1115,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
         sessionLabel: labelOf(session),
         current: isCurrentPane(session, tab, pane),
         activity: pane.id in activity,
+        ...hiddenTabMark(tab),
         ...markerOf('pane'),
       }))
     )
@@ -1158,14 +1198,27 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     emit({ type: 'showApp', sessionId: state.currentSessionId! })
   }
 
-  // Makes the Tab's Session, when open, the Current Session with the Tab focused.
+  // Makes the Tab's Session, when open, the Current Session with the Tab focused, showing it again if it's a Hidden Tab.
   function jumpToTab (tabId: TabId) {
     const session = state.sessions.find((candidate) => candidate.tabs.some((tab) => tab.id === tabId))
     if (session?.status !== 'open') return
-    updateSession(session.id, (session) =>
-      session.focusedTabId === tabId ? session : { ...session, focusedTabId: tabId }
-    )
+    updateSession(session.id, (session) => {
+      const updated = withTabShown(session, tabId)
+      return updated.focusedTabId === tabId ? updated : { ...updated, focusedTabId: tabId }
+    })
     makeCurrent(session.id)
+  }
+
+  // A Hidden Tab shown again goes where the hiddenTab.returnPosition setting says: after the other Tabs, as a new Tab
+  // does, or back at its place.
+  function withTabShown (session: Session, tabId: TabId): Session {
+    const tab = session.tabs.find((candidate) => candidate.id === tabId)
+    if (!tab?.hidden) return session
+    const { hidden: _hidden, ...shownTab } = tab
+    if (settings.hiddenTab.returnPosition === 'original') {
+      return { ...session, tabs: withTabReplaced(session.tabs, tab, shownTab) }
+    }
+    return { ...session, tabs: [...session.tabs.filter((candidate) => candidate !== tab), shownTab] }
   }
 
   // Makes the Pane's Session, when open, the Current Session with the Pane and its Tab focused.
@@ -1175,7 +1228,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     const tab = session.tabs.find((candidate) => hasPane(candidate, paneId))!
     updateSession(session.id, (session) => ({
       ...session,
-      tabs: session.tabs.map((candidate) => (candidate === tab ? withFocusedPane(tab, paneId) : candidate)),
+      tabs: withTabReplaced(session.tabs, tab, withFocusedPane(tab, paneId)),
     }))
     jumpToTab(tab.id)
   }
@@ -1254,6 +1307,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       const tab = focusedTabOf(sessionId)
       if (tab) core.clearTabTitle(tab.id)
     },
+    hideTab: (sessionId) => core.hideTab(sessionId),
     splitPaneVertically: (sessionId) => core.splitPane(sessionId, 'vertical'),
     splitPaneHorizontally: (sessionId) => core.splitPane(sessionId, 'horizontal'),
     closePane: (sessionId) => core.closePane(sessionId),
@@ -1499,7 +1553,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     }),
     focusTab: command((sessionId, position) => {
       updateSession(sessionId, (session) => {
-        const tab = session.tabs[position]
+        const tab = shownTabs(session.tabs)[position]
         return tab && tab.id !== session.focusedTabId ? { ...session, focusedTabId: tab.id } : session
       })
     }),
@@ -1513,6 +1567,14 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       })
     }),
     clearTabTitle: command((tabId) => updateTab(tabId, clearTitle)),
+    hideTab: command((sessionId) => {
+      updateSession(sessionId, (session) => {
+        const tab = focusedTab(session)
+        if (!tab || shownTabs(session.tabs).length < 2) return session
+        const tabs = withTabReplaced(session.tabs, tab, { ...tab, hidden: true })
+        return { ...session, tabs, focusedTabId: shownTabTakingPlace(session, tabs).id }
+      })
+    }),
     tabTitle (tabId) {
       const tab = findTab(tabId)
       return tab && titleOf(tab)
@@ -1609,6 +1671,9 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     tabHasActivity (tabId) {
       const tab = findTab(tabId)
       return tab !== undefined && tabHasActivity(tab)
+    },
+    hiddenTabsWithActivity (sessionId) {
+      return findSession(sessionId)?.tabs.filter((tab) => tab.hidden && tabHasActivity(tab)).length ?? 0
     },
     activityChips (sessionId) {
       const labels = sessionsInCycleOrder()

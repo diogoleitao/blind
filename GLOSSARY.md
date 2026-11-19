@@ -17,6 +17,14 @@ _Avoid_: Untitled, default name
 **Tab**:
 One page of a Session, holding one or more Panes.
 
+**Hidden Tab**:
+A Tab left out of its Session's Tab bar until it next becomes the Current Tab. It stays in the Session, its Shells keep running, and it can still be found in the Command Palette.
+_Avoid_: Closed Tab, minimised Tab, archived Tab, stashed Tab
+
+**Hide**:
+Making a Tab a Hidden Tab. Unlike closing it, nothing ends.
+_Avoid_: Close, minimise, archive, stash
+
 **Pane**:
 A rectangular region of a Tab that hosts one Shell. Panes come from splitting another Pane vertically or horizontally, and splits nest without limit.
 _Avoid_: Split, Session (iTerm2's meaning)

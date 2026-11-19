@@ -1153,6 +1153,248 @@ describe('switching Tabs', () => {
   })
 })
 
+describe('hiding a Tab', () => {
+  // Tabs A, B and C, with C focused.
+  function startWithThreeTabs (config?: string) {
+    const started = startCore(undefined, config)
+    const sessionId = started.core.state().sessions[0].id
+    started.core.newTab(sessionId)
+    started.core.newTab(sessionId)
+    const [a, b, c] = started.core.state().sessions[0].tabs.map((tab) => tab.id)
+    const session = () => started.core.state().sessions[0]
+    const hiddenTabs = () => session().tabs.filter((tab) => tab.hidden).map((tab) => tab.id)
+    return { ...started, sessionId, a, b, c, session, hiddenTabs }
+  }
+
+  it('hides the Current Tab with Cmd+H, focusing the shown Tab to its right', () => {
+    const { core, sessionId, a, b, session, hiddenTabs } = startWithThreeTabs()
+    core.focusTab(sessionId, 0)
+
+    expect(core.keyPressed(sessionId, press('h', 'KeyH', 'meta'))).toBe(true)
+
+    expect(hiddenTabs()).toEqual([a])
+    expect(session().focusedTabId).toBe(b)
+  })
+
+  it("keeps the Hidden Tab's Shells running", () => {
+    const { core, shellHost, sessionId, c, session } = startWithThreeTabs()
+    core.splitPane(sessionId, 'vertical')
+    const paneIds = session().tabs.find((tab) => tab.id === c)!.panes.map((pane) => pane.id)
+
+    core.hideTab(sessionId)
+
+    expect(shellHost.stopped).toEqual([])
+    expect(panesIn(core.state()).map((pane) => pane.id)).toEqual(expect.arrayContaining(paneIds))
+  })
+
+  it('focuses the last shown Tab after hiding the rightmost one, passing over Hidden Tabs', () => {
+    const { core, sessionId, a, b, c, session, hiddenTabs } = startWithThreeTabs()
+    core.focusTab(sessionId, 1)
+    core.hideTab(sessionId)
+
+    core.hideTab(sessionId)
+
+    expect(hiddenTabs()).toEqual([b, c])
+    expect(session().focusedTabId).toBe(a)
+  })
+
+  it("leaves the Session's only shown Tab shown", () => {
+    const { core, sessionId, a, b, c, session, hiddenTabs } = startWithThreeTabs()
+    core.hideTab(sessionId)
+    core.hideTab(sessionId)
+
+    core.hideTab(sessionId)
+
+    expect(hiddenTabs()).toEqual([b, c])
+    expect(session().focusedTabId).toBe(a)
+  })
+
+  it('is offered in the Command Palette as Hide Tab', () => {
+    const { core, sessionId, c, hiddenTabs } = startWithThreeTabs()
+    const hideTab = core.paletteResults('Hide Tab').find((result) => result.type === 'action')
+
+    expect(hideTab).toEqual({ type: 'action', action: 'hideTab', label: 'Hide Tab' })
+    core.choosePaletteResult(hideTab!)
+
+    expect(hiddenTabs()).toEqual([c])
+    expect(core.state().currentSessionId).toBe(sessionId)
+  })
+
+  it('leaves Hidden Tabs out of the positions Cmd+1 to Cmd+9 focus', () => {
+    const { core, sessionId, a, c, session } = startWithThreeTabs()
+    core.focusTab(sessionId, 1)
+    core.hideTab(sessionId)
+
+    core.keyPressed(sessionId, press('2', 'Digit2', 'meta'))
+    expect(session().focusedTabId).toBe(c)
+
+    core.focusTab(sessionId, 0)
+    core.focusTab(sessionId, 2)
+    expect(session().focusedTabId).toBe(a)
+  })
+
+  it('passes over Hidden Tabs moving to the previous and next Tab', () => {
+    const { core, sessionId, a, c, session } = startWithThreeTabs()
+    core.focusTab(sessionId, 1)
+    core.hideTab(sessionId)
+
+    core.focusPreviousTab(sessionId)
+    expect(session().focusedTabId).toBe(a)
+
+    core.focusNextTab(sessionId)
+    expect(session().focusedTabId).toBe(c)
+
+    core.focusNextTab(sessionId)
+    expect(session().focusedTabId).toBe(a)
+  })
+
+  it('passes over Hidden Tabs when the Current Tab closes', () => {
+    const { core, sessionId, a, session } = startWithThreeTabs()
+    core.focusTab(sessionId, 1)
+    core.hideTab(sessionId)
+
+    core.closePane(sessionId)
+
+    expect(session().focusedTabId).toBe(a)
+  })
+
+  it('shows a Hidden Tab again when the last shown Tab closes, as the Current Tab', () => {
+    const { core, sessionId, b, session, hiddenTabs } = startWithThreeTabs()
+    core.focusTab(sessionId, 1)
+    core.hideTab(sessionId)
+    core.closePane(sessionId)
+
+    core.closePane(sessionId)
+
+    expect(session().status).toBe('open')
+    expect(session().focusedTabId).toBe(b)
+    expect(hiddenTabs()).toEqual([])
+  })
+
+  describe('coming back', () => {
+    // Tab A hidden, with B focused.
+    function startWithHiddenTab (config?: string) {
+      const started = startWithThreeTabs(config)
+      started.core.focusTab(started.sessionId, 0)
+      started.core.hideTab(started.sessionId)
+      const tabOrder = () => started.session().tabs.map((tab) => tab.id)
+      return { ...started, tabOrder }
+    }
+
+    it('happens when the Hidden Tab is chosen in the Command Palette, moving it after the other Tabs', () => {
+      const { core, a, b, c, session, hiddenTabs, tabOrder } = startWithHiddenTab()
+      const result = core.paletteResults('tt ').find((candidate) => candidate.type === 'tab' && candidate.tabId === a)!
+
+      core.choosePaletteResult(result)
+
+      expect(hiddenTabs()).toEqual([])
+      expect(session().focusedTabId).toBe(a)
+      expect(tabOrder()).toEqual([b, c, a])
+    })
+
+    it('keeps the Tab at its place when the return position setting is original', () => {
+      const { core, effects, a, b, c, tabOrder } = startWithHiddenTab('{ "hiddenTab": { "returnPosition": "original" } }')
+      const result = core.paletteResults('tt ').find((candidate) => candidate.type === 'tab' && candidate.tabId === a)!
+
+      core.choosePaletteResult(result)
+
+      expect(effects).not.toContainEqual(expect.objectContaining({ type: 'settingsRejected' }))
+      expect(tabOrder()).toEqual([a, b, c])
+    })
+
+    it('puts the Tab after the others when the return position setting is end, its default', () => {
+      expect(defaultSettings.hiddenTab.returnPosition).toBe('end')
+      const { core, b, c, a, tabOrder } = startWithHiddenTab('{ "hiddenTab": { "returnPosition": "end" } }')
+
+      core.choosePaletteResult(core.paletteResults('tt ').find((candidate) => candidate.type === 'tab' && candidate.tabId === a)!)
+
+      expect(tabOrder()).toEqual([b, c, a])
+    })
+
+    it("doesn't happen when one of its Panes gains Activity", () => {
+      const { core, a, session, hiddenTabs } = startWithHiddenTab()
+      const paneId = session().tabs.find((tab) => tab.id === a)!.panes[0].id
+
+      core.notificationReceived(paneId)
+
+      expect(core.tabHasActivity(a)).toBe(true)
+      expect(hiddenTabs()).toEqual([a])
+    })
+
+    it('happens when one of its Panes is chosen in the Activity Sidebar', () => {
+      const { core, a, session, hiddenTabs } = startWithHiddenTab()
+      const paneId = session().tabs.find((tab) => tab.id === a)!.panes[0].id
+      core.notificationReceived(paneId)
+
+      core.activitySidebarPaneChosen(paneId)
+
+      expect(hiddenTabs()).toEqual([])
+      expect(session().focusedTabId).toBe(a)
+    })
+
+    it("doesn't happen on Restore, which keeps the Tab hidden", () => {
+      const { stateStore, a } = startWithHiddenTab()
+
+      const relaunched = startCore(stateStore).core
+
+      expect(relaunched.state().sessions[0].tabs.filter((tab) => tab.hidden).map((tab) => tab.id)).toEqual([a])
+    })
+
+    it('is offered in the Command Palette by results that mark the Hidden Tab and its Panes', () => {
+      const { core, a, b, session } = startWithHiddenTab()
+      const [hiddenPane, shownPane] = [a, b].map((tabId) => session().tabs.find((tab) => tab.id === tabId)!.panes[0].id)
+      const results = core.paletteResults('')
+      const find = (id: string) =>
+        results.find((result) => (result.type === 'tab' && result.tabId === id) || (result.type === 'pane' && result.paneId === id))
+
+      expect(find(a)).toMatchObject({ hiddenTab: true })
+      expect(find(hiddenPane)).toMatchObject({ hiddenTab: true })
+      expect(find(b)).not.toHaveProperty('hiddenTab')
+      expect(find(shownPane)).not.toHaveProperty('hiddenTab')
+    })
+
+    it('marks the Hidden Tab in the nested view, with its Panes under it', () => {
+      const { core, sessionId, a } = startWithHiddenTab('{ "commandPalette": { "nesting": "nested" } }')
+      core.choosePaletteResult(core.paletteResults('tt ').find((result) => result.type === 'tab' && result.tabId === a)!)
+      core.splitPane(sessionId, 'vertical')
+      core.hideTab(sessionId)
+
+      const nested = core.paletteResults('').filter((result) => result.type === 'tab' || result.type === 'pane')
+
+      expect(nested.map((result) => [result.level, 'hiddenTab' in result])).toEqual([
+        [1, false],
+        [1, false],
+        [1, true],
+        [2, true],
+        [2, true],
+      ])
+    })
+
+    it("counts the Session's Hidden Tabs with Activity for the Tab bar, leaving out the others", () => {
+      const { core, sessionId, a, b, session } = startWithHiddenTab()
+      core.hideTab(sessionId)
+      const paneOf = (tabId: string) => session().tabs.find((tab) => tab.id === tabId)!.panes[0].id
+      expect(core.hiddenTabsWithActivity(sessionId)).toBe(0)
+
+      core.notificationReceived(paneOf(a))
+      expect(core.hiddenTabsWithActivity(sessionId)).toBe(1)
+
+      core.notificationReceived(paneOf(b))
+      expect(core.hiddenTabsWithActivity(sessionId)).toBe(2)
+
+      core.activitySidebarPaneChosen(paneOf(a))
+      expect(core.hiddenTabsWithActivity(sessionId)).toBe(1)
+    })
+
+    it('rejects any other return position, keeping end', () => {
+      const { core, effects } = startWithHiddenTab('{ "hiddenTab": { "returnPosition": "start" } }')
+
+      expect(effects).toContainEqual({ type: 'settingsRejected', settings: ['hiddenTab.returnPosition'] })
+      expect(core.settings().hiddenTab.returnPosition).toBe('end')
+    })
+  })
+})
+
 describe("a Tab's title", () => {
   it("is the working directory's folder name while the Shell is idle, following directory changes", () => {
     const { core, shellHost } = startCore()
@@ -3723,6 +3965,7 @@ describe('the Command Palette', () => {
       'action New Tab',
       'action Rename Tab',
       'action Clear Tab Title',
+      'action Hide Tab',
       'action Split Pane Vertically',
       'action Split Pane Horizontally',
       'action Close Pane',
@@ -3808,6 +4051,7 @@ describe('the Command Palette', () => {
       'action New Tab',
       'action Rename Tab',
       'action Clear Tab Title',
+      'action Hide Tab',
       'action Next Tab',
       'action Previous Tab',
       'action Focus Pane Below',
@@ -4296,6 +4540,37 @@ describe('Activity', () => {
       expect(core.activitySidebarRows()).toEqual([
         { label: 'Session 1 (~)', level: 0 },
         { label: 'me', level: 1, paneId: left },
+      ])
+    })
+
+    it("marks every row of a Hidden Tab: the Tab's own row, its heading, and its Panes' rows with or without a heading", () => {
+      const { core, blind, infra, raise, sidebar } = startWithTwoBusySessions()
+      core.hideTab(blind)
+      core.focusTab(infra, 0)
+      core.hideTab(infra)
+      const marked = () => {
+        const hidden = core.activitySidebarRows().map((row) => row.hiddenTab === true)
+        return sidebar().map((row, index) => (hidden[index] ? `${row} (hidden)` : row))
+      }
+
+      raise('vitest', 'plan', 'apply', 'tail')
+      expect(marked()).toEqual([
+        'infra',
+        '  logs → tail',
+        '  terraform (hidden)',
+        '    apply → apply (hidden)',
+        '    plan → plan (hidden)',
+        'blind',
+        '  tests → vitest (hidden)',
+      ])
+
+      core.activitySidebarPaneChosen(core.state().sessions[1].tabs[1].panes[0].id)
+      expect(marked()).toEqual([
+        'infra',
+        '  apply → apply (hidden)',
+        '  plan → plan (hidden)',
+        'blind',
+        '  tests → vitest (hidden)',
       ])
     })
 

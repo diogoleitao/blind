@@ -182,6 +182,13 @@
         border-color: var(--accent);
         color: var(--accent);
       }
+      /* After the shown Tabs, as wide as its pill: how many Hidden Tabs have Activity, in italic as Hidden Tabs are in the
+         Command Palette and the Activity Sidebar. */
+      .tab.hidden-tabs-activity {
+        flex: none;
+        padding: 3px 6px;
+        font-style: italic;
+      }
       /* The dot marking a Tab, a Session or a Command Palette result with Activity, in the Theme's activity colour. */
       .activity-dot {
         display: inline-block;
@@ -276,6 +283,11 @@
       /* Where the user already is, which can be selected but not chosen. */
       .result.current {
         color: var(--palette-muted-text);
+      }
+      /* A Hidden Tab and its Panes, here and in the Activity Sidebar. */
+      .result.hidden-tab,
+      .activity-row.hidden-tab {
+        font-style: italic;
       }
       /* The nested view: space between the rows at the top, and each Session's Tabs and Panes under it, smaller and
          tighter, as is the Session's own row above them. */

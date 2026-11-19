@@ -427,8 +427,10 @@ app.whenReady().then(() => {
         panes: core.paneRects(tab.id),
         focusedPaneId: tab.focusedPaneId,
         activity: core.tabHasActivity(tab.id),
+        hidden: tab.hidden === true,
       })),
       focusedTabId: session.focusedTabId,
+      hiddenTabsWithActivity: core.hiddenTabsWithActivity(sessionId),
       activitySidebar: core.activitySidebarRows(),
     }
   }

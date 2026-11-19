@@ -455,16 +455,30 @@ function renderTabBar (view: SessionView) {
   sessionLabelPill.textContent = view.sessionLabel
   sessionLabelRow.replaceChildren(sessionLabelPill, ...view.activityChips.map(activityChip))
   tabsElement.replaceChildren(
-    ...view.tabs.map((tab) => {
-      const element = document.createElement('div')
-      element.className = 'tab'
-      element.classList.toggle('focused', tab.id === view.focusedTabId)
-      const title = pill(tab.title)
-      if (tab.activity) title.prepend(activityDot())
-      element.append(title)
-      return element
-    })
+    ...view.tabs
+      .filter((tab) => !tab.hidden)
+      .map((tab) => {
+        const element = document.createElement('div')
+        element.className = 'tab'
+        element.classList.toggle('focused', tab.id === view.focusedTabId)
+        const title = pill(tab.title)
+        if (tab.activity) title.prepend(activityDot())
+        element.append(title)
+        return element
+      }),
+    ...hiddenTabsActivityElement(view.hiddenTabsWithActivity)
   )
+}
+
+// After the shown Tabs, `+N` for the Hidden Tabs with Activity, while there are any.
+function hiddenTabsActivityElement (count: number) {
+  if (count === 0) return []
+  const element = document.createElement('div')
+  element.className = 'tab hidden-tabs-activity'
+  const label = pill(`+${count}`)
+  label.prepend(activityDot())
+  element.append(label)
+  return [element]
 }
 
 const sessionBanner = document.getElementById('session-banner')!
@@ -565,6 +579,11 @@ function isCurrent (result: PaletteResult) {
   return 'current' in result && result.current
 }
 
+// Whether the result is a Hidden Tab or one of its Panes.
+function isOfHiddenTab (result: PaletteResult) {
+  return 'hiddenTab' in result && result.hiddenTab === true
+}
+
 // What kind of result it is, e.g. `Tab`, or `Current Tab` for the Current Tab.
 function resultKind (result: PaletteResult) {
   return isCurrent(result) ? `Current ${resultKinds[result.type]}` : resultKinds[result.type]
@@ -599,6 +618,7 @@ function renderPalette () {
       element.className = 'result'
       element.classList.toggle('selected', index === selectedResult)
       element.classList.toggle('current', isCurrent(result))
+      element.classList.toggle('hidden-tab', isOfHiddenTab(result))
       element.classList.toggle('top-level', level === 0)
       element.classList.toggle('parent', level === 0 && Boolean(levelOf(paletteResults[index + 1])))
       if (level) element.classList.add(`level-${level}`)
@@ -1016,10 +1036,11 @@ function renderActivitySidebar () {
     return
   }
   activitySidebar.replaceChildren(
-    ...activitySidebarRows.map(({ label, level, paneId }) => {
+    ...activitySidebarRows.map(({ label, level, paneId, hiddenTab }) => {
       const element = document.createElement('li')
       element.className = `activity-row level-${level}`
       element.classList.toggle('heading', paneId === undefined)
+      element.classList.toggle('hidden-tab', hiddenTab === true)
       element.classList.toggle('selected', paneId !== undefined && paneId === selectedActivityPane)
       element.textContent = label
       element.title = label

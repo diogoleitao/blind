@@ -47,13 +47,14 @@ describe('the schema written next to the config file', () => {
     const groups = Object.entries(schema.properties as Record<string, { type?: string; properties?: object; additionalProperties?: boolean }>)
       .filter(([, property]) => property.type === 'object' && property.properties)
     expect(Object.keys(schema.properties)).toEqual([
-      '$schema', 'session', 'tab', 'pane', 'shell', 'loginLaunch', 'sessionBanner', 'commandPalette', 'activity',
+      '$schema', 'session', 'tab', 'hiddenTab', 'pane', 'shell', 'loginLaunch', 'sessionBanner', 'commandPalette', 'activity',
       'activitySidebar', 'theme', 'background', 'menuBarIcon', 'keyBindings',
     ])
     expect(schema.additionalProperties).toBe(false)
     expect(Object.fromEntries(groups.map(([name, group]) => [name, Object.keys(group.properties!)]))).toMatchObject({
       session: ['cycleOrder', 'withoutNameOrRootOnClose'],
       tab: ['startDirectory', 'renameSuggestion'],
+      hiddenTab: ['returnPosition'],
       pane: ['scrollbackLines', 'startDirectory', 'padding', 'scrollBar'],
       loginLaunch: ['start', 'withNoOpenSessions'],
       commandPalette: ['sessionSearchOrder', 'tabSearchScope', 'paneSearchScope', 'nesting', 'kindMarkers'],

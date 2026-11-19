@@ -28,6 +28,8 @@ export interface Tab {
   id: TabId;
   // Absent unless the Tab was renamed, fixing its title until cleared.
   title?: string;
+  // Set while the Tab is a Hidden Tab, left out of the Tab bar until it next becomes the Current Tab.
+  hidden?: true;
   // In layout order: left to right and top to bottom through the splits.
   panes: Pane[];
   layout: Layout;

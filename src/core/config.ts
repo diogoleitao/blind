@@ -58,6 +58,11 @@ const tabRenameSuggestions = ['claude', 'all'] as const
 // Whose Program Title Rename Tab suggests, from the current Pane: Claude Code's alone, or any program's.
 export type TabRenameSuggestion = (typeof tabRenameSuggestions)[number]
 
+const hiddenTabReturnPositions = ['end', 'original'] as const
+
+// Where a Hidden Tab goes as it's shown again: after the other Tabs, as a new Tab does, or back at its place among them.
+export type HiddenTabReturnPosition = (typeof hiddenTabReturnPositions)[number]
+
 export const menuBarIcons = ['monochrome', 'colour'] as const
 
 // The menu bar icon's look: one colour that follows the menu bar's, light or dark, or the icon's own colours.
@@ -130,6 +135,9 @@ export interface Settings {
     startDirectory: StartDirectory;
     renameSuggestion: TabRenameSuggestion;
   };
+  hiddenTab: {
+    returnPosition: HiddenTabReturnPosition;
+  };
   pane: {
     // How many lines of each Pane's scrollback are kept, `unlimited` read as `unlimitedScrollbackLines`.
     scrollbackLines: number;
@@ -183,6 +191,9 @@ export const defaultSettings: Settings = {
   tab: {
     startDirectory: 'root',
     renameSuggestion: 'claude',
+  },
+  hiddenTab: {
+    returnPosition: 'end',
   },
   pane: {
     scrollbackLines: 10_000,
@@ -265,6 +276,9 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers<Settings>
   tab: groupOf(defaultSettings.tab, {
     startDirectory: oneOf(startDirectories),
     renameSuggestion: oneOf(tabRenameSuggestions),
+  }),
+  hiddenTab: groupOf(defaultSettings.hiddenTab, {
+    returnPosition: oneOf(hiddenTabReturnPositions),
   }),
   pane: groupOf(defaultSettings.pane, {
     scrollbackLines: (value) => {
@@ -376,6 +390,19 @@ export const configSchema = {
             "Whose Program Title Rename Tab suggests, from the program running in the current Pane: claude suggests Claude Code's, which follows its /rename; all suggests any program's. When the program has none, Rename Tab suggests the Tab's current title.",
           enum: tabRenameSuggestions,
           default: defaultSettings.tab.renameSuggestion,
+        },
+      },
+    },
+    hiddenTab: {
+      description: 'Where a Hidden Tab goes when it comes back to the Tab bar.',
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        returnPosition: {
+          description:
+            'Where a Hidden Tab goes as it becomes the Current Tab again: end puts it after the other Tabs, as a new Tab is, and it stays there; original puts it back at its place among them.',
+          enum: hiddenTabReturnPositions,
+          default: defaultSettings.hiddenTab.returnPosition,
         },
       },
     },

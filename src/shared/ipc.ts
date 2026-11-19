@@ -17,8 +17,10 @@ export interface TerminalSize {
 export interface SessionView {
   sessionLabel: string;
   activityChips: string[];
-  tabs: { id: TabId; title: string; panes: PaneRect[]; focusedPaneId: PaneId; activity: boolean }[];
+  // Every Tab, Hidden Tabs included, so their terminals stay open; the Tab bar shows only the others.
+  tabs: { id: TabId; title: string; panes: PaneRect[]; focusedPaneId: PaneId; activity: boolean; hidden: boolean }[];
   focusedTabId?: TabId;
+  hiddenTabsWithActivity: number;
   activitySidebar: ActivitySidebarRow[];
 }
 
