@@ -1036,9 +1036,9 @@ function renderActivitySidebar () {
     return
   }
   activitySidebar.replaceChildren(
-    ...activitySidebarRows.map(({ label, level, paneId, hiddenTab }) => {
+    ...activitySidebarRows.map(({ label, level, paneId, group, hiddenTab }) => {
       const element = document.createElement('li')
-      element.className = `activity-row level-${level}`
+      element.className = group ? 'activity-row group' : `activity-row level-${level}`
       element.classList.toggle('heading', paneId === undefined)
       element.classList.toggle('hidden-tab', hiddenTab === true)
       element.classList.toggle('selected', paneId !== undefined && paneId === selectedActivityPane)

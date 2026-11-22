@@ -65,8 +65,9 @@ export type Effect =
   // Shows the Session Banner over the Session's window, which cycling has just swapped in.
   | { type: 'showSessionBanner'; sessionId: SessionId }
   // Asks the user whether to quit, or to restart, which quits and starts Blind again; answered with `quitConfirmed`,
-  // telling how many Sessions quitting deletes, if any.
-  | { type: 'confirmQuit'; restart?: true; sessionsToDelete?: number }
+  // naming by their labels the Sessions quitting deletes and the Closed Sessions whose still running Shells it stops, if
+  // any.
+  | { type: 'confirmQuit'; restart?: true; sessionsToDelete?: string[]; runningClosedSessions?: string[] }
   // Asks the user for the Session's name, offering `suggestion`, answered with `renameSession`.
   | { type: 'askSessionName'; sessionId: SessionId; suggestion: string }
   // Asks the user whether to delete the Session, answered with `deleteConfirmed`.
@@ -416,6 +417,9 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   // How many times a Pane has gained Activity, which orders the Activity Sidebar: a count rather than the clock's time,
   // so two gains never tie.
   let activityGains = 0
+  // The Panes whose Shell is running: started and neither stopped nor exited. Not part of the snapshot: no Shell outlives
+  // the app.
+  const runningShells = new Set<PaneId>()
   let settings: Settings = defaultSettings
   // The config file's text the settings were last read from, read again when the Themes change.
   let configText: string | undefined
@@ -548,16 +552,17 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return tab.panes.some((pane) => pane.id in activity)
   }
 
-  function sessionHasActivity (session: Session) {
-    return session.tabs.some(tabHasActivity)
+  // A Closed Session's Activity shows only in the Activity Sidebar, so nothing marks the Session itself.
+  function sessionShowsActivity (session: Session) {
+    return session.status === 'open' && session.tabs.some(tabHasActivity)
   }
 
-  // The Open Sessions with Activity, each with its Tabs with Activity and their Panes with it, each list ordered by when
-  // its Panes gained Activity, latest first.
-  function sessionsByActivity () {
+  // The Sessions with Activity among `sessions`, each with its Tabs with Activity and their Panes with it, each list
+  // ordered by when its Panes gained Activity, latest first.
+  function sessionsByActivity (sessions: Session[]) {
     const latestFirst = <Item extends { gainOrder: number }>(items: Item[]) =>
       items.toSorted((a, b) => b.gainOrder - a.gainOrder)
-    const sessions = openSessionsInCycleOrder().map((session) => {
+    const withTabs = sessions.map((session) => {
       const tabs = session.tabs.map((tab) => {
         const panes = latestFirst(
           tab.panes.filter((pane) => pane.id in activity).map((pane) => ({ pane, gainOrder: activity[pane.id].gainOrder }))
@@ -567,14 +572,27 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       const withActivity = latestFirst(tabs.filter(({ panes }) => panes.length > 0))
       return { session, tabs: withActivity, gainOrder: withActivity[0]?.gainOrder ?? 0 }
     })
-    return latestFirst(sessions.filter(({ tabs }) => tabs.length > 0))
+    return latestFirst(withTabs.filter(({ tabs }) => tabs.length > 0))
+  }
+
+  // The Open Sessions with Activity under one group heading, then the Closed Sessions with Activity under another, each
+  // heading left out while its group has no Session.
+  function activitySidebarRows (): ActivitySidebarRow[] {
+    const groups = [
+      { label: 'Open Sessions', status: 'open' },
+      { label: 'Closed Sessions', status: 'closed' },
+    ] as const
+    return groups.flatMap(({ label, status }) => {
+      const rows = sessionRowsByActivity(sessionsInCycleOrder().filter((session) => session.status === status))
+      return rows.length === 0 ? [] : [{ label, level: 0, group: true } as const, ...rows]
+    })
   }
 
   // A Session with Activity is a heading, its Tabs with Activity under it only while there are two or more, and a Tab's
   // Panes with Activity under it only while there are two or more. A Tab with one such Pane stands for it, under the
   // Tab's title, as does a Session's only row.
-  function activitySidebarRows (): ActivitySidebarRow[] {
-    return sessionsByActivity().flatMap(({ session, tabs }) => {
+  function sessionRowsByActivity (sessions: Session[]): ActivitySidebarRow[] {
+    return sessionsByActivity(sessions).flatMap(({ session, tabs }) => {
       const tabLevel = tabs.length > 1
       return [
         { label: labelOf(session), level: 0 } as const,
@@ -590,10 +608,10 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     })
   }
 
-  // Only a Pane of an Open Session that isn't the Current Pane gets Activity: a stopped Shell can still report on its way
-  // out.
+  // Only a Pane whose Shell is running, in an Open or a Closed Session, and that isn't the Current Pane gets Activity: a
+  // stopped Shell can still report on its way out.
   function canRaiseActivity (paneId: PaneId) {
-    return findSessionWithPane(paneId)?.status === 'open' && paneId !== currentPaneId()
+    return runningShells.has(paneId) && findSessionWithPane(paneId) !== undefined && paneId !== currentPaneId()
   }
 
   // A Pane left with no reason for Activity has none. A Pane gaining Activity plays the Activity sound.
@@ -615,14 +633,12 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return ring === 'always' || (ring === 'whileHidden' && !appShown)
   }
 
-  // The Current Pane's Activity clears as it becomes the Current Pane, and a Pane's goes when it closes or its Session
-  // does.
+  // The Current Pane's Activity clears as it becomes the Current Pane, and a Pane's goes when it closes or its Session is
+  // deleted. Closing its Session keeps it.
   function dropSettledActivity () {
     const currentPane = currentPaneId()
-    const openPanes = new Set(
-      state.sessions.filter((session) => session.status === 'open').flatMap(paneIdsOf)
-    )
-    const kept = Object.entries(activity).filter(([paneId]) => paneId !== currentPane && openPanes.has(paneId))
+    const panes = new Set(state.sessions.flatMap(paneIdsOf))
+    const kept = Object.entries(activity).filter(([paneId]) => paneId !== currentPane && panes.has(paneId))
     if (kept.length < Object.keys(activity).length) activity = Object.fromEntries(kept)
   }
 
@@ -740,6 +756,12 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   // Runs the shell setting's program, so a change to it reaches only the Shells started after it.
   function startShell ({ id, workingDirectory }: Pane) {
     shellHost.start(id, { workingDirectory, shell: settings.shell })
+    runningShells.add(id)
+  }
+
+  function stopShell (paneId: PaneId) {
+    shellHost.stop(paneId)
+    runningShells.delete(paneId)
   }
 
   // A new Pane whose Shell starts in `workingDirectory`.
@@ -749,15 +771,18 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return pane
   }
 
-  // The Session's Panes with a fresh Shell each, in their working directories. Nothing that ran before runs again.
+  // The Session's Panes whose Shell isn't running with a fresh Shell each, in their working directories. Nothing that
+  // ran before in them runs again; a Shell still running is left as it is.
   function restartShells (session: Session): Session {
     return {
       ...session,
       tabs: session.tabs.map((tab) => ({
         ...tab,
-        panes: tab.panes.map(({ runningProgram: _stopped, programTitle: _gone, ...pane }) => {
-          startShell(pane)
-          return pane
+        panes: tab.panes.map((pane) => {
+          if (runningShells.has(pane.id)) return pane
+          const { runningProgram: _stopped, programTitle: _gone, ...fresh } = pane
+          startShell(fresh)
+          return fresh
         }),
       })),
     }
@@ -862,8 +887,10 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   // Removes the Session, Open or Closed, for good, with its scrollback, stopping its Shells.
   function deleteSession (session: Session) {
     const wasCurrent = removeSessions([session])
+    for (const paneId of paneIdsOf(session)) {
+      if (runningShells.has(paneId)) stopShell(paneId)
+    }
     if (session.status !== 'open') return
-    for (const paneId of paneIdsOf(session)) shellHost.stop(paneId)
     emit({ type: 'closeWindow', sessionId: session.id })
     if (wasCurrent) replaceCurrentSession()
   }
@@ -898,10 +925,21 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     setState({ ...state, currentSessionId: mostRecentlyUsedOpenSession()?.id })
   }
 
-  // Asks whether to quit, or to restart, saying how many Sessions quitting deletes, if any.
+  // Asks whether to quit, or to restart, naming the Sessions quitting deletes and the Closed Sessions whose Shells it
+  // stops, if any, each by its label in cycle order.
   function confirmQuit (restart?: true) {
-    const sessionsToDelete = sessionsDeletedOnQuit().length
-    emit({ type: 'confirmQuit', ...(restart ? { restart } : {}), ...(sessionsToDelete > 0 ? { sessionsToDelete } : {}) })
+    const deleted = sessionsDeletedOnQuit()
+    const running = state.sessions.filter(
+      (session) =>
+        session.status === 'closed' && !deleted.includes(session) && paneIdsOf(session).some((id) => runningShells.has(id))
+    )
+    const labels = (sessions: Session[]) => sessions.toSorted(compareInCycleOrder).map(labelOf)
+    emit({
+      type: 'confirmQuit',
+      ...(restart ? { restart } : {}),
+      ...(deleted.length > 0 ? { sessionsToDelete: labels(deleted) } : {}),
+      ...(running.length > 0 ? { runningClosedSessions: labels(running) } : {}),
+    })
   }
 
   // The smallest label number no Unnamed Session holds, starting at 1.
@@ -1044,7 +1082,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       label: labelOf(session),
       closed: session.status === 'closed',
       current: session.id === state.currentSessionId,
-      activity: sessionHasActivity(session),
+      activity: sessionShowsActivity(session),
       ...markerOf('session'),
     }
   }
@@ -1225,6 +1263,17 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   function jumpToPane (paneId: PaneId) {
     const session = findSessionWithPane(paneId)
     if (session?.status !== 'open') return
+    focusPaneInSession(session, paneId)
+  }
+
+  // As jumpToPane, reopening the Pane's Session first when it's closed.
+  function jumpToPaneReopening (paneId: PaneId) {
+    const closed = findSessionWithPane(paneId)
+    if (closed?.status === 'closed') reopenSession(closed.id)
+    jumpToPane(paneId)
+  }
+
+  function focusPaneInSession (session: Session, paneId: PaneId) {
     const tab = session.tabs.find((candidate) => hasPane(candidate, paneId))!
     updateSession(session.id, (session) => ({
       ...session,
@@ -1257,10 +1306,18 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     }))
   }
 
-  // A stopped Shell can still report on its way out, and a Closed Session keeps its Panes as they were when it closed.
+  // A Closed Session's layout never changes while it's closed: a Pane whose Shell exits stays, for a fresh Shell when
+  // it's reopened. A stopped Shell's Pane has already gone.
+  function shellExited (paneId: PaneId) {
+    const wasRunning = runningShells.delete(paneId)
+    if (wasRunning && findSessionWithPane(paneId)?.status === 'open') removePaneFromSession(paneId)
+  }
+
+  // A Closed Session's Shells keep running and reporting as an Open Session's do. A stopped Shell can still report on
+  // its way out, which changes nothing.
   shellHost.subscribe((event) => {
-    if (findSessionWithPane(event.paneId)?.status !== 'open') return
-    if (event.type === 'shellExited') removePaneFromSession(event.paneId)
+    if (event.type === 'shellExited') return shellExited(event.paneId)
+    if (!runningShells.has(event.paneId)) return
     if (event.type === 'workingDirectoryChanged') {
       updatePane(event.paneId, (pane) => ({ ...pane, workingDirectory: event.workingDirectory }))
     }
@@ -1481,7 +1538,6 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       if (session?.status !== 'open') return
       if (deletesOnClose(session)) return deleteSession(session)
       updateSession(sessionId, (session) => ({ ...session, status: 'closed' }))
-      for (const paneId of paneIdsOf(session)) shellHost.stop(paneId)
       closeWindow(sessionId)
     }),
     deleteRequested: command((sessionId) => {
@@ -1524,7 +1580,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       const tab = focusedTabOf(sessionId)
       if (!tab) return
       removePaneFromSession(tab.focusedPaneId)
-      shellHost.stop(tab.focusedPaneId)
+      stopShell(tab.focusedPaneId)
     }),
     focusPreviousPane: command((sessionId) => focusPaneBy(sessionId, -1)),
     focusNextPane: command((sessionId) => focusPaneBy(sessionId, 1)),
@@ -1677,12 +1733,12 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     },
     activityChips (sessionId) {
       const labels = sessionsInCycleOrder()
-        .filter((session) => session.id !== sessionId && sessionHasActivity(session))
+        .filter((session) => session.id !== sessionId && sessionShowsActivity(session))
         .map(shortLabelOf)
       return labels.length > maximumActivityChips ? [`${maximumActivityChips}+`] : labels
     },
     activitySidebarRows,
-    activitySidebarPaneChosen: command(jumpToPane),
+    activitySidebarPaneChosen: command(jumpToPaneReopening),
     onEffect (listener) {
       effectListeners.push(listener)
     },

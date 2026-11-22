@@ -485,6 +485,20 @@
       .activity-row.level-2 {
         padding-left: calc(var(--result-padding-x) + 36px);
       }
+      /* The heading over the Open Sessions or the Closed Sessions, small and spaced; the second has a line above it. */
+      .activity-row.group {
+        padding-top: 4px;
+        padding-bottom: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .activity-row.group:not(:first-child) {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--palette-border);
+      }
       /* The find bar takes the Command Palette's colours, and the Pane dividers' for the line before its count. */
       #find {
         position: fixed;

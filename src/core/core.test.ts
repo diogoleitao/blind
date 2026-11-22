@@ -1842,6 +1842,24 @@ describe('quitting', () => {
 
     expect(effects).toEqual([{ type: 'confirmQuit', restart: true }])
   })
+
+  it('has the confirmation name the Closed Sessions whose Shells are still running, which quitting stops', () => {
+    const { core, shellHost, effects } = startCore()
+    const api = core.state().sessions[0].id
+    core.renameSession(api, 'api')
+    core.newSession()
+    const web = core.state().sessions[1]
+    core.renameSession(web.id, 'web')
+    core.newSession()
+    core.closeSession(api)
+    core.closeSession(web.id)
+    shellHost.exit(web.tabs[0].panes[0].id)
+    effects.length = 0
+
+    core.quitRequested()
+
+    expect(effects).toEqual([{ type: 'confirmQuit', runningClosedSessions: ['api'] }])
+  })
 })
 
 describe('the config file', () => {
@@ -2936,13 +2954,13 @@ describe('closing a Session', () => {
     return { ...started, other, saved: core.state().sessions[0] }
   }
 
-  it('makes it a Closed Session that keeps its Tabs and Panes, stopping every Shell and closing its window', () => {
+  it('makes it a Closed Session that keeps its Tabs and Panes, keeping every Shell running and closing its window', () => {
     const { core, shellHost, effects, sessionId, saved, other } = startWithSessionToClose()
 
     chooseAction(core, 'Close Session')
 
     expect(core.state().sessions[0]).toEqual({ ...saved, status: 'closed' })
-    expect(shellHost.stopped).toEqual(saved.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id)))
+    expect(shellHost.stopped).toEqual([])
     expect(core.state().currentSessionId).toBe(other)
     expect(effects).toEqual([
       { type: 'closeWindow', sessionId },
@@ -2950,32 +2968,40 @@ describe('closing a Session', () => {
     ])
   })
 
-  it('ignores what the stopped Shells report afterwards', () => {
-    const { core, shellHost, sessionId, saved } = startWithSessionToClose()
+  it('follows the working directories its running Shells report', () => {
+    const { core, shellHost, sessionId, left } = startWithSessionToClose()
     core.closeSession(sessionId)
-    const announced: unknown[] = []
-    core.onStateChange((state) => announced.push(state))
 
-    for (const pane of saved.tabs.flatMap((tab) => tab.panes)) {
-      shellHost.changeWorkingDirectory(pane.id, '/tmp')
-      shellHost.exit(pane.id)
-    }
+    shellHost.changeWorkingDirectory(left, '/tmp')
 
-    expect(announced).toEqual([])
-    expect(core.state().sessions[0]).toEqual({ ...saved, status: 'closed' })
+    expect(core.state().sessions[0].tabs[0].panes[0]).toMatchObject({ id: left, workingDirectory: '/tmp' })
   })
 
-  it('brings back its Tabs, Panes and scrollback when reopened', () => {
+  it('keeps the Pane of a Shell that exits while it is closed, with its scrollback, and starts a fresh Shell there when reopened', () => {
+    const { core, shellHost, sessionId, saved, left } = startWithSessionToClose()
+    core.closeSession(sessionId)
+    const startedBefore = shellHost.started.length
+
+    shellHost.exit(left)
+
+    expect(core.state().sessions[0]).toEqual({ ...saved, status: 'closed' })
+    expect(core.scrollback(left)).toEqual({ text: '$ ls\r\nsrc', savedAt: 1_000 })
+
+    core.reopenSession(sessionId)
+
+    expect(shellHost.started.slice(startedBefore)).toEqual([{ paneId: left, workingDirectory: '/Users/me' }])
+  })
+
+  it('brings back its Tabs, Panes and scrollback when reopened, with the Shells still running', () => {
     const { core, shellHost, clock, sessionId, saved, left } = startWithSessionToClose()
     core.closeSession(sessionId)
+    const startedBefore = shellHost.started.length
     clock.advance(1_000)
 
     core.reopenSession(sessionId)
 
     expect(core.state().sessions[0]).toEqual({ ...saved, lastUsedAt: 4_000 })
-    expect(shellHost.started.slice(-3).map((started) => started.paneId)).toEqual(
-      saved.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id))
-    )
+    expect(shellHost.started).toHaveLength(startedBefore)
     expect(core.scrollback(left)).toEqual({ text: '$ ls\r\nsrc', savedAt: 1_000 })
   })
 
@@ -3037,6 +3063,24 @@ describe('deleting a Session', () => {
 
     expect(currentSessionIds).not.toContain(deleted)
     expect(currentSessionIds.at(-1)).toBe(core.state().sessions[0].id)
+  })
+
+  it('once confirmed, removes a Closed Session, stopping the Shells still running in it, with no window to close', () => {
+    const { core, shellHost, effects } = startCore()
+    core.renameSession(core.state().sessions[0].id, 'api')
+    core.splitPane(core.state().sessions[0].id, 'vertical')
+    const closed = core.state().sessions[0]
+    const [exited, running] = closed.tabs[0].panes.map((pane) => pane.id)
+    core.newSession()
+    core.closeSession(closed.id)
+    shellHost.exit(exited)
+    effects.length = 0
+
+    core.deleteConfirmed(closed.id)
+
+    expect(core.state().sessions).toHaveLength(1)
+    expect(shellHost.stopped).toEqual([running])
+    expect(effects).toEqual([])
   })
 
   it('once confirmed, removes a Closed Session without anything to stop or close', () => {
@@ -3322,20 +3366,22 @@ describe('the setting for closing Sessions with neither a name nor a Root direct
       expect(after.core.state().currentSessionId).toBe(web)
     })
 
-    it('has the quit confirmation tell how many Sessions quitting deletes', () => {
+    it('has the quit confirmation name the Sessions quitting deletes, by their labels', () => {
       const { core, effects } = startDeleting()
 
       core.quitRequested()
 
-      expect(effects).toEqual([{ type: 'confirmQuit', sessionsToDelete: 2 }])
+      expect(effects).toEqual([{ type: 'confirmQuit', sessionsToDelete: ['Session 1 (~)', 'Session 2 (~)'] }])
     })
 
-    it('has the restart confirmation tell how many Sessions restarting deletes', () => {
+    it('has the restart confirmation name the Sessions restarting deletes', () => {
       const { core, effects } = startDeleting()
 
       core.restartRequested()
 
-      expect(effects).toEqual([{ type: 'confirmQuit', restart: true, sessionsToDelete: 2 }])
+      expect(effects).toEqual([
+        { type: 'confirmQuit', restart: true, sessionsToDelete: ['Session 1 (~)', 'Session 2 (~)'] },
+      ])
     })
 
     it('leaves the quit confirmation as usual when quitting deletes none', () => {
@@ -4202,11 +4248,9 @@ describe("the menu bar icon's menu", () => {
     expect(effects).toEqual([{ type: 'showApp', sessionId: first }])
   })
 
-  it('reopens a Closed Session chosen from it with a Restore and shows it, with no Open Sessions left', () => {
+  it('reopens a Closed Session chosen from it and shows it, with no Open Sessions left', () => {
     const { core, shellHost, effects } = startCore()
     const session = core.state().sessions[0]
-    const paneId = session.tabs[0].panes[0].id
-    shellHost.changeWorkingDirectory(paneId, '/Users/me/code/api')
     core.closeSession(session.id)
     effects.length = 0
 
@@ -4214,7 +4258,7 @@ describe("the menu bar icon's menu", () => {
 
     expect(core.state().sessions[0].status).toBe('open')
     expect(core.state().currentSessionId).toBe(session.id)
-    expect(shellHost.started.at(-1)).toEqual({ paneId, workingDirectory: '/Users/me/code/api' })
+    expect(shellHost.started).toHaveLength(1)
     expect(effects).toEqual([{ type: 'showApp', sessionId: session.id }])
   })
 
@@ -4392,21 +4436,45 @@ describe('Activity', () => {
     expect(core.tabHasActivity(tabId)).toBe(false)
   })
 
-  it('goes when its Session closes, so the Session reopens without it', () => {
+  it('stays when its Session closes, whose Shells keep running, so the Session reopens with it', () => {
     const { core, sessionId, tabId, left } = startWithThreePanes()
     core.newSession()
     core.notificationReceived(left)
 
     core.closeSession(sessionId)
-    core.reopenSession(sessionId)
+    expect(core.tabHasActivity(tabId)).toBe(true)
 
-    expect(core.tabHasActivity(tabId)).toBe(false)
+    core.reopenSession(sessionId)
+    expect(core.tabHasActivity(tabId)).toBe(true)
   })
 
-  it("isn't raised on a Pane that's gone or in a Closed Session, whose Shell can still report on its way out", () => {
+  it('is raised on a Pane of a Closed Session, whose Shell keeps running', () => {
     const { core, sessionId, tabId, left } = startWithThreePanes()
     core.newSession()
     core.closeSession(sessionId)
+
+    core.programStatusReported(left, { id: '', state: 'done' })
+
+    expect(core.tabHasActivity(tabId)).toBe(true)
+  })
+
+  it("on a Closed Session's Pane shows in neither the Session label row's chips nor the Command Palette", () => {
+    const { core, sessionId, left } = startWithThreePanes()
+    core.newSession()
+    const current = core.state().currentSessionId!
+    core.closeSession(sessionId)
+
+    core.notificationReceived(left)
+
+    expect(core.activityChips(current)).toEqual([])
+    expect(core.paletteResults('').some((result) => 'activity' in result && result.activity)).toBe(false)
+  })
+
+  it("isn't raised on a Pane that's gone, or whose Shell has stopped, though the Shell can still report on its way out", () => {
+    const { core, shellHost, sessionId, tabId, left } = startWithThreePanes()
+    core.newSession()
+    core.closeSession(sessionId)
+    shellHost.exit(left)
     let changes = 0
     core.onStateChange(() => (changes += 1))
 
@@ -4492,9 +4560,11 @@ describe('Activity', () => {
       const infra = fill('infra', [['terraform', ['plan', 'apply']], ['logs', ['tail']]])
       core.newSession()
       const programOf = (paneId: string) => Object.keys(paneIds).find((program) => paneIds[program] === paneId)
-      // Each row indented by its level, a row standing for a Pane followed by the Pane's program.
+      // Each row indented by its level, a row standing for a Pane followed by the Pane's program, and a group's heading in
+      // brackets.
       const sidebar = () =>
         core.activitySidebarRows().map((row) => {
+          if (row.group) return `[${row.label}]`
           const indent = '  '.repeat(row.level)
           return row.paneId === undefined ? `${indent}${row.label}` : `${indent}${row.label} → ${programOf(row.paneId)}`
         })
@@ -4508,12 +4578,44 @@ describe('Activity', () => {
       expect(sidebar()).toEqual([])
     })
 
+    it("lists a Closed Session's Panes with Activity under a Closed Sessions heading, after the Open Sessions", () => {
+      const { core, sidebar, raise, infra } = startWithTwoBusySessions()
+      core.closeSession(infra)
+
+      raise('plan', 'vitest')
+
+      expect(sidebar()).toEqual(['[Open Sessions]', 'blind', '  tests → vitest', '[Closed Sessions]', 'infra', '  terraform → plan'])
+    })
+
+    it('leaves out the Open Sessions heading while no Open Session has a Pane with Activity', () => {
+      const { core, sidebar, raise, infra } = startWithTwoBusySessions()
+      core.closeSession(infra)
+
+      raise('plan')
+
+      expect(sidebar()).toEqual(['[Closed Sessions]', 'infra', '  terraform → plan'])
+    })
+
+    it("choosing a Closed Session's Pane reopens the Session with the Pane as the Current Pane, clearing its Activity", () => {
+      const { core, sidebar, raise, infra, paneIds } = startWithTwoBusySessions()
+      core.closeSession(infra)
+      raise('plan')
+
+      core.activitySidebarPaneChosen(paneIds.plan)
+
+      const session = core.state().sessions.find(({ id }) => id === infra)!
+      expect(session.status).toBe('open')
+      expect(core.state().currentSessionId).toBe(infra)
+      expect(session.tabs[0].focusedPaneId).toBe(paneIds.plan)
+      expect(sidebar()).toEqual([])
+    })
+
     it("lists a Session's one Pane with Activity as one row under the Session, labelled with its Tab's title", () => {
       const { sidebar, raise } = startWithTwoBusySessions()
 
       raise('zsh')
 
-      expect(sidebar()).toEqual(['blind', '  editor → zsh'])
+      expect(sidebar()).toEqual(['[Open Sessions]', 'blind', '  editor → zsh'])
     })
 
     it("lists a Tab's two Panes with Activity under the Session by their titles, when no other Tab has any", () => {
@@ -4521,7 +4623,7 @@ describe('Activity', () => {
 
       raise('vim', 'zsh')
 
-      expect(sidebar()).toEqual(['blind', '  zsh → zsh', '  vim → vim'])
+      expect(sidebar()).toEqual(['[Open Sessions]', 'blind', '  zsh → zsh', '  vim → vim'])
     })
 
     it("lists two Tabs with Activity under the Session, each standing for its one Pane under the Tab's title", () => {
@@ -4529,7 +4631,7 @@ describe('Activity', () => {
 
       raise('zsh', 'vitest')
 
-      expect(sidebar()).toEqual(['blind', '  tests → vitest', '  editor → zsh'])
+      expect(sidebar()).toEqual(['[Open Sessions]', 'blind', '  tests → vitest', '  editor → zsh'])
     })
 
     it("labels an Unnamed Session as the Command Palette does, with its focused Pane's working directory", () => {
@@ -4538,6 +4640,7 @@ describe('Activity', () => {
       core.notificationReceived(left)
 
       expect(core.activitySidebarRows()).toEqual([
+        { label: 'Open Sessions', level: 0, group: true },
         { label: 'Session 1 (~)', level: 0 },
         { label: 'me', level: 1, paneId: left },
       ])
@@ -4555,6 +4658,7 @@ describe('Activity', () => {
 
       raise('vitest', 'plan', 'apply', 'tail')
       expect(marked()).toEqual([
+        '[Open Sessions]',
         'infra',
         '  logs → tail',
         '  terraform (hidden)',
@@ -4566,6 +4670,7 @@ describe('Activity', () => {
 
       core.activitySidebarPaneChosen(core.state().sessions[1].tabs[1].panes[0].id)
       expect(marked()).toEqual([
+        '[Open Sessions]',
         'infra',
         '  apply → apply (hidden)',
         '  plan → plan (hidden)',
@@ -4623,7 +4728,7 @@ describe('Activity', () => {
       expect(session.focusedTabId).toBe(session.tabs[0].id)
       expect(session.tabs[0].focusedPaneId).toBe(paneIds.plan)
       expect(effects).toEqual([{ type: 'showSession', sessionId: infra }])
-      expect(sidebar()).toEqual(['blind', '  tests → vitest'])
+      expect(sidebar()).toEqual(['[Open Sessions]', 'blind', '  tests → vitest'])
     })
 
     it('lists the Session whose Pane gained Activity last first, whatever the cycle order', () => {
@@ -4631,7 +4736,7 @@ describe('Activity', () => {
 
       raise('vitest', 'tail')
 
-      expect(sidebar()).toEqual(['infra', '  logs → tail', 'blind', '  tests → vitest'])
+      expect(sidebar()).toEqual(['[Open Sessions]', 'infra', '  logs → tail', 'blind', '  tests → vitest'])
     })
 
     it('lists Tabs and Panes by when they gained Activity too, latest first', () => {
@@ -4639,7 +4744,14 @@ describe('Activity', () => {
 
       raise('plan', 'tail', 'apply')
 
-      expect(sidebar()).toEqual(['infra', '  terraform', '    apply → apply', '    plan → plan', '  logs → tail'])
+      expect(sidebar()).toEqual([
+        '[Open Sessions]',
+        'infra',
+        '  terraform',
+        '    apply → apply',
+        '    plan → plan',
+        '  logs → tail',
+      ])
     })
 
     it("keeps a Pane's place when it asks again while it has Activity, and moves it up once it regains it", () => {
@@ -4648,11 +4760,11 @@ describe('Activity', () => {
       raise('tail')
 
       core.programStatusReported(paneIds.vitest, { id: 'b', state: 'blocked' })
-      expect(sidebar()).toEqual(['infra', '  logs → tail', 'blind', '  tests → vitest'])
+      expect(sidebar()).toEqual(['[Open Sessions]', 'infra', '  logs → tail', 'blind', '  tests → vitest'])
 
       core.programStatusReported(paneIds.vitest, { id: '', state: 'clear' })
       core.programStatusReported(paneIds.vitest, { id: '', state: 'done' })
-      expect(sidebar()).toEqual(['blind', '  tests → vitest', 'infra', '  logs → tail'])
+      expect(sidebar()).toEqual(['[Open Sessions]', 'blind', '  tests → vitest', 'infra', '  logs → tail'])
     })
   })
 

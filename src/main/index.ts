@@ -64,7 +64,17 @@ app.whenReady().then(() => {
   // Keeps the app out of the Dock and Cmd+Tab.
   app.setActivationPolicy('accessory')
 
-  const shellHost = createNodePtyShellHost({ loginShell: process.env.SHELL || userInfo().shell || '/bin/zsh' })
+  // A windowless Pane's headless terminal reports to the core as an attached Pane's window does.
+  const shellHost = createNodePtyShellHost({
+    loginShell: process.env.SHELL || userInfo().shell || '/bin/zsh',
+    scrollbackLines: () => core.settings().pane.scrollbackLines,
+    restoredOutput: (paneId) => restoredOutput(paneId),
+    windowlessReports: {
+      notification: (paneId) => core.notificationReceived(paneId),
+      programStatus: (paneId, report) => core.programStatusReported(paneId, report),
+      scrollback: (paneId, scrollback) => core.scrollbackChanged(paneId, scrollback),
+    },
+  })
   const core = createCore({
     shellHost,
     stateStore: createFileStateStore(dataDirectory),
@@ -150,13 +160,41 @@ app.whenReady().then(() => {
     visible.forEach(hideWindow)
   }
 
-  // Hidden at once, and closed once its terminals have reported their latest scrollback, which a Closed Session keeps.
+  // The Panes each window's terminals are attached to, windowless once the window closes or its page is gone.
+  const attachedPanes = new Map<WebContents, Map<PaneId, (data: string) => void>>()
+
+  function attachedTo (page: WebContents) {
+    let panes = attachedPanes.get(page)
+    if (panes) return panes
+    panes = new Map()
+    attachedPanes.set(page, panes)
+    page.once('destroyed', () => {
+      for (const [paneId, onData] of attachedPanes.get(page)!) shellHost.windowClosed(paneId, onData)
+      attachedPanes.delete(page)
+    })
+    return panes
+  }
+
+  // A restored Pane's terminal gets its saved scrollback first, with no colour or style left over from it. The line the
+  // cursor was on, usually the old Shell's idle prompt, gives way to a dim marker, and the fresh Shell's output follows.
+  // Its headless terminal starts from the same.
+  function restoredOutput (paneId: PaneId) {
+    const scrollback = core.scrollback(paneId)
+    return scrollback && `${scrollback.text}\x1b[0m\r\x1b[2K${restoredMarker(scrollback.savedAt)}\r\n`
+  }
+
+  // Hidden and closed at once. Its Panes whose Shells run on are windowless from now, so a Session reopened before the
+  // window is gone gets their headless terminals' replay; their latest scrollback, which a Closed Session keeps, comes
+  // from those.
   function closeWindow (sessionId: SessionId) {
     const window = windows.get(sessionId)
     windows.delete(sessionId)
     if (!window) return
+    const panes = attachedPanes.get(window.webContents)
+    for (const [paneId, onData] of panes ?? []) shellHost.windowClosed(paneId, onData)
+    panes?.clear()
     window.hide()
-    flushScrollback([window]).then(() => window.close())
+    window.close()
   }
 
   core.onEffect((effect) => {
@@ -296,30 +334,34 @@ app.whenReady().then(() => {
   async function saveAndQuit ({ waitForScrollback }: { waitForScrollback: boolean }) {
     if (savedForQuit || saving) return
     saving = true
-    if (waitForScrollback) await flushScrollback()
+    if (waitForScrollback) await Promise.all([flushScrollback(), shellHost.reportWindowlessScrollback()])
     core.quitConfirmed()
   }
 
-  // Tells how many Sessions quitting deletes, if any. A restart starts Blind again once it has quit, from the copy now in
-  // its place, e.g. one just installed; cancelled, nothing of it is left to happen later.
-  async function confirmQuit ({ restart, sessionsToDelete }: Extract<Effect, { type: 'confirmQuit' }>) {
+  // Names the Sessions quitting deletes and the Closed Sessions whose Shells are still running, if any. A restart starts
+  // Blind again once it has quit, from the copy now in its place, e.g. one just installed; cancelled, nothing of it is
+  // left to happen later.
+  async function confirmQuit ({
+    restart,
+    sessionsToDelete,
+    runningClosedSessions,
+  }: Extract<Effect, { type: 'confirmQuit' }>) {
     if (quitInProgress) {
       restartOnQuit ||= restart === true
       return
     }
     quitInProgress = true
     restartOnQuit = restart === true
-    const deletionNote =
-      sessionsToDelete === undefined
-        ? ''
-        : sessionsToDelete === 1
-          ? ' 1 Session without a name or Root directory is deleted.'
-          : ` ${sessionsToDelete} Sessions without a name or Root directory are deleted.`
+    const listed = (heading: string, labels: string[] | undefined) =>
+      labels === undefined ? '' : `\n\n${heading}\n${labels.map((label) => `• ${label}`).join('\n')}`
     const comingBack = restart ? 'as Blind starts again' : 'the next time Blind starts'
     const { response } = await ask({
       type: 'question',
       message: restart ? 'Restart Blind?' : 'Quit Blind?',
-      detail: `Every Shell stops. Sessions come back with fresh Shells ${comingBack}.${deletionNote}`,
+      detail:
+        `Every Shell stops. Sessions come back with fresh Shells ${comingBack}.` +
+        listed('Deleted, having neither a name nor a Root directory:', sessionsToDelete) +
+        listed('Closed Sessions still running:', runningClosedSessions),
       buttons: [restart ? 'Restart' : 'Quit', 'Cancel'],
       defaultId: 0,
       cancelId: 1,
@@ -484,24 +526,25 @@ app.whenReady().then(() => {
     windows.forEach(sendPalettePosition)
   })
 
-  // A restored Pane's terminal gets its saved scrollback first, with no colour or style left over from it. The line the
-  // cursor was on, usually the old Shell's idle prompt, gives way to a dim marker, and the fresh Shell's output follows.
-  ipcMain.handle(channels.attachPane, (event, paneId: PaneId, size: TerminalSize) => {
-    const scrollback = core.scrollback(paneId)
-    if (scrollback) {
-      const replay = `${scrollback.text}\x1b[0m\r\x1b[2K${restoredMarker(scrollback.savedAt)}\r\n`
-      event.sender.send(channels.paneData, paneId, replay)
-    }
+  // A Pane whose Shell ran on while its Session was closed gets its headless terminal's replay instead of the restored
+  // output, at the window's size.
+  ipcMain.handle(channels.attachPane, async (event, paneId: PaneId, size: TerminalSize) => {
+    const page = event.sender
+    const restored = shellHost.isWindowless(paneId) ? undefined : restoredOutput(paneId)
+    if (restored !== undefined) page.send(channels.paneData, paneId, restored)
     shellHost.resize(paneId, size)
-    shellHost.attach(paneId, (data) => {
-      if (!event.sender.isDestroyed()) event.sender.send(channels.paneData, paneId, data)
-    })
+    const onData = (data: string) => {
+      if (!page.isDestroyed()) page.send(channels.paneData, paneId, data)
+    }
+    attachedTo(page).set(paneId, onData)
+    await shellHost.attach(paneId, onData)
   })
   ipcMain.on(channels.writeToPane, (_event, paneId: PaneId, data: string) => shellHost.write(paneId, data))
   ipcMain.on(channels.resizePane, (_event, paneId: PaneId, size: TerminalSize) => shellHost.resize(paneId, size))
-  ipcMain.on(channels.reportScrollback, (_event, paneId: PaneId, scrollback: string) =>
-    core.scrollbackChanged(paneId, scrollback)
-  )
+  // A windowless Pane's scrollback comes from its headless terminal, not from a closing window's terminal reporting late.
+  ipcMain.on(channels.reportScrollback, (_event, paneId: PaneId, scrollback: string) => {
+    if (!shellHost.isWindowless(paneId)) core.scrollbackChanged(paneId, scrollback)
+  })
   ipcMain.on(channels.reportNotification, (_event, paneId: PaneId) => core.notificationReceived(paneId))
   ipcMain.on(channels.reportProgramStatus, (_event, paneId: PaneId, report: ProgramStatusReport) =>
     core.programStatusReported(paneId, report)
@@ -601,6 +644,7 @@ app.whenReady().then(() => {
   configFile.watch((read) => {
     applyConfig(read)
     windows.forEach(sendWindowSettings)
+    shellHost.setScrollbackLines(core.settings().pane.scrollbackLines)
     windows.forEach(applyBackgroundEffect)
     warnIfBlurUnavailable()
     // The cycle order setting may have changed.

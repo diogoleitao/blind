@@ -59,11 +59,11 @@ The Pane of the Current Tab that is focused.
 _Avoid_: Active Pane
 
 **Closed Session**:
-A Session that is saved but out of the cycle. Closing a Session's window makes it a Closed Session; it can be opened again. A Session with neither a name nor a Root directory, closed while the user has chosen to delete such Sessions, is deleted instead.
+A Session that is saved but out of the cycle. Closing a Session's window makes it a Closed Session; it can be opened again. Its Shells keep running while it is closed and once it is opened again, until it is deleted or the app quits. A Session with neither a name nor a Root directory, closed while the user has chosen to delete such Sessions, is deleted instead.
 _Avoid_: Detached, archived
 
 **Delete**:
-Permanently removing a Session, open or closed. Closing a window never deletes a Session with a name or a Root directory; one with neither is deleted on closing when the user has chosen so.
+Permanently removing a Session, open or closed, which ends its Shells. Closing a window never deletes a Session with a name or a Root directory; one with neither is deleted on closing when the user has chosen so.
 _Avoid_: Close (when the Session should go away)
 
 **Restore**:
@@ -95,7 +95,7 @@ A Pane's standing request for the user's attention, raised when the program in i
 _Avoid_: Unread, alert, output
 
 **Activity Sidebar**:
-A list of the Panes with Activity across every Open Session, grouped by Session, that slides over one side of the Current Session's window. Choosing a Pane in it makes that Pane the Current Pane.
+A list of the Panes with Activity across every Open Session and Closed Session, grouped by Session, with Open Sessions and Closed Sessions under separate headings, that slides over one side of the Current Session's window. Choosing a Pane in it makes that Pane the Current Pane, opening its Session first if it is a Closed Session.
 _Avoid_: Inbox, drawer, panel
 
 ### Appearance

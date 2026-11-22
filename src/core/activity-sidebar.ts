@@ -1,11 +1,13 @@
 import type { PaneId } from './state'
 
 // One row of the Activity Sidebar, at its depth: 0 for a Session, 1 under it, 2 under a Tab. A row with `paneId` stands
-// for that Pane and is the one chosen; one without is a heading. `hiddenTab` marks a Hidden Tab's rows.
+// for that Pane and is the one chosen; one without is a heading. `group` marks the heading of the Open Sessions or the
+// Closed Sessions, at depth 0. `hiddenTab` marks a Hidden Tab's rows.
 export interface ActivitySidebarRow {
   label: string;
   level: 0 | 1 | 2;
   paneId?: PaneId;
+  group?: true;
   hiddenTab?: true;
 }
 
