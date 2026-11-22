@@ -74,6 +74,7 @@ export const defaultKeyBindings: Record<BoundAction, string | null> = {
   resetCommandPalettePosition: null,
   openSettings: null,
   quit: null,
+  quitAndEndShells: null,
 }
 
 const modifierNames: Record<string, keyof Omit<Shortcut, 'key'>> = {

@@ -63,6 +63,12 @@
         "to": "native/window_effects.node"
       }
     ],
+    "extraFiles": [
+      {
+        "from": "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+        "to": "MacOS/Blind Spot"
+      }
+    ],
     "npmRebuild": false,
     "protocols": [
       {

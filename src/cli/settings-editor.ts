@@ -221,7 +221,7 @@ export async function editSettings (deps: SettingsEditorDependencies): Promise<n
 
   function valueOf (name: string) {
     const value = settingIn(settings, name)
-    if (name === 'shell' && value === undefined) return 'login shell'
+    if (name === 'shell.program' && value === undefined) return 'login shell'
     if (name === 'pane.scrollbackLines' && value === unlimitedScrollbackLines) return 'unlimited'
     return String(value)
   }

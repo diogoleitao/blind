@@ -399,6 +399,69 @@
         border-radius: 4px;
         font: 11px ui-monospace, monospace;
       }
+      /* The quit confirmation sits where the Command Palette would, in its colours, its text where the palette's starts.
+         The backdrop behind it takes every click meant for the window. */
+      #quit-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 2;
+      }
+      #quit-backdrop[hidden],
+      #quit-dialog[hidden] {
+        display: none;
+      }
+      #quit-dialog {
+        position: fixed;
+        top: 20%;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(640px, 90vw);
+        max-height: 60vh;
+        box-sizing: border-box;
+        z-index: 2;
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr) auto;
+        gap: 10px;
+        padding: 18px calc(7px + var(--result-inset) + var(--result-padding-x));
+        border: 1px solid var(--palette-border);
+        border-radius: var(--window-corner-radius);
+        background: var(--palette-background);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+        font: 13px system-ui, sans-serif;
+        color: var(--palette-text);
+        outline: none;
+        cursor: default;
+      }
+      .quit-title {
+        font-size: 15px;
+      }
+      .quit-detail,
+      .quit-program {
+        color: var(--palette-muted-text);
+      }
+      .quit-lists {
+        display: grid;
+        gap: 10px;
+        overflow-y: auto;
+      }
+      .quit-heading {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--palette-muted-text);
+      }
+      .quit-session {
+        padding: 3px 0;
+      }
+      .quit-session summary {
+        cursor: default;
+      }
+      .quit-session ul {
+        margin: 4px 0 0;
+        padding-left: 22px;
+        list-style: none;
+      }
       /* The Activity Sidebar slides over the side of the window the activitySidebar.side setting names, the full height
          of it, above the Tab bar and the Panes. It is as wide as the Command Palette and takes its colours. While it is
          open, the backdrop over the rest of the window takes clicks, which close it. */
@@ -557,6 +620,8 @@
       <div id="palette-import" hidden></div>
       <ul id="palette-results"></ul>
     </div>
+    <div id="quit-backdrop" hidden></div>
+    <div id="quit-dialog" tabindex="-1" hidden></div>
     <div id="activity-sidebar-backdrop" hidden></div>
     <ul id="activity-sidebar" tabindex="-1"></ul>
     <div id="find" hidden>

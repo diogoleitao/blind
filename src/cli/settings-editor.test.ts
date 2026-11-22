@@ -95,7 +95,9 @@ describe('blind settings', () => {
       'scrollbackLines', 'startDirectory', 'padding', 'scrollBar',
     ])
     expect(lines[pane + 1]).toMatch(/^ {4}scrollbackLines/)
-    expect(lines[pane + 5]).toMatch(/^ {2}shell +login shell/)
+    expect(lines[pane + 5]).toBe('  shell')
+    expect(lines[pane + 6]).toMatch(/^ {4}program +login shell/)
+    expect(lines[pane + 7]).toMatch(/^ {4}onQuit +keepRunning/)
     expect(lines).toContainEqual(expect.stringMatching(/^› {3}startDirectory +root/))
   })
 
@@ -106,10 +108,16 @@ describe('blind settings', () => {
 
   it.each([
     ['escape', ['escape']],
-    ['Ctrl+C, even while typing', [...downTo('shell'), 'enter', ...typed('/bin/ba'), 'interrupt']],
+    ['Ctrl+C, even while typing', [...downTo('shell.program'), 'enter', ...typed('/bin/ba'), 'interrupt']],
   ] as [string, Key[]][])('exits 0 on %s, giving the terminal back', async (_, keys) => {
     // Were the editor still running, the keys after these would write a shell.
-    const { code, file, closed } = await editSettings([...keys, ...downTo('shell'), 'enter', ...typed('/bin/zsh'), 'enter'])
+    const { code, file, closed } = await editSettings([
+      ...keys,
+      ...downTo('shell.program'),
+      'enter',
+      ...typed('/bin/zsh'),
+      'enter',
+    ])
     expect(code).toBe(0)
     expect(file).toBe(starterConfig)
     expect(closed).toBe(true)
@@ -210,8 +218,8 @@ describe('blind settings', () => {
     })
 
     it('tells a shell typed as login shell from the login shell', async () => {
-      const { file } = await editSettings([...downTo('shell'), 'enter', ...typed('login shell'), 'enter', quit])
-      expect(file).toContain('"shell": "login shell"')
+      const { file } = await editSettings([...downTo('shell.program'), 'enter', ...typed('login shell'), 'enter', quit])
+      expect(file).toContain('"program": "login shell"')
     })
 
     it('says which keys save and which quit without saving', async () => {
@@ -224,8 +232,8 @@ describe('blind settings', () => {
   })
 
   it('marks an invalid shell, shown as the login shell', async () => {
-    const { screen } = await editSettings([], { text: '{ "shell": "" }' })
-    expect(screen).toMatch(/shell +login shell +\(invalid in config\.jsonc\)/)
+    const { screen } = await editSettings([], { text: '{ "shell": { "program": "" } }' })
+    expect(screen).toMatch(/program +login shell +\(invalid in config\.jsonc\)/)
   })
 
   it('writes onto the file as it is on disk, keeping what changed there since the editor opened', async () => {
@@ -355,15 +363,15 @@ describe('blind settings', () => {
 
     it('takes the shell typed, and shows the login shell while it is unset', async () => {
       const { screen: before } = await editSettings([])
-      expect(before).toMatch(/shell +login shell/)
-      const { file } = await editSettings([...downTo('shell'), 'enter', ...typed('/bin/bash'), 'enter', quit])
-      expect(file).toContain('"shell": "/bin/bash"')
+      expect(before).toMatch(/program +login shell/)
+      const { file } = await editSettings([...downTo('shell.program'), 'enter', ...typed('/bin/bash'), 'enter', quit])
+      expect(file).toContain('"shell": {\n    "program": "/bin/bash"\n  }')
     })
 
     it('refuses an empty shell, pointing at blind settings open to remove it', async () => {
-      const { file, screen } = await editSettings([...downTo('shell'), 'enter', 'enter', quit])
+      const { file, screen } = await editSettings([...downTo('shell.program'), 'enter', 'enter', quit])
       expect(file).toBe(starterConfig)
-      expect(screen).toContain("shell can't be empty; remove it with blind settings open")
+      expect(screen).toContain("shell.program can't be empty; remove it with blind settings open")
     })
 
     it('leaves the value as it was on escape while typing, without quitting', async () => {

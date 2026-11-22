@@ -27,7 +27,16 @@ import { fuzzyScore } from './fuzzy'
 import { setJsoncProperty } from './jsonc'
 import { type BoundAction, type KeyPress, matchesShortcut } from './key-bindings'
 import { type LinkTarget, linkTarget } from './links'
-import type { Clock, SavedScrollback, ShellHost, Snapshot, StateStore } from './ports'
+import type {
+  Clock,
+  PaneReport,
+  SavedScrollback,
+  ShellEvent,
+  ShellFromBefore,
+  ShellHost,
+  Snapshot,
+  StateStore,
+} from './ports'
 import { capScrollback } from './scrollback'
 import {
   importTheme,
@@ -51,6 +60,18 @@ import {
   type TabId,
 } from './state'
 
+// A program running in a Session's Panes, by the name it gives itself, and how many of the Panes it runs in.
+export interface RunningProgram {
+  program: string;
+  count: number;
+}
+
+// A Session the quit confirmation names, by its label, with the programs quitting ends in it.
+export interface QuitSession {
+  label: string;
+  programs: RunningProgram[];
+}
+
 export type Effect =
   | { type: 'closeWindow'; sessionId: SessionId }
   // Fades the app in with the Session visible.
@@ -64,14 +85,28 @@ export type Effect =
   | { type: 'showSession'; sessionId: SessionId }
   // Shows the Session Banner over the Session's window, which cycling has just swapped in.
   | { type: 'showSessionBanner'; sessionId: SessionId }
-  // Asks the user whether to quit, or to restart, which quits and starts Blind again; answered with `quitConfirmed`,
-  // naming by their labels the Sessions quitting deletes and the Closed Sessions whose still running Shells it stops, if
-  // any.
-  | { type: 'confirmQuit'; restart?: true; sessionsToDelete?: string[]; runningClosedSessions?: string[] }
+  // Asks the user whether to quit, or to restart, which quits and starts Blind again, over the Current Session's window,
+  // shown first; answered with `quitConfirmed`, passing `endShells` on. It names, each by its label with the programs
+  // quitting ends in it, the Sessions quitting deletes; while quitting ends the Shells, the Closed Sessions running
+  // programs; and for Quit and End Shells, every Session running programs. Each list is left out when it names none.
+  | {
+    type: 'confirmQuit';
+    restart?: true;
+    endShells?: true;
+    deleted?: QuitSession[];
+    runningClosed?: QuitSession[];
+    running?: QuitSession[];
+  }
+  // Quitting needs no confirmation: the terminals' scrollback is taken first, then `quitConfirmed` is called, passing
+  // `endShells` on.
+  | { type: 'saveForQuit'; endShells?: true }
+  // Every Shell ended at once, as whatever held them went, and fresh Shells took their places in the Open Sessions.
+  | { type: 'shellsLost' }
   // Asks the user for the Session's name, offering `suggestion`, answered with `renameSession`.
   | { type: 'askSessionName'; sessionId: SessionId; suggestion: string }
-  // Asks the user whether to delete the Session, answered with `deleteConfirmed`.
-  | { type: 'confirmDelete'; sessionId: SessionId }
+  // Asks the user whether to delete the Session, answered with `deleteConfirmed`, naming the programs deleting ends, if
+  // any.
+  | { type: 'confirmDelete'; sessionId: SessionId; programs?: RunningProgram[] }
   // Asks the user for the title of a Tab in the Session, offering `suggestion`, answered with `renameTab`.
   | { type: 'askTabTitle'; sessionId: SessionId; tabId: TabId; suggestion: string }
   // Opens the config file for editing.
@@ -150,6 +185,7 @@ const paletteActionLabels = {
   resetCommandPalettePosition: 'Reset Command Palette Position',
   openSettings: 'Open Settings',
   quit: 'Quit Blind',
+  quitAndEndShells: 'Quit and End Shells',
 } as const
 
 export type PaletteAction = keyof typeof paletteActionLabels
@@ -213,7 +249,7 @@ const menuBarIconLabels: Record<MenuBarIcon, string> = {
 }
 
 // The app actions the menu bar icon's menu offers after the Sessions, in order.
-const menuBarActions = ['newSession', 'openSettings', 'quit'] as const satisfies PaletteAction[]
+const menuBarActions = ['newSession', 'openSettings', 'quit', 'quitAndEndShells'] as const satisfies PaletteAction[]
 
 export type MenuBarAction = (typeof menuBarActions)[number]
 
@@ -268,11 +304,16 @@ export interface Core {
   paletteDismissed(): void;
   // Blind stopped being the active app, e.g. because another app was clicked.
   focusLost(): void;
-  // Quitting always asks for confirmation first.
+  // Quitting asks for confirmation first when it deletes Sessions, or, while it ends the Shells, when Closed Sessions run
+  // programs.
   quitRequested(): void;
-  // Asked from outside, e.g. after a new copy of Blind is installed; confirmed like quitting.
+  // Quits and ends every Shell, asking first when programs are running or Sessions are deleted.
+  quitAndEndShellsRequested(): void;
+  // Asked from outside, e.g. after a new copy of Blind is installed, so always confirmed, as quitting is.
   restartRequested(): void;
-  quitConfirmed(): void;
+  // Deletes the Sessions quitting deletes and saves. The Shells run on unless `endShells` says, which defaults to what
+  // the shell.onQuit setting says, e.g. when the app is told to stop.
+  quitConfirmed(options?: { endShells?: boolean }): void;
   // The config file's text, or undefined without a file. Settings start at their defaults, as without a file. Text that
   // isn't a JSON object, e.g. a save caught halfway through an edit, leaves the settings as they were.
   configChanged(config: string | undefined): void;
@@ -417,9 +458,11 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   // How many times a Pane has gained Activity, which orders the Activity Sidebar: a count rather than the clock's time,
   // so two gains never tie.
   let activityGains = 0
-  // The Panes whose Shell is running: started and neither stopped nor exited. Not part of the snapshot: no Shell outlives
-  // the app.
+  // The Panes whose Shell is running: started, or kept running from before the app last quit, and neither stopped nor
+  // exited. Not part of the snapshot: the ShellHost says which Shells outlived the app.
   const runningShells = new Set<PaneId>()
+  // Set while the app, launching, takes what its Panes reported while it was gone.
+  let takingMissedReports = false
   let settings: Settings = defaultSettings
   // The config file's text the settings were last read from, read again when the Themes change.
   let configText: string | undefined
@@ -627,10 +670,11 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     if (gained && ringsNow()) emit({ type: 'playActivitySound', sound: settings.activity.sound })
   }
 
-  // Whether the activity.ring setting lets a Pane gaining Activity play the Activity sound now.
+  // Whether the activity.ring setting lets a Pane gaining Activity play the Activity sound now. Activity gained while the
+  // app was gone, taken as it launches, plays none.
   function ringsNow () {
     const { ring } = settings.activity
-    return ring === 'always' || (ring === 'whileHidden' && !appShown)
+    return !takingMissedReports && (ring === 'always' || (ring === 'whileHidden' && !appShown))
   }
 
   // The Current Pane's Activity clears as it becomes the Current Pane, and a Pane's goes when it closes or its Session is
@@ -755,7 +799,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
 
   // Runs the shell setting's program, so a change to it reaches only the Shells started after it.
   function startShell ({ id, workingDirectory }: Pane) {
-    shellHost.start(id, { workingDirectory, shell: settings.shell })
+    shellHost.start(id, { workingDirectory, shell: settings.shell.program })
     runningShells.add(id)
   }
 
@@ -788,14 +832,58 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     }
   }
 
-  // Brings back the saved Sessions, starting Shells for the Open ones. New ids continue after the saved ones.
+  // Brings back the saved Sessions, starting Shells for the Open ones' Panes whose Shells didn't run on since the app
+  // quit, once what the Shells from before reported meanwhile is taken, so a fresh Shell starts where the one before it
+  // last was. New ids continue after the saved ones. A Pane's scrollback saved while the app was gone replaces an older
+  // one the app saved.
   function restore (saved: Snapshot) {
     lastId = Math.max(lastId, ...idsIn(saved.state).map((id) => Number(id.split('-').at(-1))))
-    scrollback = saved.scrollback
-    const sessions = saved.state.sessions.map((session) =>
-      session.status === 'open' ? restartShells(session) : session
-    )
-    setState({ ...saved.state, sessions })
+    scrollback = { ...saved.scrollback }
+    for (const [paneId, savedMeanwhile] of Object.entries(shellHost.savedScrollback())) {
+      if (savedMeanwhile.savedAt <= (scrollback[paneId]?.savedAt ?? -Infinity)) continue
+      scrollback[paneId] = { ...savedMeanwhile, text: capScrollback(savedMeanwhile.text, settings.pane.scrollbackLines) }
+    }
+    setState(saved.state)
+    const savedPanes = new Set(panesIn(saved.state).map((pane) => pane.id))
+    const fromBefore = shellHost.shellsFromBefore().filter(({ paneId }) => savedPanes.has(paneId))
+    for (const { paneId } of fromBefore) runningShells.add(paneId)
+    takeMissedReports(fromBefore)
+    for (const { paneId, exited } of fromBefore) if (exited) runningShells.delete(paneId)
+    setState({
+      ...state,
+      sessions: state.sessions.map((session) => (session.status === 'open' ? restartShells(session) : session)),
+    })
+  }
+
+  // In order, Activity raised with no sound.
+  function takeMissedReports (fromBefore: ShellFromBefore[]) {
+    takingMissedReports = true
+    for (const { missed } of fromBefore) missed.forEach(paneReported)
+    takingMissedReports = false
+  }
+
+  // Shells still running from before the app quit that no saved Pane has are ended, having nowhere to show.
+  function endShellsWithNoPane () {
+    for (const { paneId, exited } of shellHost.shellsFromBefore()) {
+      if (!exited && !runningShells.has(paneId)) shellHost.stop(paneId)
+    }
+  }
+
+  function paneReported (report: PaneReport) {
+    if (report.type === 'notification') return core.notificationReceived(report.paneId)
+    if (report.type === 'programStatus') return core.programStatusReported(report.paneId, report.report)
+    shellEventReceived(report)
+  }
+
+  // Whatever held the Shells is gone, and every Shell with it. Every Pane stays: the Open Sessions' get fresh Shells,
+  // and the Closed Sessions' get theirs when they're opened again.
+  function shellsLost () {
+    runningShells.clear()
+    setState({
+      ...state,
+      sessions: state.sessions.map((session) => (session.status === 'open' ? restartShells(session) : session)),
+    })
+    emit({ type: 'shellsLost' })
   }
 
   // The directory a new Tab or Pane starts in, given its Session's Root directory and the working directory of the Pane
@@ -862,6 +950,18 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return session.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id))
   }
 
+  // The programs running in the Session's Panes, Hidden Tabs' included, each once in the order of the Panes it first runs
+  // in. A Shell idle at its prompt runs none.
+  function programsOf (session: Session): RunningProgram[] {
+    const counts = new Map<string, number>()
+    for (const pane of session.tabs.flatMap((tab) => tab.panes)) {
+      if (pane.runningProgram !== undefined && runningShells.has(pane.id)) {
+        counts.set(pane.runningProgram, (counts.get(pane.runningProgram) ?? 0) + 1)
+      }
+    }
+    return [...counts].map(([program, count]) => ({ program, count }))
+  }
+
   // Whether closing the Session deletes it rather than making it a Closed Session, as the setting says for Sessions with
   // neither a name nor a Root directory.
   function deletesOnClose (session: Session) {
@@ -918,28 +1018,39 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return open.toSorted((a, b) => b.lastUsedAt - a.lastUsedAt)[0]
   }
 
-  // Their windows and Shells go with the app, and a Current Session among them passes on to the most recently used Open
-  // Session left without being shown.
+  // Their windows go with the app, and their Shells end; a Current Session among them passes on to the most recently
+  // used Open Session left without being shown.
   function deleteSessionsOnQuit () {
-    if (!removeSessions(sessionsDeletedOnQuit())) return
-    setState({ ...state, currentSessionId: mostRecentlyUsedOpenSession()?.id })
+    const deleted = sessionsDeletedOnQuit()
+    const wasCurrent = removeSessions(deleted)
+    for (const paneId of deleted.flatMap(paneIdsOf)) {
+      if (runningShells.has(paneId)) stopShell(paneId)
+    }
+    if (wasCurrent) setState({ ...state, currentSessionId: mostRecentlyUsedOpenSession()?.id })
   }
 
-  // Asks whether to quit, or to restart, naming the Sessions quitting deletes and the Closed Sessions whose Shells it
-  // stops, if any, each by its label in cycle order.
-  function confirmQuit (restart?: true) {
+  // Asks whether to quit, or to restart, when there's something to tell first, naming each Session by its label in
+  // cycle order with the programs quitting ends in it: the Sessions quitting deletes, and the Sessions running programs
+  // whose Shells quitting ends besides, only the Closed ones on a plain quit, since the Open ones are on screen. A
+  // restart, which anything can ask for, is always confirmed.
+  function confirmQuit ({ restart, andEndShells }: { restart?: true; andEndShells?: true }) {
+    const endShells = andEndShells || settings.shell.onQuit === 'end'
     const deleted = sessionsDeletedOnQuit()
-    const running = state.sessions.filter(
-      (session) =>
-        session.status === 'closed' && !deleted.includes(session) && paneIdsOf(session).some((id) => runningShells.has(id))
-    )
-    const labels = (sessions: Session[]) => sessions.toSorted(compareInCycleOrder).map(labelOf)
-    emit({
-      type: 'confirmQuit',
-      ...(restart ? { restart } : {}),
-      ...(deleted.length > 0 ? { sessionsToDelete: labels(deleted) } : {}),
-      ...(running.length > 0 ? { runningClosedSessions: labels(running) } : {}),
-    })
+    const named = (sessions: Session[]) =>
+      sessions.toSorted(compareInCycleOrder).map((session) => ({ label: labelOf(session), programs: programsOf(session) }))
+    const running = named(
+      state.sessions.filter(
+        (session) => !deleted.includes(session) && (andEndShells || session.status === 'closed')
+      )
+    ).filter((session) => session.programs.length > 0)
+    const lists = {
+      ...(deleted.length > 0 ? { deleted: named(deleted) } : {}),
+      ...(endShells && running.length > 0 ? { [andEndShells ? 'running' : 'runningClosed']: running } : {}),
+    }
+    const options = endShells ? { endShells: true as const } : {}
+    if (!restart && Object.keys(lists).length === 0) return emit({ type: 'saveForQuit', ...options })
+    if (state.currentSessionId !== undefined) showAppIfHidden()
+    emit({ type: 'confirmQuit', ...(restart ? { restart } : {}), ...options, ...lists })
   }
 
   // The smallest label number no Unnamed Session holds, starting at 1.
@@ -1299,11 +1410,16 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
   }
 
   function actionResults (): PaletteResult[] {
-    return Object.entries(paletteActionLabels).map(([action, label]) => ({
+    return offeredActions(Object.keys(paletteActionLabels) as PaletteAction[]).map((action) => ({
       type: 'action',
-      action: action as PaletteAction,
-      label,
+      action,
+      label: paletteActionLabels[action],
     }))
+  }
+
+  // Quit and End Shells is left out while quitting ends the Shells anyway.
+  function offeredActions<Action extends PaletteAction> (actions: readonly Action[]) {
+    return actions.filter((action) => action !== 'quitAndEndShells' || settings.shell.onQuit === 'keepRunning')
   }
 
   // A Closed Session's layout never changes while it's closed: a Pane whose Shell exits stays, for a fresh Shell when
@@ -1315,7 +1431,8 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
 
   // A Closed Session's Shells keep running and reporting as an Open Session's do. A stopped Shell can still report on
   // its way out, which changes nothing.
-  shellHost.subscribe((event) => {
+  function shellEventReceived (event: ShellEvent) {
+    if (event.type === 'shellsLost') return shellsLost()
     if (event.type === 'shellExited') return shellExited(event.paneId)
     if (!runningShells.has(event.paneId)) return
     if (event.type === 'workingDirectoryChanged') {
@@ -1338,11 +1455,13 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
         programTitle === undefined ? unchanged : { ...unchanged, programTitle }
       )
     }
-  })
+  }
+
+  shellHost.subscribe(shellEventReceived)
 
   // The app actions on the Current Session, by the core's own commands.
   const sessionActions: Record<
-    Exclude<PaletteAction, 'newSession' | 'resetCommandPalettePosition' | 'openSettings' | 'quit'>,
+    Exclude<PaletteAction, 'newSession' | 'resetCommandPalettePosition' | 'openSettings' | 'quit' | 'quitAndEndShells'>,
     (sessionId: SessionId) => void
   > = {
     renameSession: (sessionId) => {
@@ -1404,6 +1523,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     if (action === 'resetCommandPalettePosition') return emit({ type: 'resetPalettePosition' })
     if (action === 'openSettings') return emit({ type: 'openSettings' })
     if (action === 'quit') return core.quitRequested()
+    if (action === 'quitAndEndShells') return core.quitAndEndShellsRequested()
     if (sessionId === undefined) return
     if (action === 'openCommandPalette') return emit({ type: 'openPalette', sessionId })
     if (action === 'copy' || action === 'paste') return emit({ type: action, sessionId })
@@ -1416,6 +1536,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       appShown = !atLogin || settings.loginLaunch.start === 'shown'
       const saved = stateStore.load()
       if (saved) restore(saved)
+      endShellsWithNoPane()
       // Started shown, the app needs a Session to show. Started hidden at login, it opens one for the Hotkey to show, or
       // leaves that to the Hotkey, as the setting says.
       const opensSession = appShown || settings.loginLaunch.withNoOpenSessions === 'new'
@@ -1441,10 +1562,12 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       appShown = false
       emit({ type: 'hideApp' })
     }),
-    quitRequested: command(() => confirmQuit()),
-    restartRequested: command(() => confirmQuit(true)),
-    quitConfirmed: command(() => {
+    quitRequested: command(() => confirmQuit({})),
+    quitAndEndShellsRequested: command(() => confirmQuit({ andEndShells: true })),
+    restartRequested: command(() => confirmQuit({ restart: true })),
+    quitConfirmed: command(({ endShells = settings.shell.onQuit === 'end' } = {}) => {
       deleteSessionsOnQuit()
+      if (endShells) [...runningShells].forEach(stopShell)
       stateStore.flush()
       emit({ type: 'quit' })
     }),
@@ -1541,7 +1664,10 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       closeWindow(sessionId)
     }),
     deleteRequested: command((sessionId) => {
-      if (findSession(sessionId)) emit({ type: 'confirmDelete', sessionId })
+      const session = findSession(sessionId)
+      if (!session) return
+      const programs = programsOf(session)
+      emit({ type: 'confirmDelete', sessionId, ...(programs.length > 0 ? { programs } : {}) })
     }),
     deleteConfirmed: command((sessionId) => {
       const session = findSession(sessionId)
@@ -1653,7 +1779,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       return {
         open: withStatus('open'),
         closed: withStatus('closed'),
-        actions: menuBarActions.map((action) => ({ action, label: paletteActionLabels[action] })),
+        actions: offeredActions(menuBarActions).map((action) => ({ action, label: paletteActionLabels[action] })),
       }
     },
     paletteResults: searchPalette,

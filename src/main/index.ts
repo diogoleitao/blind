@@ -1,6 +1,7 @@
-import { existsSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync } from 'node:fs'
 import { homedir, userInfo } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   app,
   BrowserWindow,
@@ -21,13 +22,14 @@ import { createCore, type Effect, type PaletteResult } from '../core/core'
 import { defaultPalettePosition } from '../core/palette-position'
 import type { PaneId, SessionId } from '../core/state'
 import { channels, type PalettePrompt, type SessionView, type TerminalSize, type WindowSettings } from '../shared/ipc'
+import { listInProse, programLabel, type QuitPrompt, quitPromptText, quitSessionLine } from '../shared/quit-prompt'
 import { createActivitySoundPlayer } from './activity-sound'
 import { createBlurWarningFile } from './blur-warning-file'
 import { type ConfigRead, createConfigFile } from './config-file'
 import { fadeWindow } from './fade'
 import { createFileStateStore } from './file-state-store'
 import { createMenuBarIcon } from './menu-bar-icon'
-import { createNodePtyShellHost } from './node-pty-shell-host'
+import { createBlindSpotShellHost } from './blind-spot-shell-host'
 import { createPalettePositionFile } from './palette-position-file'
 import { createThemeFiles, readThemeSource } from './theme-files'
 import { loadWindowEffects } from './window-effects'
@@ -41,6 +43,10 @@ const hotkey = app.isPackaged ? 'F12' : 'F7'
 const dataDirectory = join(app.getPath('appData'), app.isPackaged ? 'Blind' : 'Blind Dev')
 const configDirectory = join(homedir(), '.config', app.isPackaged ? 'blind' : 'blind-dev')
 if (!app.isPackaged) app.setPath('userData', dataDirectory)
+// Where Blind Spot listens for the app, and keeps what it keeps for the next app while none is there; each app,
+// installed or run from the repo, has its own.
+const blindSpotSocket = join(dataDirectory, 'blind-spot.sock')
+const blindSpotKept = join(dataDirectory, 'blind-spot-kept.json')
 
 // How long quitting waits for the windows' terminals to report their scrollback.
 const scrollbackFlushTimeoutMilliseconds = 1_000
@@ -60,14 +66,43 @@ function restoredMarker (savedAt: number) {
   return `\x1b[2m── Restored · ${savedAtFormat.format(savedAt)} ──\x1b[0m`
 }
 
-app.whenReady().then(() => {
+// Blind Spot runs from a copy of the app's own executable run as Node, named so Activity Monitor shows it as Blind Spot:
+// the installed app carries one next to its own; running from the repo makes one next to Electron's.
+function blindSpotExecutable () {
+  if (app.isPackaged) return join(dirname(process.execPath), 'Blind Spot')
+  const copy = join(dirname(process.execPath), 'Blind Dev Spot')
+  if (!existsSync(copy)) {
+    copyFileSync(process.execPath, copy)
+    chmodSync(copy, 0o755)
+  }
+  return copy
+}
+
+// Detached, so it outlives the app, with its own output kept in a log next to the app's data.
+function launchBlindSpot () {
+  mkdirSync(dataDirectory, { recursive: true })
+  const log = openSync(join(dataDirectory, 'blind-spot.log'), 'a')
+  spawn(blindSpotExecutable(), [join(import.meta.dirname, 'blind-spot.js'), blindSpotSocket, blindSpotKept], {
+    detached: true,
+    stdio: ['ignore', log, log],
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    cwd: homedir(),
+  }).unref()
+  closeSync(log)
+}
+
+app.whenReady().then(async () => {
   // Keeps the app out of the Dock and Cmd+Tab.
   app.setActivationPolicy('accessory')
 
-  // A windowless Pane's headless terminal reports to the core as an attached Pane's window does.
-  const shellHost = createNodePtyShellHost({
+  // The Shells run in Blind Spot, so they outlive the app. A windowless Pane's headless terminal reports to the core as
+  // an attached Pane's window does.
+  const shellHost = createBlindSpotShellHost({
+    socketPath: blindSpotSocket,
+    launch: launchBlindSpot,
     loginShell: process.env.SHELL || userInfo().shell || '/bin/zsh',
     scrollbackLines: () => core.settings().pane.scrollbackLines,
+    onQuit: () => core.settings().shell.onQuit,
     restoredOutput: (paneId) => restoredOutput(paneId),
     windowlessReports: {
       notification: (paneId) => core.notificationReceived(paneId),
@@ -208,7 +243,9 @@ app.whenReady().then(() => {
     if (effect.type === 'showSession') swapToWindow(effect.sessionId)
     if (effect.type === 'showSessionBanner') showSessionBanner(effect.sessionId)
     if (effect.type === 'confirmQuit') confirmQuit(effect)
-    if (effect.type === 'confirmDelete') confirmDelete(effect.sessionId)
+    if (effect.type === 'saveForQuit') quitUnasked(effect)
+    if (effect.type === 'shellsLost') shellsLost()
+    if (effect.type === 'confirmDelete') confirmDelete(effect)
     if (effect.type === 'askSessionName' || effect.type === 'askTabTitle') {
       windows.get(effect.sessionId)?.webContents.send(channels.promptPalette, effect)
     }
@@ -260,6 +297,18 @@ app.whenReady().then(() => {
       windows.forEach(sendPalettePosition)
     }
   })
+
+  // Each window's terminals keep what the lost Shells printed, marked off from the fresh Shell's output as a restored
+  // Pane's is, and follow the fresh Shell the core has started.
+  function shellsLost () {
+    notify('The Shells ended unexpectedly', 'Every Pane keeps its output, and the Open Sessions have fresh Shells.')
+    for (const panes of attachedPanes.values()) {
+      for (const [paneId, onData] of panes) {
+        onData(`\x1b[0m\r\n${restoredMarker(Date.now())}\r\n`)
+        shellHost.attach(paneId, onData)
+      }
+    }
+  }
 
   // A system notification, seen even while Blind is hidden behind the editor the config file was saved from.
   function notify (title: string, body: string) {
@@ -330,59 +379,91 @@ app.whenReady().then(() => {
     return parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
   }
 
-  // Saves and quits, taking the terminals' latest scrollback first unless told not to wait for it.
-  async function saveAndQuit ({ waitForScrollback }: { waitForScrollback: boolean }) {
+  // Saves and quits, taking the terminals' latest scrollback first unless told not to wait for it. The Shells end as
+  // `endShells` says, or else as the shell.onQuit setting does.
+  async function saveAndQuit ({ waitForScrollback, endShells }: { waitForScrollback: boolean; endShells?: boolean }) {
     if (savedForQuit || saving) return
     saving = true
     if (waitForScrollback) await Promise.all([flushScrollback(), shellHost.reportWindowlessScrollback()])
-    core.quitConfirmed()
+    core.quitConfirmed(endShells === undefined ? undefined : { endShells })
   }
 
-  // Names the Sessions quitting deletes and the Closed Sessions whose Shells are still running, if any. A restart starts
-  // Blind again once it has quit, from the copy now in its place, e.g. one just installed; cancelled, nothing of it is
-  // left to happen later.
-  async function confirmQuit ({
-    restart,
-    sessionsToDelete,
-    runningClosedSessions,
-  }: Extract<Effect, { type: 'confirmQuit' }>) {
-    if (quitInProgress) {
-      restartOnQuit ||= restart === true
-      return
-    }
-    quitInProgress = true
-    restartOnQuit = restart === true
-    const listed = (heading: string, labels: string[] | undefined) =>
-      labels === undefined ? '' : `\n\n${heading}\n${labels.map((label) => `• ${label}`).join('\n')}`
-    const comingBack = restart ? 'as Blind starts again' : 'the next time Blind starts'
+  // The page asking whether to quit, and how its answer is taken.
+  let quitQuestion: { page: WebContents; answer: (confirmed: boolean) => void } | undefined
+
+  // Over the Current Session's window, which the core has shown. A page gone before it answers has cancelled. With no
+  // Open Session there's no window to ask in, so an alert asks instead.
+  function askQuit (asked: QuitPrompt) {
+    const sessionId = core.state().currentSessionId
+    if (sessionId === undefined) return askQuitInAlert(asked)
+    const page = windowFor(sessionId).webContents
+    return new Promise<boolean>((resolve) => {
+      const cancel = () => quitQuestion?.answer(false)
+      quitQuestion = {
+        page,
+        answer: (confirmed) => {
+          quitQuestion = undefined
+          page.off('destroyed', cancel)
+          resolve(confirmed)
+        },
+      }
+      page.once('destroyed', cancel)
+      if (page.isLoading()) page.once('did-finish-load', () => page.send(channels.askQuit, asked))
+      else page.send(channels.askQuit, asked)
+    })
+  }
+
+  async function askQuitInAlert (asked: QuitPrompt) {
+    const { title, detail, lists, confirm } = quitPromptText(asked)
+    const listed = lists.map(
+      ({ heading, sessions }) =>
+        `\n\n${heading ? `${heading}:\n` : ''}${sessions.map((session) => `• ${quitSessionLine(session)}`).join('\n')}`
+    )
     const { response } = await ask({
       type: 'question',
-      message: restart ? 'Restart Blind?' : 'Quit Blind?',
-      detail:
-        `Every Shell stops. Sessions come back with fresh Shells ${comingBack}.` +
-        listed('Deleted, having neither a name nor a Root directory:', sessionsToDelete) +
-        listed('Closed Sessions still running:', runningClosedSessions),
-      buttons: [restart ? 'Restart' : 'Quit', 'Cancel'],
+      message: title,
+      detail: detail + listed.join(''),
+      buttons: [confirm, 'Cancel'],
       defaultId: 0,
       cancelId: 1,
     })
-    if (response !== 0) {
+    return response === 0
+  }
+
+  // A quit that needs no confirmation, unless one is up already, which answers for it.
+  function quitUnasked ({ endShells }: Extract<Effect, { type: 'saveForQuit' }>) {
+    if (quitInProgress) return
+    quitInProgress = true
+    saveAndQuit({ waitForScrollback: true, endShells: endShells === true })
+  }
+
+  // A restart starts Blind again once it has quit, from the copy now in its place, e.g. one just installed; cancelled,
+  // nothing of it is left to happen later.
+  async function confirmQuit (effect: Extract<Effect, { type: 'confirmQuit' }>) {
+    if (quitInProgress) {
+      restartOnQuit ||= effect.restart === true
+      return
+    }
+    quitInProgress = true
+    restartOnQuit = effect.restart === true
+    if (!(await askQuit(effect))) {
       quitInProgress = false
       restartOnQuit = false
       return
     }
     if (restartOnQuit) app.relaunch()
-    await saveAndQuit({ waitForScrollback: true })
+    await saveAndQuit({ waitForScrollback: true, endShells: effect.endShells === true })
   }
 
   // Like the quit confirmation, Return accepts and Escape cancels.
-  async function confirmDelete (sessionId: SessionId) {
+  async function confirmDelete ({ sessionId, programs }: Extract<Effect, { type: 'confirmDelete' }>) {
     const label = core.sessionLabel(sessionId)
     if (label === undefined) return
+    const ending = programs ? `, ending ${listInProse(programs.map(programLabel))}` : ''
     const { response } = await ask({
       type: 'warning',
       message: `Delete ${label}?`,
-      detail: 'Its Shells stop, and its Tabs, Panes and scrollback are removed for good.',
+      detail: `Its Shells stop${ending}, and its Tabs, Panes and scrollback are removed for good.`,
       buttons: ['Delete', 'Cancel'],
       defaultId: 0,
       cancelId: 1,
@@ -430,7 +511,10 @@ app.whenReady().then(() => {
   if (!globalShortcut.register(hotkey, () => core.hotkeyPressed())) {
     console.error(`Couldn't register the Hotkey ${hotkey}; another app may own it.`)
   }
-  app.on('will-quit', () => globalShortcut.unregisterAll())
+  app.on('will-quit', () => {
+    globalShortcut.unregisterAll()
+    shellHost.close()
+  })
   // Every way of quitting, Cmd+Q included, goes through the core's confirmation.
   app.on('before-quit', (event) => {
     if (savedForQuit) return
@@ -552,6 +636,9 @@ app.whenReady().then(() => {
   ipcMain.on(channels.reportTitle, (_event, paneId: PaneId, title: string) => shellHost.reportTitle(paneId, title))
   ipcMain.on(channels.scrollbackFlushed, (event) => scrollbackFlushes.get(event.sender)?.())
   ipcMain.on(channels.copyText, (_event, text: string) => clipboard.writeText(text))
+  ipcMain.on(channels.answerQuit, (event, confirmed: boolean) => {
+    if (quitQuestion?.page === event.sender) quitQuestion.answer(confirmed)
+  })
   ipcMain.handle(channels.openableLinks, (_event, paneId: PaneId, texts: string[]) =>
     texts.map((text) => {
       const target = core.linkTarget(paneId, text)
@@ -645,6 +732,7 @@ app.whenReady().then(() => {
     applyConfig(read)
     windows.forEach(sendWindowSettings)
     shellHost.setScrollbackLines(core.settings().pane.scrollbackLines)
+    shellHost.setOnQuit(core.settings().shell.onQuit)
     windows.forEach(applyBackgroundEffect)
     warnIfBlurUnavailable()
     // The cycle order setting may have changed.
@@ -652,6 +740,18 @@ app.whenReady().then(() => {
   })
   // The installed app opens at login, hidden or shown as the loginLaunch.start setting says.
   if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: true })
+  // The Shells still running from before the app quit are known before the core restores the Sessions. Once the config
+  // is read, so Blind Spot hears what to do with them should the app go.
+  // Without it no Shell can run, so the app says why and goes.
+  const connection = await shellHost.connect().catch((error: Error) => {
+    dialog.showErrorBox("Blind couldn't start its Shells", `${error.message}. Its log is ${join(dataDirectory, 'blind-spot.log')}.`)
+    app.exit(1)
+  })
+  if (!connection) return
+  const { endedOtherVersion } = connection
+  if (endedOtherVersion) {
+    notify('The update ended the Shells', 'Shells running from before the update ended with it. Every Pane has a fresh Shell.')
+  }
   const { shown } = core.start({ atLogin: app.getLoginItemSettings().wasOpenedAtLogin })
   // Showing now, not on ready-to-show, keeps the window in step with the core.
   if (shown) showWindow(windowFor(core.state().currentSessionId!))

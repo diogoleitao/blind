@@ -84,6 +84,10 @@ const api: BlindApi = {
   },
   openableLinks: (paneId, texts) => ipcRenderer.invoke(channels.openableLinks, paneId, texts),
   openLink: (paneId, text) => ipcRenderer.send(channels.openLink, paneId, text),
+  onAskQuit: (listener) => {
+    ipcRenderer.on(channels.askQuit, (_event, asked) => listener(asked))
+  },
+  answerQuit: (confirmed) => ipcRenderer.send(channels.answerQuit, confirmed),
 }
 
 contextBridge.exposeInMainWorld('blind', api)

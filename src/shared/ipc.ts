@@ -6,6 +6,7 @@ import type { PaneRect } from '../core/layout'
 import type { PaneId, TabId } from '../core/state'
 import type { ThemeImport } from '../core/theme-import'
 import type { Theme } from '../core/themes'
+import type { QuitPrompt } from './quit-prompt'
 
 export interface TerminalSize {
   cols: number;
@@ -79,6 +80,8 @@ export const channels = {
   paste: 'clipboard:paste',
   openableLinks: 'link:openable',
   openLink: 'link:open',
+  askQuit: 'quit:ask',
+  answerQuit: 'quit:answer',
 } as const
 
 // What the preload script exposes to the renderer as `window.blind`.
@@ -159,4 +162,7 @@ export interface BlindApi {
   openableLinks(paneId: PaneId, texts: string[]): Promise<boolean[]>;
   // Opens a URL in the default browser, or a path with its default app.
   openLink(paneId: PaneId, text: string): void;
+  // Called when the window should ask whether to quit, which the listener answers with `answerQuit`.
+  onAskQuit(listener: (asked: QuitPrompt) => void): void;
+  answerQuit(confirmed: boolean): void;
 }

@@ -30,7 +30,7 @@ A rectangular region of a Tab that hosts one Shell. Panes come from splitting an
 _Avoid_: Split, Session (iTerm2's meaning)
 
 **Shell**:
-The process running inside a Pane.
+The process running inside a Pane. It keeps running after the app quits, unless the user has chosen for quitting to end it, until its Pane or Tab is closed, its Session is deleted, or the OS restarts.
 _Avoid_: Session
 
 **Program Title**:
@@ -59,7 +59,7 @@ The Pane of the Current Tab that is focused.
 _Avoid_: Active Pane
 
 **Closed Session**:
-A Session that is saved but out of the cycle. Closing a Session's window makes it a Closed Session; it can be opened again. Its Shells keep running while it is closed and once it is opened again, until it is deleted or the app quits. A Session with neither a name nor a Root directory, closed while the user has chosen to delete such Sessions, is deleted instead.
+A Session that is saved but out of the cycle. Closing a Session's window makes it a Closed Session; it can be opened again. Its Shells keep running while it is closed and once it is opened again. A Session with neither a name nor a Root directory, closed while the user has chosen to delete such Sessions, is deleted instead.
 _Avoid_: Detached, archived
 
 **Delete**:
@@ -67,7 +67,7 @@ Permanently removing a Session, open or closed, which ends its Shells. Closing a
 _Avoid_: Close (when the Session should go away)
 
 **Restore**:
-Bringing back every Session with its Tabs, Pane layout, working directories and scrollback after the app quits or the OS restarts. Shells start fresh; nothing keeps running in between.
+Bringing back every Session with its Tabs, Pane layout, working directories and scrollback after the app quits or the OS restarts. A Shell still running since the app quit carries on as it was; any other Shell starts fresh.
 _Avoid_: Resume, reattach
 
 **Login Launch**:

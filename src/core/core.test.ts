@@ -4,14 +4,20 @@ import { defaultSettings } from './config'
 import { createCore, type Effect, type PaletteResult } from './core'
 import { createControllableClock, createFakeShellHost, press } from './fakes'
 import { createInMemoryStateStore } from './in-memory-state-store'
-import type { StateStore } from './ports'
+import type { SavedScrollback, ShellFromBefore, StateStore } from './ports'
 import { idsIn, panesIn, type Session } from './state'
 import { defaultTheme } from './themes'
 
 // Passing the state store of an earlier core relaunches the app from what that core saved. A config file's text is read
-// before starting, as the app does. `atLogin` starts the app as the launch at login does.
-function startCore (stateStore: StateStore = createInMemoryStateStore(), config?: string, atLogin = false) {
-  const shellHost = createFakeShellHost()
+// before starting, as the app does. `atLogin` starts the app as the launch at login does. `shells` are the Shells the
+// app finds still running as it starts, and the scrollback saved while it was gone.
+function startCore (
+  stateStore: StateStore = createInMemoryStateStore(),
+  config?: string,
+  atLogin = false,
+  shells?: Parameters<typeof createFakeShellHost>[0]
+) {
+  const shellHost = createFakeShellHost(shells)
   const clock = createControllableClock(1_000)
   const core = createCore({ shellHost, stateStore, clock, homeDirectory: '/Users/me' })
   const effects: unknown[] = []
@@ -1811,12 +1817,50 @@ describe('Restore', () => {
 })
 
 describe('quitting', () => {
-  it('asks for confirmation, without quitting yet', () => {
-    const { core, effects } = startCore()
+  // A program as the quit confirmation names it, running in one Pane.
+  const oneVim = { program: 'vim', count: 1 }
+  const oneClaude = { program: 'claude', count: 1 }
+
+  // Sessions `api`, open, running `vim` and an idle Shell; `web`, closed, running `claude` in a Hidden Tab; and `docs`,
+  // closed, with an idle Shell.
+  function startWithPrograms (config?: string) {
+    const started = startCore(undefined, config)
+    const { core, shellHost } = started
+    const api = core.state().sessions[0].id
+    core.renameSession(api, 'api')
+    core.splitPane(api, 'vertical')
+    const [vim] = paneIdsIn(core, api)
+    shellHost.changeRunningProgram(vim, 'vim')
+    core.newSession()
+    const web = core.state().sessions[1].id
+    core.renameSession(web, 'web')
+    core.newTab(web)
+    const [, claude] = paneIdsIn(core, web)
+    shellHost.changeRunningProgram(claude, 'claude')
+    core.hideTab(web)
+    core.newSession()
+    const docs = core.state().sessions[2].id
+    core.renameSession(docs, 'docs')
+    core.closeSession(web)
+    core.closeSession(docs)
+    started.effects.length = 0
+    return { ...started, api, web, docs }
+  }
+
+  it('quits without asking when it deletes no Session, the Shells running on', () => {
+    const { core, effects } = startWithPrograms()
 
     core.quitRequested()
 
-    expect(effects).toEqual([{ type: 'confirmQuit' }])
+    expect(effects).toEqual([{ type: 'saveForQuit' }])
+  })
+
+  it('once confirmed, leaves every Shell running, Closed Sessions\' too', () => {
+    const { core, shellHost } = startWithPrograms()
+
+    core.quitConfirmed()
+
+    expect(shellHost.stopped).toEqual([])
   })
 
   it('once confirmed, writes everything pending to the state store before quitting', () => {
@@ -1835,7 +1879,22 @@ describe('quitting', () => {
     expect(calls).toEqual(['flush', 'quit'])
   })
 
-  it('asks the same confirmation for a restart, saying it is one', () => {
+  it('shows the app first when it asks while hidden, as the confirmation shows over the Current Session', () => {
+    const { core, effects, api } = startWithPrograms('{ "shell": { "onQuit": "end" } }')
+    core.hotkeyPressed()
+    effects.length = 0
+
+    core.quitRequested()
+    core.hotkeyPressed()
+
+    expect(effects).toEqual([
+      { type: 'showApp', sessionId: api },
+      { type: 'confirmQuit', endShells: true, runningClosed: [{ label: 'web', programs: [oneClaude] }] },
+      { type: 'hideApp' },
+    ])
+  })
+
+  it('always asks before a restart, which anything can ask for, saying it is one', () => {
     const { core, effects } = startCore()
 
     core.restartRequested()
@@ -1843,24 +1902,268 @@ describe('quitting', () => {
     expect(effects).toEqual([{ type: 'confirmQuit', restart: true }])
   })
 
-  it('has the confirmation name the Closed Sessions whose Shells are still running, which quitting stops', () => {
-    const { core, shellHost, effects } = startCore()
-    const api = core.state().sessions[0].id
-    core.renameSession(api, 'api')
-    core.newSession()
-    const web = core.state().sessions[1]
-    core.renameSession(web.id, 'web')
-    core.newSession()
-    core.closeSession(api)
-    core.closeSession(web.id)
-    shellHost.exit(web.tabs[0].panes[0].id)
-    effects.length = 0
+  describe('while shell.onQuit ends the Shells', () => {
+    const endShells = '{ "shell": { "onQuit": "end" } }'
 
-    core.quitRequested()
+    it('has the confirmation name the Closed Sessions running programs, with the programs quitting ends', () => {
+      const { core, effects } = startWithPrograms(endShells)
 
-    expect(effects).toEqual([{ type: 'confirmQuit', runningClosedSessions: ['api'] }])
+      core.quitRequested()
+
+      expect(effects).toEqual([
+        { type: 'confirmQuit', endShells: true, runningClosed: [{ label: 'web', programs: [oneClaude] }] },
+      ])
+    })
+
+    it('quits without asking when no Closed Session runs a program and none is deleted', () => {
+      const { core, shellHost, effects, web } = startWithPrograms(endShells)
+      shellHost.changeRunningProgram(paneIdsIn(core, web)[1], undefined)
+
+      core.quitRequested()
+
+      expect(effects).toEqual([{ type: 'saveForQuit', endShells: true }])
+    })
+
+    it('once confirmed, ends every Shell, Closed Sessions\' too', () => {
+      const { core, shellHost, api, web, docs } = startWithPrograms(endShells)
+
+      core.quitConfirmed({ endShells: true })
+
+      expect(shellHost.stopped).toEqual([...paneIdsIn(core, api), ...paneIdsIn(core, web), ...paneIdsIn(core, docs)])
+    })
+
+    it('ends every Shell on quitting unasked, e.g. when told to stop', () => {
+      const { core, shellHost } = startWithPrograms(endShells)
+
+      core.quitConfirmed()
+
+      expect(shellHost.stopped).toHaveLength(5)
+    })
+  })
+
+  describe('and ending the Shells', () => {
+    it('is offered by the Command Palette and the menu bar icon after quitting, while the Shells run on', () => {
+      const { core } = startCore()
+
+      expect(actionLabels(core).slice(-2)).toEqual(['Quit Blind', 'Quit and End Shells'])
+      expect(core.menuBar().actions.at(-1)).toEqual({ action: 'quitAndEndShells', label: 'Quit and End Shells' })
+    })
+
+    it('is offered by neither while shell.onQuit ends the Shells anyway', () => {
+      const { core } = startCore(undefined, '{ "shell": { "onQuit": "end" } }')
+
+      expect(actionLabels(core)).not.toContain('Quit and End Shells')
+      expect(core.menuBar().actions.map((action) => action.action)).not.toContain('quitAndEndShells')
+    })
+
+    it('names the programs it ends, by Session in cycle order, Open and Closed', () => {
+      const { core, effects } = startWithPrograms()
+
+      chooseAction(core, 'Quit and End Shells')
+
+      expect(effects).toEqual([
+        {
+          type: 'confirmQuit',
+          endShells: true,
+          running: [
+            { label: 'api', programs: [oneVim] },
+            { label: 'web', programs: [oneClaude] },
+          ],
+        },
+      ])
+    })
+
+    it('quits without asking when no program runs', () => {
+      const { core, effects } = startCore()
+
+      core.menuBarActionChosen('quitAndEndShells')
+
+      expect(effects).toEqual([{ type: 'saveForQuit', endShells: true }])
+    })
+
+    it('once confirmed, ends every Shell', () => {
+      const { core, shellHost } = startWithPrograms()
+      chooseAction(core, 'Quit and End Shells')
+
+      core.quitConfirmed({ endShells: true })
+
+      expect(shellHost.stopped).toHaveLength(5)
+    })
+
+    it('has no shortcut by default, and takes one from the key bindings', () => {
+      const { core, effects } = startCore()
+      const sessionId = core.state().sessions[0].id
+
+      expect(core.keyPressed(sessionId, press('q', 'KeyQ', 'meta', 'alt'))).toBe(false)
+      core.configChanged('{ "keyBindings": { "quitAndEndShells": "Cmd+Alt+Q" } }')
+      core.keyPressed(sessionId, press('q', 'KeyQ', 'meta', 'alt'))
+
+      expect(effects).toEqual([{ type: 'saveForQuit', endShells: true }])
+    })
   })
 })
+
+describe('launching with Shells still running from before the app quit', () => {
+  // Session `api`, open, with two Panes, `vim` running in the first, and Session `web`, closed, with one Pane; quit and
+  // launched again with the Shells given running, by their Panes' positions among `api`'s, then `web`'s, and those given
+  // as `exited` having run on and exited since.
+  function relaunch (live: number[], { exited = [], missed = () => [], saved = () => ({}), config }: {
+    exited?: number[];
+    missed?: (paneIds: string[]) => ShellFromBefore['missed'];
+    saved?: (paneIds: string[]) => Record<string, SavedScrollback>;
+    config?: string;
+  } = {}) {
+    const before = startCore()
+    const api = before.core.state().sessions[0].id
+    before.core.renameSession(api, 'api')
+    before.core.splitPane(api, 'vertical')
+    before.core.newSession()
+    const web = before.core.state().sessions[1].id
+    before.core.renameSession(web, 'web')
+    before.core.focusNextSession()
+    before.core.closeSession(web)
+    const paneIds = [...paneIdsIn(before.core, api), ...paneIdsIn(before.core, web)]
+    before.shellHost.changeRunningProgram(paneIds[0], 'vim')
+    before.shellHost.setTitle(paneIds[0], 'notes.md')
+    before.core.scrollbackChanged(paneIds[1], '$ ls')
+    before.core.quitConfirmed()
+    const after = startCore(before.stateStore, config, false, {
+      fromBefore: [
+        ...live.map((position) => ({ paneId: paneIds[position], missed: missed(paneIds) })),
+        ...exited.map((position) => ({ paneId: paneIds[position], missed: missed(paneIds), exited: true as const })),
+      ],
+      saved: saved(paneIds),
+    })
+    return { ...after, api, web, paneIds }
+  }
+
+  it('shows each Pane whose Shell ran on as it is, starting fresh Shells only in the others', () => {
+    const { core, shellHost, paneIds } = relaunch([0])
+
+    expect(shellHost.started.map((started) => started.paneId)).toEqual([paneIds[1]])
+    expect(shellHost.stopped).toEqual([])
+    expect(core.state().sessions.find((session) => session.name === 'api')!.tabs[0].panes[0]).toMatchObject({
+      runningProgram: 'vim',
+      programTitle: 'notes.md',
+    })
+  })
+
+  it("keeps a Closed Session's running Shells for when it's opened again, which starts none in their Panes", () => {
+    const { core, shellHost, web, paneIds } = relaunch([2])
+    shellHost.started.length = 0
+
+    core.reopenSession(web)
+
+    expect(shellHost.started).toEqual([])
+    expect(paneIdsIn(core, web)).toEqual([paneIds[2]])
+  })
+
+  it('takes what each Pane reported while the app was gone, in order', () => {
+    const { core, paneIds } = relaunch([0], {
+      missed: ([vim]) => [
+        { type: 'workingDirectoryChanged', paneId: vim, workingDirectory: '/Users/me/api' },
+        { type: 'runningProgramChanged', paneId: vim, runningProgram: 'claude' },
+        { type: 'titleChanged', paneId: vim, title: '✳ Fix the build' },
+      ],
+    })
+
+    const pane = core.state().sessions[0].tabs[0].panes.find((candidate) => candidate.id === paneIds[0])
+    expect(pane).toMatchObject({ workingDirectory: '/Users/me/api', runningProgram: 'claude', programTitle: 'Fix the build' })
+  })
+
+  it('raises the Activity Panes asked for while the app was gone, playing no sound for it', () => {
+    const { core, effects, paneIds } = relaunch([0, 2], {
+      missed: ([vim, , closed]) => [
+        { type: 'notification', paneId: vim },
+        { type: 'programStatus', paneId: closed, report: { id: 'build', state: 'done' } },
+      ].filter((report) => [vim, closed].includes(report.paneId)) as ShellFromBefore['missed'],
+      config: '{ "activity": { "ring": "always" } }',
+    })
+
+    expect(core.activitySidebarRows().flatMap((row) => (row.paneId ? [row.paneId] : []))).toEqual([paneIds[0], paneIds[2]])
+    expect(effects).not.toContainEqual(expect.objectContaining({ type: 'playActivitySound' }))
+  })
+
+  it('ends Shells running for Panes no saved Session has', () => {
+    const before = startCore()
+    before.core.quitConfirmed()
+
+    const { shellHost } = startCore(before.stateStore, undefined, false, {
+      fromBefore: [{ paneId: 'pane-99', missed: [] }],
+    })
+
+    expect(shellHost.stopped).toEqual(['pane-99'])
+  })
+
+  it('takes what a Shell that exited while the app was gone reported, starting its fresh Shell where it was last', () => {
+    const { core, shellHost, effects, paneIds } = relaunch([], {
+      exited: [0],
+      missed: ([vim]) => [
+        { type: 'workingDirectoryChanged', paneId: vim, workingDirectory: '/Users/me/api' },
+        { type: 'notification', paneId: vim },
+      ],
+      config: '{ "activity": { "ring": "always" } }',
+    })
+
+    expect(shellHost.started).toEqual([
+      { paneId: paneIds[0], workingDirectory: '/Users/me/api' },
+      { paneId: paneIds[1], workingDirectory: '/Users/me' },
+    ])
+    expect(core.state().sessions[0].tabs[0].panes[0].runningProgram).toBeUndefined()
+    expect(core.activitySidebarRows().flatMap((row) => (row.paneId ? [row.paneId] : []))).toEqual([paneIds[0]])
+    expect(effects).not.toContainEqual(expect.objectContaining({ type: 'playActivitySound' }))
+    expect(shellHost.stopped).toEqual([])
+  })
+
+  it('takes the scrollback saved while the app was gone over the older scrollback it saved itself', () => {
+    const { core, paneIds } = relaunch([], {
+      saved: ([vim, ls]) => ({
+        [vim]: { text: '$ vim', savedAt: 9_000 },
+        [ls]: { text: '$ ls -la', savedAt: 500 },
+      }),
+    })
+
+    expect(core.scrollback(paneIds[0])).toEqual({ text: '$ vim', savedAt: 9_000 })
+    expect(core.scrollback(paneIds[1])).toEqual({ text: '$ ls', savedAt: 1_000 })
+  })
+
+  describe('then losing every Shell at once', () => {
+    it("keeps every Pane, starting fresh Shells in the Open Sessions' and saying the Shells were lost", () => {
+      const { core, shellHost, effects, api, web, paneIds } = relaunch([0, 1, 2])
+      const before = core.state()
+      effects.length = 0
+
+      shellHost.lose()
+
+      expect(shellHost.started.map((started) => started.paneId)).toEqual(paneIdsIn(core, api))
+      expect(paneIdsIn(core, api)).toEqual(paneIds.slice(0, 2))
+      expect(paneIdsIn(core, web)).toEqual(paneIds.slice(2))
+      expect(core.state().sessions[0].tabs[0].panes[0].runningProgram).toBeUndefined()
+      expect(core.state().sessions.map((session) => session.status)).toEqual(before.sessions.map((session) => session.status))
+      expect(effects).toContainEqual({ type: 'shellsLost' })
+    })
+
+    it("starts a Closed Session's fresh Shells once it's opened again", () => {
+      const { core, shellHost, web, paneIds } = relaunch([0, 1, 2])
+      shellHost.lose()
+      shellHost.started.length = 0
+
+      core.reopenSession(web)
+
+      expect(shellHost.started.map((started) => started.paneId)).toEqual([paneIds[2]])
+    })
+  })
+})
+
+// The ids of the Session's Panes, its Tabs' in order.
+function paneIdsIn (core: ReturnType<typeof startCore>['core'], sessionId: string) {
+  return core.state().sessions.find((session) => session.id === sessionId)!.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id))
+}
+
+// The app actions the Command Palette offers, by label, in order.
+function actionLabels (core: ReturnType<typeof startCore>['core']) {
+  return core.paletteResults('').flatMap((result) => (result.type === 'action' ? [result.label] : []))
+}
 
 describe('the config file', () => {
   // Sessions `b`, then `a`, so the cycle order shows whether `created` took effect.
@@ -1884,7 +2187,7 @@ describe('the config file', () => {
     core.configChanged(`{
       // How Sessions are cycled.
       "session": { "cycleOrder": /* by creation */ "created" },
-      "shell": "/opt/homebrew/bin/fish // not a comment",
+      "shell": { "program": "/opt/homebrew/bin/fish // not a comment" },
     }`)
 
     expect(names(core)).toEqual(['b', 'a'])
@@ -1971,12 +2274,12 @@ describe('the config file', () => {
   })
 })
 
-describe('the shell setting', () => {
-  it('starts restored Shells with the configured shell', () => {
+describe('the shell program setting', () => {
+  it('starts restored Shells with the configured program', () => {
     const before = startCore()
     before.core.newSession()
 
-    const { shellHost } = startCore(before.stateStore, '{ "shell": "/opt/homebrew/bin/fish" }')
+    const { shellHost } = startCore(before.stateStore, '{ "shell": { "program": "/opt/homebrew/bin/fish" } }')
 
     expect(shellHost.started.map((started) => started.shell)).toEqual([
       '/opt/homebrew/bin/fish',
@@ -1984,11 +2287,11 @@ describe('the shell setting', () => {
     ])
   })
 
-  it('starts new Shells with the shell configured at the time, leaving running ones alone', () => {
+  it('starts new Shells with the program configured at the time, leaving running ones alone', () => {
     const { core, shellHost } = startCore()
     const sessionId = core.state().sessions[0].id
 
-    core.configChanged('{ "shell": "/bin/bash" }')
+    core.configChanged('{ "shell": { "program": "/bin/bash" } }')
     core.newTab(sessionId)
     core.configChanged(undefined)
     core.splitPane(sessionId, 'vertical')
@@ -1997,16 +2300,46 @@ describe('the shell setting', () => {
     expect(shellHost.stopped).toEqual([])
   })
 
-  it("rejects a shell that isn't a non-empty string, starting the login shell instead", () => {
-    const { core, shellHost, effects } = startCore(undefined, '{ "shell": " " }')
+  it("rejects a program that isn't a non-empty string, starting the login shell instead", () => {
+    const { core, shellHost, effects } = startCore(undefined, '{ "shell": { "program": " " } }')
 
-    core.configChanged('{ "shell": 42 }')
+    core.configChanged('{ "shell": { "program": 42 } }')
 
     expect(shellHost.started[0].shell).toBeUndefined()
     expect(effects).toEqual([
-      { type: 'settingsRejected', settings: ['shell'] },
-      { type: 'settingsRejected', settings: ['shell'] },
+      { type: 'settingsRejected', settings: ['shell.program'] },
+      { type: 'settingsRejected', settings: ['shell.program'] },
     ])
+  })
+
+  it('rejects the shell setting given as a program alone, as it was before it held onQuit too', () => {
+    const { shellHost, core, effects } = startCore(undefined, '{ "shell": "/bin/bash" }')
+
+    expect(shellHost.started[0].shell).toBeUndefined()
+    expect(core.settings().shell.onQuit).toBe('keepRunning')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['shell'] }])
+  })
+})
+
+describe('the shell onQuit setting', () => {
+  it('keeps Shells running after the app quits by default', () => {
+    const { core } = startCore()
+
+    expect(core.settings().shell.onQuit).toBe('keepRunning')
+  })
+
+  it('takes end', () => {
+    const { core, effects } = startCore(undefined, '{ "shell": { "onQuit": "end" } }')
+
+    expect(core.settings().shell.onQuit).toBe('end')
+    expect(effects).toEqual([])
+  })
+
+  it('rejects anything else, keeping Shells running', () => {
+    const { core, effects } = startCore(undefined, '{ "shell": { "onQuit": "stop" } }')
+
+    expect(core.settings().shell.onQuit).toBe('keepRunning')
+    expect(effects).toEqual([{ type: 'settingsRejected', settings: ['shell.onQuit'] }])
   })
 })
 
@@ -3028,6 +3361,32 @@ describe('deleting a Session', () => {
     expect(shellHost.stopped).toEqual([])
   })
 
+  it("names the programs deleting ends, Hidden Tabs' too, each once in the order of its Panes, counting repeats", () => {
+    const { core, shellHost, effects, sessionId, left, topRight, bottomRight } = startWithThreePanes()
+    core.newTab(sessionId)
+    const lastTab = core.state().sessions[0].tabs[1]
+    core.hideTab(sessionId)
+    shellHost.changeRunningProgram(left, 'vim')
+    shellHost.changeRunningProgram(topRight, 'claude')
+    shellHost.changeRunningProgram(bottomRight, 'vim')
+    shellHost.changeRunningProgram(lastTab.panes[0].id, 'less')
+    effects.length = 0
+
+    chooseAction(core, 'Delete Session')
+
+    expect(effects).toEqual([
+      {
+        type: 'confirmDelete',
+        sessionId,
+        programs: [
+          { program: 'vim', count: 2 },
+          { program: 'claude', count: 1 },
+          { program: 'less', count: 1 },
+        ],
+      },
+    ])
+  })
+
   it('once confirmed, removes an Open Session for good, stopping its Shells and closing its window', () => {
     const before = startWithThreePanes()
     const { core, shellHost, effects, sessionId, left, topRight, bottomRight } = before
@@ -3366,12 +3725,21 @@ describe('the setting for closing Sessions with neither a name nor a Root direct
       expect(after.core.state().currentSessionId).toBe(web)
     })
 
-    it('has the quit confirmation name the Sessions quitting deletes, by their labels', () => {
-      const { core, effects } = startDeleting()
+    it('has the quit confirmation name the Sessions quitting deletes, by their labels, with the programs it ends', () => {
+      const { core, shellHost, effects, paneIds } = startDeleting()
+      shellHost.changeRunningProgram(paneIds[1], 'vim')
 
       core.quitRequested()
 
-      expect(effects).toEqual([{ type: 'confirmQuit', sessionsToDelete: ['Session 1 (~)', 'Session 2 (~)'] }])
+      expect(effects).toEqual([
+        {
+          type: 'confirmQuit',
+          deleted: [
+            { label: 'Session 1 (~)', programs: [] },
+            { label: 'Session 2 (~)', programs: [{ program: 'vim', count: 1 }] },
+          ],
+        },
+      ])
     })
 
     it('has the restart confirmation name the Sessions restarting deletes', () => {
@@ -3380,18 +3748,34 @@ describe('the setting for closing Sessions with neither a name nor a Root direct
       core.restartRequested()
 
       expect(effects).toEqual([
-        { type: 'confirmQuit', restart: true, sessionsToDelete: ['Session 1 (~)', 'Session 2 (~)'] },
+        {
+          type: 'confirmQuit',
+          restart: true,
+          deleted: [
+            { label: 'Session 1 (~)', programs: [] },
+            { label: 'Session 2 (~)', programs: [] },
+          ],
+        },
       ])
     })
 
-    it('leaves the quit confirmation as usual when quitting deletes none', () => {
+    it('quits without asking when quitting deletes none', () => {
       const { core, effects, sessionId, other } = startDeleting()
       core.renameSession(sessionId, 'api')
       core.renameSession(other, 'web')
 
       core.quitRequested()
 
-      expect(effects).toEqual([{ type: 'confirmQuit' }])
+      expect(effects).toEqual([{ type: 'saveForQuit' }])
+    })
+
+    it('on quitting, ends the Shells of the Sessions it deletes alone', () => {
+      const { core, shellHost, other, paneIds } = startDeleting()
+      core.renameSession(other, 'web')
+
+      core.quitConfirmed()
+
+      expect(shellHost.stopped).toEqual(paneIds)
     })
 
     it('makes a named one a Closed Session as usual', () => {
@@ -4035,6 +4419,7 @@ describe('the Command Palette', () => {
       'action Reset Command Palette Position',
       'action Open Settings',
       'action Quit Blind',
+      'action Quit and End Shells',
     ])
   })
 
@@ -4207,7 +4592,7 @@ describe('the Command Palette', () => {
     expect(core.state().sessions).toHaveLength(5)
 
     choose('Quit Blind')
-    expect(effects.at(-1)).toEqual({ type: 'confirmQuit' })
+    expect(effects.at(-1)).toEqual({ type: 'saveForQuit' })
   })
 })
 
@@ -4287,19 +4672,24 @@ describe("the menu bar icon's menu", () => {
     expect(effects).toEqual([{ type: 'showApp', sessionId: session.id }])
   })
 
-  it('offers New Session, Open Settings and Quit Blind after the Sessions, under their Command Palette labels', () => {
+  it('offers New Session, Open Settings, Quit Blind and Quit and End Shells after the Sessions, under their Command Palette labels', () => {
     const { core } = startCore()
 
-    expect(core.menuBar().actions.map((action) => action.label)).toEqual(['New Session', 'Open Settings', 'Quit Blind'])
+    expect(core.menuBar().actions.map((action) => action.label)).toEqual([
+      'New Session',
+      'Open Settings',
+      'Quit Blind',
+      'Quit and End Shells',
+    ])
   })
 
-  it('opens the settings and asks before quitting', () => {
+  it('opens the settings and quits', () => {
     const { core, effects } = startCore()
 
     core.menuBarActionChosen('openSettings')
     core.menuBarActionChosen('quit')
 
-    expect(effects).toEqual([{ type: 'openSettings' }, { type: 'confirmQuit' }])
+    expect(effects).toEqual([{ type: 'openSettings' }, { type: 'saveForQuit' }])
   })
 })
 

@@ -13,7 +13,7 @@ import { type ActivitySidebarRow, movedSelection, selectionAfter } from '../core
 import { isNotification, notificationOscs, programStatus, programStatusSupported } from '../core/attention'
 import { mixColours, withOpacity } from '../core/colours'
 import { defaultSettings } from '../core/config'
-import type { KindMarker, PaletteResult } from '../core/core'
+import type { KindMarker, PaletteResult, QuitSession } from '../core/core'
 import type { KeyPress } from '../core/key-bindings'
 import type { PaneRect } from '../core/layout'
 import { findLinks } from '../core/links'
@@ -29,6 +29,7 @@ import {
 } from '../core/theme-import'
 import { type Colour, defaultTheme, type Theme } from '../core/themes'
 import type { BlindApi, PalettePrompt, SessionView, WindowSettings } from '../shared/ipc'
+import { programLabel, type QuitPrompt, quitPromptText, quitSessionSummary } from '../shared/quit-prompt'
 
 declare global {
   interface Window {
@@ -1126,7 +1127,112 @@ activitySidebar.addEventListener('focusout', (event) => {
 })
 window.addEventListener('blur', closeActivitySidebarAtOnce)
 
+const quitDialog = document.getElementById('quit-dialog')!
+const quitBackdrop = document.getElementById('quit-backdrop')!
+
+// A Session the quit confirmation names: with programs, a section that opens to list them, open from the start when
+// it's the only Session named; without, its label alone.
+function quitSessionElement (session: QuitSession, open: boolean) {
+  if (session.programs.length === 0) {
+    const element = document.createElement('div')
+    element.className = 'quit-session'
+    element.textContent = session.label
+    return element
+  }
+  const element = document.createElement('details')
+  element.className = 'quit-session'
+  element.open = open
+  const summary = document.createElement('summary')
+  summary.textContent = quitSessionSummary(session)
+  const programs = document.createElement('ul')
+  programs.replaceChildren(
+    ...session.programs.map((program) => {
+      const item = document.createElement('li')
+      item.className = 'quit-program'
+      item.textContent = programLabel(program)
+      return item
+    })
+  )
+  element.append(summary, programs)
+  return element
+}
+
+// The keys that answer the confirmation, each also clickable: Return confirms and Escape cancels.
+function quitKeys (confirm: string) {
+  const keys = document.createElement('div')
+  keys.className = 'import-keys'
+  for (const [key, label, confirmed] of [
+    ['⏎', confirm, true],
+    ['esc', 'Cancel', false],
+  ] as const) {
+    const button = document.createElement('span')
+    button.className = 'import-key'
+    const kbd = document.createElement('kbd')
+    kbd.textContent = key
+    button.append(kbd, label)
+    button.addEventListener('mousedown', (event) => {
+      event.preventDefault()
+      answerQuit(confirmed)
+    })
+    keys.append(button)
+  }
+  return keys
+}
+
+// Takes the keyboard, over everything else in the window, until answered.
+function openQuitDialog (asked: QuitPrompt) {
+  dismissPalette()
+  closeActivitySidebar()
+  closeFind()
+  const { title, detail, lists, confirm } = quitPromptText(asked)
+  const titleElement = document.createElement('div')
+  titleElement.className = 'quit-title'
+  titleElement.textContent = title
+  const detailElement = document.createElement('div')
+  detailElement.className = 'quit-detail'
+  detailElement.textContent = detail
+  const onlyOne = lists.flatMap((list) => list.sessions).length === 1
+  const listsElement = document.createElement('div')
+  listsElement.className = 'quit-lists'
+  for (const { heading, sessions } of lists) {
+    if (heading) {
+      const headingElement = document.createElement('div')
+      headingElement.className = 'quit-heading'
+      headingElement.textContent = heading
+      listsElement.append(headingElement)
+    }
+    listsElement.append(...sessions.map((session) => quitSessionElement(session, onlyOne)))
+  }
+  quitDialog.replaceChildren(titleElement, detailElement, listsElement, quitKeys(confirm))
+  quitDialog.hidden = false
+  quitBackdrop.hidden = false
+  quitDialog.focus()
+}
+
+// The focused Pane's terminal takes the keyboard back once the quit is cancelled.
+function answerQuit (confirmed: boolean) {
+  if (quitDialog.hidden) return
+  quitDialog.hidden = true
+  quitBackdrop.hidden = true
+  if (!confirmed && focusedPaneId) terminals.get(focusedPaneId)?.terminal.focus()
+  blind.answerQuit(confirmed)
+}
+
+// Return confirms, wherever the keyboard is within the dialog, a section's line included.
+quitDialog.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') answerQuit(true)
+  else if (event.key === 'Escape') answerQuit(false)
+  else return
+  event.preventDefault()
+})
+// Clicks inside keep the keyboard with the dialog; the backdrop takes every other click in the window.
+quitDialog.addEventListener('mousedown', (event) => {
+  if (event.target === quitDialog) event.preventDefault()
+})
+quitBackdrop.addEventListener('mousedown', (event) => event.preventDefault())
+
 applyChromeColours(theme)
+blind.onAskQuit(openQuitDialog)
 blind.onWindowSettings(applyWindowSettings)
 blind.onShowSessionBanner(showSessionBanner)
 blind.onTheme(applyTheme)

@@ -110,6 +110,11 @@ const paneScrollBars = ['none', 'visible'] as const
 // Whether each Pane shows a scroll bar, or leaves its room to the terminal.
 export type PaneScrollBar = (typeof paneScrollBars)[number]
 
+const shellOnQuits = ['keepRunning', 'end'] as const
+
+// What the app quitting does to the Shells: leaves them running, for the app to show again as it launches, or ends them.
+export type ShellOnQuit = (typeof shellOnQuits)[number]
+
 const backgroundEffects = ['blur', 'none'] as const
 
 // What a Session window's background shows behind it: a blur of what's there, or what's there as good as unblurred.
@@ -146,8 +151,11 @@ export interface Settings {
     padding: PanePadding;
     scrollBar: PaneScrollBar;
   };
-  // The program each new Pane's Shell runs; absent for the user's login shell.
-  shell?: string;
+  shell: {
+    // The program each new Pane's Shell runs; absent for the user's login shell.
+    program?: string;
+    onQuit: ShellOnQuit;
+  };
   loginLaunch: {
     start: LoginLaunchStart;
     withNoOpenSessions: LoginLaunchWithNoOpenSessions;
@@ -200,6 +208,9 @@ export const defaultSettings: Settings = {
     startDirectory: 'current',
     padding: 'padded',
     scrollBar: 'none',
+  },
+  shell: {
+    onQuit: 'keepRunning',
   },
   loginLaunch: {
     start: 'hidden',
@@ -291,7 +302,10 @@ const settingParsers = (themeNames: readonly string[]): SettingParsers<Settings>
     padding: oneOf(panePaddings),
     scrollBar: oneOf(paneScrollBars),
   }),
-  shell: (value) => (typeof value === 'string' && value.trim() !== '' ? value : invalid),
+  shell: groupOf(defaultSettings.shell, {
+    program: (value) => (typeof value === 'string' && value.trim() !== '' ? value : invalid),
+    onQuit: oneOf(shellOnQuits),
+  }),
   loginLaunch: groupOf(defaultSettings.loginLaunch, {
     start: oneOf(loginLaunchStarts),
     withNoOpenSessions: oneOf(loginLaunchesWithNoOpenSessions),
@@ -440,9 +454,22 @@ export const configSchema = {
       },
     },
     shell: {
-      type: 'string',
-      minLength: 1,
-      description: "The program each new Pane's Shell runs, as a login shell. Defaults to your login shell ($SHELL).",
+      description: "The program each Pane's Shell runs, and what quitting Blind does to the Shells.",
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        program: {
+          type: 'string',
+          minLength: 1,
+          description: "The program each new Pane's Shell runs, as a login shell. Defaults to your login shell ($SHELL).",
+        },
+        onQuit: {
+          description:
+            "What quitting Blind does to the Shells: keepRunning leaves every Shell running, and Blind shows each as it was the next time it starts, unless the OS restarts meanwhile; the Command Palette's and the Menu Bar Icon's Quit and End Shells ends them. end ends every Shell, and Sessions come back with fresh Shells. A change takes effect at the next quit.",
+          enum: shellOnQuits,
+          default: defaultSettings.shell.onQuit,
+        },
+      },
     },
     loginLaunch: {
       description: 'How Blind starts on its own when you log in to macOS.',
