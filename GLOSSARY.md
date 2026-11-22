@@ -62,6 +62,10 @@ _Avoid_: Active Pane
 A Session that is saved but out of the cycle. Closing a Session's window makes it a Closed Session; it can be opened again. Its Shells keep running while it is closed and once it is opened again. A Session with neither a name nor a Root directory, closed while the user has chosen to delete such Sessions, is deleted instead.
 _Avoid_: Detached, archived
 
+**Windowless Pane**:
+A Pane whose Shell runs on while no window shows it: a Closed Session's, or any Pane's once the app has quit. Its program can still raise Activity, and everything it prints is kept, so the Pane shows as it is when a window shows it again.
+_Avoid_: Detached Pane, background Pane, hidden Pane
+
 **Delete**:
 Permanently removing a Session, open or closed, which ends its Shells. Closing a window never deletes a Session with a name or a Root directory; one with neither is deleted on closing when the user has chosen so.
 _Avoid_: Close (when the Session should go away)
