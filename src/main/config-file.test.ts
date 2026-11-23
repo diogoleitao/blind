@@ -79,4 +79,10 @@ describe('the schema written next to the config file', () => {
     })
     expect(defaults('background')).toEqual({ transparency: 25, effect: 'blur', blurRadius: 15 })
   })
+
+  it('lists Cmd+Right and Cmd+Left as the default shortcuts for the next and previous Tab', () => {
+    const { properties } = writtenSchema().properties.keyBindings
+    expect(properties.nextTab.default).toBe('Cmd+Right')
+    expect(properties.previousTab.default).toBe('Cmd+Left')
+  })
 })

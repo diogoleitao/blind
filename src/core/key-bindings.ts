@@ -27,7 +27,8 @@ type TabNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
 export type BoundAction = PaletteAction | 'openCommandPalette' | 'copy' | 'paste' | `focusTab${TabNumber}`
 
 // iTerm2's shortcuts, plus Cmd+K for the Command Palette, Cmd+Backtick for cycling Sessions, Cmd+B for the Activity
-// Sidebar, Cmd+H for hiding a Tab and Cmd+Shift+K for clearing scrollback. Null leaves an action unbound.
+// Sidebar, Cmd+H for hiding a Tab and Cmd+Shift+K for clearing scrollback. Cmd+Right and Cmd+Left move to the next and
+// previous Tab, leaving Cmd+Shift+] and Cmd+Shift+[ unbound. Null leaves an action unbound.
 export const defaultKeyBindings: Record<BoundAction, string | null> = {
   openCommandPalette: 'Cmd+K',
   newSession: 'Cmd+N',
@@ -45,8 +46,8 @@ export const defaultKeyBindings: Record<BoundAction, string | null> = {
   closePane: 'Cmd+W',
   nextSession: 'Cmd+`',
   previousSession: 'Cmd+Shift+`',
-  nextTab: 'Cmd+Shift+]',
-  previousTab: 'Cmd+Shift+[',
+  nextTab: 'Cmd+Right',
+  previousTab: 'Cmd+Left',
   nextPane: 'Cmd+]',
   previousPane: 'Cmd+[',
   focusPaneLeft: 'Cmd+Alt+Left',

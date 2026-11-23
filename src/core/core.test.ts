@@ -647,9 +647,9 @@ describe('key bindings', () => {
     expect(session().tabs).toHaveLength(2)
     core.keyPressed(sessionId, press('1', 'Digit1', 'meta'))
     expect(session().focusedTabId).toBe(session().tabs[0].id)
-    core.keyPressed(sessionId, press('}', 'BracketRight', 'meta', 'shift'))
+    core.keyPressed(sessionId, press('ArrowRight', 'ArrowRight', 'meta'))
     expect(session().focusedTabId).toBe(session().tabs[1].id)
-    core.keyPressed(sessionId, press('{', 'BracketLeft', 'meta', 'shift'))
+    core.keyPressed(sessionId, press('ArrowLeft', 'ArrowLeft', 'meta'))
     expect(session().focusedTabId).toBe(session().tabs[0].id)
     core.keyPressed(sessionId, press('d', 'KeyD', 'meta'))
     expect(tab().layout).toMatchObject({ type: 'split', direction: 'vertical' })
@@ -671,6 +671,40 @@ describe('key bindings', () => {
     expect(core.state().currentSessionId).not.toBe(sessionId)
     // A new Session and the two presses each swap a Session in, and each press shows the Session Banner.
     expect(effects).toHaveLength(5)
+  })
+
+  it('move to the shown Tab to the right with Cmd+Right and to the left with Cmd+Left, wrapping around at the ends and passing over Hidden Tabs', () => {
+    const { core } = startCore()
+    const sessionId = core.state().sessions[0].id
+    const session = () => core.state().sessions[0]
+    core.keyPressed(sessionId, press('t', 'KeyT', 'meta'))
+    core.keyPressed(sessionId, press('t', 'KeyT', 'meta'))
+    const [a, b, c] = session().tabs.map((tab) => tab.id)
+
+    expect(core.keyPressed(sessionId, press('ArrowRight', 'ArrowRight', 'meta'))).toBe(true)
+    expect(session().focusedTabId).toBe(a)
+    expect(core.keyPressed(sessionId, press('ArrowLeft', 'ArrowLeft', 'meta'))).toBe(true)
+    expect(session().focusedTabId).toBe(c)
+    core.keyPressed(sessionId, press('ArrowLeft', 'ArrowLeft', 'meta'))
+    expect(session().focusedTabId).toBe(b)
+
+    core.hideTab(sessionId)
+    core.keyPressed(sessionId, press('ArrowLeft', 'ArrowLeft', 'meta'))
+    expect(session().focusedTabId).toBe(a)
+    core.keyPressed(sessionId, press('ArrowRight', 'ArrowRight', 'meta'))
+    expect(session().focusedTabId).toBe(c)
+  })
+
+  it('leave Cmd+Shift+] and Cmd+Shift+[ unbound by default', () => {
+    const { core } = startCore()
+    const sessionId = core.state().sessions[0].id
+    const session = () => core.state().sessions[0]
+    core.keyPressed(sessionId, press('t', 'KeyT', 'meta'))
+    const focused = session().focusedTabId
+
+    expect(core.keyPressed(sessionId, press('}', 'BracketRight', 'meta', 'shift'))).toBe(false)
+    expect(core.keyPressed(sessionId, press('{', 'BracketLeft', 'meta', 'shift'))).toBe(false)
+    expect(session().focusedTabId).toBe(focused)
   })
 
   it("leave every other key to the Pane's terminal", () => {
