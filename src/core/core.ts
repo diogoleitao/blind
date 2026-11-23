@@ -107,6 +107,8 @@ export type Effect =
   // Asks the user whether to delete the Session, answered with `deleteConfirmed`, naming the programs deleting ends, if
   // any.
   | { type: 'confirmDelete'; sessionId: SessionId; programs?: RunningProgram[] }
+  // Asks the user whether to close the Pane, naming the program closing it ends, answered with `closePaneConfirmed`.
+  | { type: 'confirmClosePane'; paneId: PaneId; program: string }
   // Asks the user for the title of a Tab in the Session, offering `suggestion`, answered with `renameTab`.
   | { type: 'askTabTitle'; sessionId: SessionId; tabId: TabId; suggestion: string }
   // Opens the config file for editing.
@@ -389,8 +391,11 @@ export interface Core {
   // Splits the focused Pane in two, starting the new half's Shell in the directory the pane.startDirectory setting
   // picks, and focuses it.
   splitPane(sessionId: SessionId, direction: SplitDirection): void;
-  // Closes the focused Pane and stops its Shell, following the same chain as the Shell exiting.
+  // Closes the focused Pane and stops its Shell, following the same chain as the Shell exiting. A Pane whose Shell runs a
+  // program asks for confirmation first.
   closePane(sessionId: SessionId): void;
+  // Closes the Pane and stops its Shell, as `closePane` does without asking.
+  closePaneConfirmed(paneId: PaneId): void;
   // Both move through the focused Tab's Panes in layout order, wrapping around between the first and last.
   focusPreviousPane(sessionId: SessionId): void;
   focusNextPane(sessionId: SessionId): void;
@@ -950,16 +955,26 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     return session.tabs.flatMap((tab) => tab.panes.map((pane) => pane.id))
   }
 
+  // The program the Pane's Shell runs, if its Shell is still running. A Shell idle at its prompt runs none.
+  function programRunningIn (pane: Pane) {
+    return runningShells.has(pane.id) ? pane.runningProgram : undefined
+  }
+
   // The programs running in the Session's Panes, Hidden Tabs' included, each once in the order of the Panes it first runs
-  // in. A Shell idle at its prompt runs none.
+  // in.
   function programsOf (session: Session): RunningProgram[] {
     const counts = new Map<string, number>()
     for (const pane of session.tabs.flatMap((tab) => tab.panes)) {
-      if (pane.runningProgram !== undefined && runningShells.has(pane.id)) {
-        counts.set(pane.runningProgram, (counts.get(pane.runningProgram) ?? 0) + 1)
-      }
+      const program = programRunningIn(pane)
+      if (program !== undefined) counts.set(program, (counts.get(program) ?? 0) + 1)
     }
     return [...counts].map(([program, count]) => ({ program, count }))
+  }
+
+  // Removes the Pane from its Tab and stops its Shell, following the same chain as the Shell exiting.
+  function closePaneNow (paneId: PaneId) {
+    removePaneFromSession(paneId)
+    stopShell(paneId)
   }
 
   // Whether closing the Session deletes it rather than making it a Closed Session, as the setting says for Sessions with
@@ -1705,8 +1720,12 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     closePane: command((sessionId) => {
       const tab = focusedTabOf(sessionId)
       if (!tab) return
-      removePaneFromSession(tab.focusedPaneId)
-      stopShell(tab.focusedPaneId)
+      const program = programRunningIn(focusedPane(tab))
+      if (program !== undefined) return emit({ type: 'confirmClosePane', paneId: tab.focusedPaneId, program })
+      closePaneNow(tab.focusedPaneId)
+    }),
+    closePaneConfirmed: command((paneId) => {
+      if (findPane(paneId)) closePaneNow(paneId)
     }),
     focusPreviousPane: command((sessionId) => focusPaneBy(sessionId, -1)),
     focusNextPane: command((sessionId) => focusPaneBy(sessionId, 1)),

@@ -1131,6 +1131,78 @@ describe('closing a Pane', () => {
 
     expect(announced).toEqual([])
   })
+
+  describe('running a program', () => {
+    it('asks for confirmation naming the program, leaving the Pane and its Shell as they were', () => {
+      const { core, shellHost, effects, sessionId, bottomRight } = startWithThreePanes()
+      shellHost.changeRunningProgram(bottomRight, 'vim')
+      const before = core.state()
+      effects.length = 0
+
+      core.closePane(sessionId)
+
+      expect(effects).toEqual([{ type: 'confirmClosePane', paneId: bottomRight, program: 'vim' }])
+      expect(core.state()).toBe(before)
+      expect(shellHost.stopped).toEqual([])
+    })
+
+    it('closes without asking once the program stops and its Shell is back at its prompt', () => {
+      const { core, shellHost, effects, sessionId, bottomRight } = startWithThreePanes()
+      shellHost.changeRunningProgram(bottomRight, 'vim')
+      shellHost.changeRunningProgram(bottomRight, undefined)
+      effects.length = 0
+
+      core.closePane(sessionId)
+
+      expect(effects).toEqual([])
+      expect(shellHost.stopped).toEqual([bottomRight])
+    })
+
+    it('once confirmed, closes the Pane and stops its Shell', () => {
+      const { core, shellHost, sessionId, tabId, left, topRight, bottomRight } = startWithThreePanes()
+      shellHost.changeRunningProgram(bottomRight, 'vim')
+      core.closePane(sessionId)
+
+      core.closePaneConfirmed(bottomRight)
+
+      expect(shellHost.stopped).toEqual([bottomRight])
+      expect(core.paneRects(tabId)).toEqual([
+        { paneId: left, x: 0, y: 0, width: 0.5, height: 1 },
+        { paneId: topRight, x: 0.5, y: 0, width: 0.5, height: 1 },
+      ])
+    })
+
+    it('as the last Pane of a Tab, asks the same way, and once confirmed closes the Tab', () => {
+      const { core, shellHost, effects } = startCore()
+      const sessionId = core.state().sessions[0].id
+      core.newTab(sessionId)
+      const [first, last] = core.state().sessions[0].tabs
+      const pane = last.panes[0].id
+      shellHost.changeRunningProgram(pane, 'claude')
+      effects.length = 0
+
+      core.closePane(sessionId)
+      expect(effects).toEqual([{ type: 'confirmClosePane', paneId: pane, program: 'claude' }])
+      expect(core.state().sessions[0].tabs.map((tab) => tab.id)).toEqual([first.id, last.id])
+
+      core.closePaneConfirmed(pane)
+      expect(core.state().sessions[0].tabs.map((tab) => tab.id)).toEqual([first.id])
+      expect(shellHost.stopped).toEqual([pane])
+    })
+
+    it('once confirmed after its Shell exited and took the Pane with it, does nothing more', () => {
+      const { core, shellHost, sessionId, bottomRight } = startWithThreePanes()
+      shellHost.changeRunningProgram(bottomRight, 'vim')
+      core.closePane(sessionId)
+      shellHost.exit(bottomRight)
+      const before = core.state()
+
+      core.closePaneConfirmed(bottomRight)
+
+      expect(core.state()).toBe(before)
+      expect(shellHost.stopped).toEqual([])
+    })
+  })
 })
 
 describe('switching Tabs', () => {

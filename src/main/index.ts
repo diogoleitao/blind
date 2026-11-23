@@ -246,6 +246,7 @@ app.whenReady().then(async () => {
     if (effect.type === 'saveForQuit') quitUnasked(effect)
     if (effect.type === 'shellsLost') shellsLost()
     if (effect.type === 'confirmDelete') confirmDelete(effect)
+    if (effect.type === 'confirmClosePane') confirmClosePane(effect)
     if (effect.type === 'askSessionName' || effect.type === 'askTabTitle') {
       windows.get(effect.sessionId)?.webContents.send(channels.promptPalette, effect)
     }
@@ -469,6 +470,19 @@ app.whenReady().then(async () => {
       cancelId: 1,
     })
     if (response === 0) core.deleteConfirmed(sessionId)
+  }
+
+  // Like the delete confirmation, Return closes and Escape cancels.
+  async function confirmClosePane ({ paneId, program }: Extract<Effect, { type: 'confirmClosePane' }>) {
+    const { response } = await ask({
+      type: 'warning',
+      message: 'Close Pane?',
+      detail: `It ends ${program}.`,
+      buttons: ['Close', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (response === 0) core.closePaneConfirmed(paneId)
   }
 
   // Blurs what's behind a Session window as the settings say, through the native addon. `none` sets the lightest blur
