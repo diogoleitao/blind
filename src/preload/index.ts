@@ -65,6 +65,10 @@ const api: BlindApi = {
   },
   searchActivitySounds: (query) => ipcRenderer.invoke(channels.searchActivitySounds, query),
   previewActivitySound: (sound) => ipcRenderer.send(channels.previewActivitySound, sound),
+  onPickBuild: (listener) => {
+    ipcRenderer.on(channels.pickBuild, () => listener())
+  },
+  searchBuild: (query) => ipcRenderer.invoke(channels.searchBuild, query),
   onShowThemeImport: (listener) => {
     ipcRenderer.on(channels.showThemeImport, (_event, themeImport) => listener(themeImport))
   },
@@ -79,6 +83,9 @@ const api: BlindApi = {
     ipcRenderer.on(channels.copy, () => listener())
   },
   copyText: (text) => ipcRenderer.send(channels.copyText, text),
+  onShowCopyBanner: (listener) => {
+    ipcRenderer.on(channels.showCopyBanner, () => listener())
+  },
   onPaste: (listener) => {
     ipcRenderer.on(channels.paste, (_event, text) => listener(text))
   },

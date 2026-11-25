@@ -74,6 +74,10 @@ _Avoid_: Close (when the Session should go away)
 Bringing back every Session with its Tabs, Pane layout, working directories and scrollback after the app quits or the OS restarts. A Shell still running since the app quit carries on as it was; any other Shell starts fresh.
 _Avoid_: Resume, reattach
 
+**Build**:
+The version of Blind, and the commit, a running copy of Blind was made from. Blind Spot has a Build of its own, which can be older than the app's.
+_Avoid_: Release, About, build info
+
 **Login Launch**:
 The app starting on its own when the user logs in to macOS, hidden until the Hotkey shows it unless the user has chosen for it to start shown.
 _Avoid_: Autostart, startup, launch at login
@@ -84,9 +88,15 @@ _Avoid_: Autostart, startup, launch at login
 The global shortcut that shows or hides the app, floating above every other app's windows, fullscreen ones included, but beneath the system's own overlays and the launchers the user summons over it. When shown, exactly one Session is visible: the most recently used one.
 _Avoid_: Hotkey window, quake mode, visor
 
-**Session Banner**:
-A brief label naming the Session that cycling has just made the Current Session, shown in the middle of its window.
+**Banner**:
+A brief label shown in the middle of a Session's window, which then fades.
 _Avoid_: Toast, HUD, flash, OSD
+
+**Session Banner**:
+The Banner naming the Session that cycling has just made the Current Session.
+
+**Copy Banner**:
+The Banner confirming what the Command Palette has just copied.
 
 **Command Palette**:
 The searchable dialog for jumping to any Session, Tab or Pane and for running any app action.

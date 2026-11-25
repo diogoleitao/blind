@@ -71,12 +71,15 @@ export const channels = {
   pickActivitySound: 'activitySound:pick',
   searchActivitySounds: 'activitySound:search',
   previewActivitySound: 'activitySound:preview',
+  pickBuild: 'build:pick',
+  searchBuild: 'build:search',
   showThemeImport: 'themeImport:show',
   saveThemeImport: 'themeImport:save',
   findInPane: 'pane:find',
   clearScrollback: 'pane:clear',
   copy: 'clipboard:copy',
   copyText: 'clipboard:write',
+  showCopyBanner: 'clipboard:banner',
   paste: 'clipboard:paste',
   openableLinks: 'link:openable',
   openLink: 'link:open',
@@ -143,6 +146,9 @@ export interface BlindApi {
   searchActivitySounds(query: string): Promise<PaletteResult[]>;
   // The Activity sound the Command Palette's selection moved to.
   previewActivitySound(sound: ActivitySound): void;
+  // Called when the Command Palette should list the Build instead of searching.
+  onPickBuild(listener: () => void): void;
+  searchBuild(query: string): Promise<PaletteResult[]>;
   // Called when the Command Palette should show the Theme file an Import makes, to be saved, or why it was refused.
   onShowThemeImport(listener: (themeImport: ThemeImport) => void): void;
   // Saves the Theme file the Command Palette showed.
@@ -155,6 +161,8 @@ export interface BlindApi {
   onCopy(listener: () => void): void;
   // Puts the text on the clipboard.
   copyText(text: string): void;
+  // Called when the Command Palette has copied something, to show the Copy Banner.
+  onShowCopyBanner(listener: () => void): void;
   // Called with the clipboard's text when it should be pasted.
   onPaste(listener: (text: string) => void): void;
   // Answers, for each link found in the Pane's terminal, whether Cmd+clicking it opens something: a URL, or a path to a

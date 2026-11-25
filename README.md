@@ -26,6 +26,7 @@ Terminal windows get buried under everything else, and each project's tabs and s
 - **See-through windows.** A Session's window shows its Theme's background 25% transparent over a blur of what's behind it, as iTerm2 does. Set `background.transparency` (0 to 100), `background.blurRadius` (1 to 64), or `background.effect` to `none` for next to no blur. The blur uses a private macOS function ([ADR 0003](docs/adr/0003-blur-through-a-private-macos-api.md)); if a macOS update breaks it, windows show unblurred and blind tells you, once per launch.
 - **One config file.** `~/.config/blind/config.jsonc` comes with a schema for editor autocomplete, applies changes as you save, and rebinds any shortcut. Settings are grouped by what they act on, such as `"pane": { "scrollBar": "visible" }`, and this README names them by group and setting joined by a dot, such as `pane.scrollBar` ([ADR 0004](docs/adr/0004-settings-grouped-by-glossary-term.md)).
 - **Menu bar icon.** Lists your Open and Closed Sessions, so any of them is one click away.
+- **Show Build.** The Show Build action lists the Build blind is running: `Version: 0.0.0` and `Commit: 45e9d74`, the commit's short SHA, with ` (dev)` after it when running from the repo. Blind Spot can run an older Build than the app, as it keeps running through an install; when its commit differs, `Blind Spot Version` and `Blind Spot Commit` follow. A Blind Spot too old to report its Build adds nothing. Enter, or a click, copies the version or the commit's full SHA and shows `Copied!`, leaving the list open.
 - **Out of the way.** blind is not in the Dock or `Cmd+Tab`, and starts hidden at login unless `loginLaunch.start` says to start shown.
 
 ## Limitations
@@ -43,7 +44,14 @@ Terminal windows get buried under everything else, and each project's tabs and s
 npm run install-app
 ```
 
-Builds `Blind.app` and copies it to `/Applications`, replacing any previous copy. Quit a running Blind and open it again to use the new copy, or use `blind install` (below), which does both.
+Builds `Blind.app` from the last commit and copies it to `/Applications`, replacing any previous copy. It refuses to run while the repo has uncommitted changes, untracked files included; `blind install` (below) stashes them for the build. Quit a running Blind and open it again to use the new copy, or use `blind install`, which does both.
+
+The installed app records the Build it was made from: its `Info.plist` names the commit's full SHA under `BlindCommit`, beside the version in `CFBundleShortVersionString`, and `Blind.app/Contents/Resources/version` holds the version on its first line and the full SHA on its second.
+
+```sh
+plutil -extract BlindCommit raw /Applications/Blind.app/Contents/Info.plist
+cat /Applications/Blind.app/Contents/Resources/version
+```
 
 The installed app:
 
@@ -65,7 +73,7 @@ Run once from the repo, this builds the `blind` command and puts it on your `PAT
 
 `blind themes import <file>` makes a Theme file in `~/.config/blind/themes` from an iTerm2, Ghostty, Kitty, Alacritty or Windows Terminal theme, as the Command Palette's Import Theme does, and says where it saved it. It saves the file without showing the Theme first, and refuses a file that isn't a theme, one that leaves out colours the rest are drawn from, and one whose name another Theme or file in the folder has, ignoring case. A running Blind lists the new Theme in Change Theme straight away.
 
-`blind install` runs `npm run install-app`, then asks a running Blind to restart into the new copy: it asks you to confirm, as quitting does, and starts again once you do. Cancel and the old copy keeps running until you next quit. `blind install --force` restarts it without asking, saving your Sessions first. A Blind that isn't running is left that way.
+`blind install` runs `npm run install-app`, then has a running Blind restart into the new copy. With uncommitted changes, untracked files included, it first lists them and stashes them as `blind install: uncommitted changes`, so only the last commit is built, and puts them back once the build ends, staged changes staged again, whether the build succeeded, failed or was stopped with Ctrl+C. A running `blind dev` reloads onto the last commit meanwhile. Should putting them back fail, it says so and leaves Blind running as it is; `git stash list` and `git stash pop --index` get them back. To restart, Blind asks you to confirm, as quitting does, and starts again once you do. Cancel and the old copy keeps running until you next quit. `blind install --force` restarts it without asking, saving your Sessions first. A Blind that isn't running is left that way.
 
 `blind link` runs `npm link` in the repo, which rebuilds the `blind` command first. Run it after changing the command's source. It needs `blind` on your `PATH` already, so the first link, and the one after switching Node versions, is still the one above.
 

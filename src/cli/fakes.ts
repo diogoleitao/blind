@@ -28,6 +28,7 @@ export function createFakeDependencies (overrides: Partial<CliDependencies> = {}
     readThemeSource: (path) => ({ fileName: basename(path), text: undefined }),
     terminal: createFakeTerminal([]),
     run: async () => 0,
+    uncommittedChanges: async () => [],
     runningBlindPid: async () => undefined,
     relaunchAfterExit: () => {},
     terminate: () => {},

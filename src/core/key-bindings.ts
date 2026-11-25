@@ -74,6 +74,7 @@ export const defaultKeyBindings: Record<BoundAction, string | null> = {
   changeActivitySound: null,
   resetCommandPalettePosition: null,
   openSettings: null,
+  showBuild: null,
   quit: null,
   quitAndEndShells: null,
 }

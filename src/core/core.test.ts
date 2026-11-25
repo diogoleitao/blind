@@ -4,22 +4,27 @@ import { defaultSettings } from './config'
 import { createCore, type Effect, type PaletteResult } from './core'
 import { createControllableClock, createFakeShellHost, press } from './fakes'
 import { createInMemoryStateStore } from './in-memory-state-store'
-import type { SavedScrollback, ShellFromBefore, StateStore } from './ports'
+import type { Build, SavedScrollback, ShellFromBefore, StateStore } from './ports'
 import { idsIn, panesIn, type Session } from './state'
 import { defaultTheme } from './themes'
 
+// The Build of the app every test core runs as, unless a test says otherwise.
+const appBuild: Build = { version: '0.0.0', commit: '45e9d74b1c0a8f3e2d6b9a7c5e4f3d2c1b0a9e8f' }
+
 // Passing the state store of an earlier core relaunches the app from what that core saved. A config file's text is read
 // before starting, as the app does. `atLogin` starts the app as the launch at login does. `shells` are the Shells the
-// app finds still running as it starts, and the scrollback saved while it was gone.
+// app finds still running as it starts, the scrollback saved while it was gone, and Blind Spot's Build, the app's own
+// unless it says otherwise. `build` is the app's.
 function startCore (
   stateStore: StateStore = createInMemoryStateStore(),
   config?: string,
   atLogin = false,
-  shells?: Parameters<typeof createFakeShellHost>[0]
+  shells?: Parameters<typeof createFakeShellHost>[0],
+  build = appBuild
 ) {
-  const shellHost = createFakeShellHost(shells)
+  const shellHost = createFakeShellHost({ blindSpotBuild: build, ...shells })
   const clock = createControllableClock(1_000)
-  const core = createCore({ shellHost, stateStore, clock, homeDirectory: '/Users/me' })
+  const core = createCore({ shellHost, stateStore, clock, homeDirectory: '/Users/me', build })
   const effects: unknown[] = []
   core.onEffect((effect) => effects.push(effect))
   if (config !== undefined) core.configChanged(config)
@@ -4524,6 +4529,7 @@ describe('the Command Palette', () => {
       'action Change Activity Sound',
       'action Reset Command Palette Position',
       'action Open Settings',
+      'action Show Build',
       'action Quit Blind',
       'action Quit and End Shells',
     ])
@@ -4878,6 +4884,62 @@ describe('the menu bar icon', () => {
 
     expect(core.menuBarIcon()).toBe('colour')
     expect(effects).toEqual([{ type: 'applyMenuBarIcon', icon: 'colour' }, { type: 'configUnreadable' }])
+  })
+})
+
+describe('the Build', () => {
+  it("choosing Show Build asks for the Build to be listed over the Current Session's window", () => {
+    const { core, effects } = startCore()
+    const sessionId = core.state().sessions[0].id
+
+    chooseAction(core, 'Show Build')
+
+    expect(effects).toEqual([{ type: 'pickBuild', sessionId }])
+  })
+
+  it("lists the version and the commit's short SHA, and nothing of Blind Spot's when it runs the same commit", () => {
+    const { core } = startCore()
+
+    expect(summarize(core.buildResults(''))).toEqual(['build Version: 0.0.0', 'build Commit: 45e9d74'])
+  })
+
+  it('marks the commit of a dev run', () => {
+    const { core } = startCore(undefined, undefined, false, undefined, { ...appBuild, dev: true })
+
+    expect(summarize(core.buildResults(''))).toEqual(['build Version: 0.0.0', 'build Commit: 45e9d74 (dev)'])
+  })
+
+  it("adds Blind Spot's version and commit when it runs another commit", () => {
+    const blindSpotBuild = { version: '0.0.0', commit: 'b6c7143a9e8f7d6c5b4a3f2e1d0c9b8a7f6e5d4c' }
+    const { core } = startCore(undefined, undefined, false, { blindSpotBuild })
+
+    expect(summarize(core.buildResults(''))).toEqual([
+      'build Version: 0.0.0',
+      'build Commit: 45e9d74',
+      'build Blind Spot Version: 0.0.0',
+      'build Blind Spot Commit: b6c7143',
+    ])
+  })
+
+  it('lists nothing of Blind Spot\'s when it reports no Build, as there would be nothing to copy', () => {
+    const { core } = startCore(undefined, undefined, false, { blindSpotBuild: undefined })
+
+    expect(summarize(core.buildResults(''))).toEqual(['build Version: 0.0.0', 'build Commit: 45e9d74'])
+  })
+
+  it.each([
+    ['the version', 'Version', '0.0.0'],
+    ["the commit's full SHA", 'Commit', '45e9d74b1c0a8f3e2d6b9a7c5e4f3d2c1b0a9e8f'],
+    ["Blind Spot's version", 'Blind Spot Version', '0.1.0'],
+    ["Blind Spot's full SHA", 'Blind Spot Commit', 'b6c7143a9e8f7d6c5b4a3f2e1d0c9b8a7f6e5d4c'],
+  ])("choosing a row copies %s over the Current Session's window", (_, row, copied) => {
+    const blindSpotBuild = { version: '0.1.0', commit: 'b6c7143a9e8f7d6c5b4a3f2e1d0c9b8a7f6e5d4c' }
+    const { core, effects } = startCore(undefined, undefined, false, { blindSpotBuild })
+    const sessionId = core.state().sessions[0].id
+
+    core.choosePaletteResult(core.buildResults('').find((result) => result.label.startsWith(`${row}:`))!)
+
+    expect(effects).toEqual([{ type: 'copyToClipboard', sessionId, text: copied }])
   })
 })
 

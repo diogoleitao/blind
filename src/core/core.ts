@@ -28,6 +28,7 @@ import { setJsoncProperty } from './jsonc'
 import { type BoundAction, type KeyPress, matchesShortcut } from './key-bindings'
 import { type LinkTarget, linkTarget } from './links'
 import type {
+  Build,
   Clock,
   PaneReport,
   SavedScrollback,
@@ -133,6 +134,8 @@ export type Effect =
   | { type: 'pickMenuBarIcon'; sessionId: SessionId }
   // Has the Command Palette list the Activity sounds, like `pickTheme`.
   | { type: 'pickActivitySound'; sessionId: SessionId }
+  // Has the Command Palette list the Build, like `pickTheme`.
+  | { type: 'pickBuild'; sessionId: SessionId }
   // Asks for the file to Import a Theme from, over the Session's window.
   | { type: 'pickThemeImport'; sessionId: SessionId }
   // Has the Command Palette show the Theme file a picked file makes, to be saved, or why the Import was refused.
@@ -149,6 +152,8 @@ export type Effect =
   | { type: 'copy'; sessionId: SessionId }
   // Pastes the clipboard's text where the Session's window takes typing.
   | { type: 'paste'; sessionId: SessionId }
+  // Puts the text on the clipboard, showing the Copy Banner over the Session's window.
+  | { type: 'copyToClipboard'; sessionId: SessionId; text: string }
   // Forgets where the user dragged the Command Palette, so it next opens where it starts.
   | { type: 'resetPalettePosition' }
 
@@ -186,6 +191,7 @@ const paletteActionLabels = {
   changeActivitySound: 'Change Activity Sound',
   resetCommandPalettePosition: 'Reset Command Palette Position',
   openSettings: 'Open Settings',
+  showBuild: 'Show Build',
   quit: 'Quit Blind',
   quitAndEndShells: 'Quit and End Shells',
 } as const
@@ -244,6 +250,8 @@ export type PaletteResult =
   | { type: 'menuBarIcon'; icon: MenuBarIcon; label: string }
   // An Activity sound, labelled with its name.
   | { type: 'activitySound'; sound: ActivitySound; label: string }
+  // A part of a Build, e.g. `Commit: 45e9d74`, with what choosing it copies.
+  | { type: 'build'; label: string; copies: string }
 
 const menuBarIconLabels: Record<MenuBarIcon, string> = {
   monochrome: 'Monochrome',
@@ -288,11 +296,18 @@ function withoutStatusGlyph (title: string) {
   return title.replace(/^[✳◐◑] /u, '')
 }
 
+// A commit's SHA as git abbreviates it, e.g. `45e9d74`.
+function shortSha (commit: string) {
+  return commit.slice(0, 7)
+}
+
 export interface CoreDependencies {
   shellHost: ShellHost;
   stateStore: StateStore;
   clock: Clock;
   homeDirectory: string;
+  // The app's own Build.
+  build: Build;
 }
 
 export interface Core {
@@ -347,6 +362,9 @@ export interface Core {
   activitySoundResults(query: string): PaletteResult[];
   // Plays the Activity sound the Command Palette's selection moved to, whatever the activity.ring setting says.
   previewActivitySound(sound: ActivitySound): void;
+  // What the Command Palette lists for the Build, for a query: the app's version and commit, then Blind Spot's when its
+  // commit differs. A Blind Spot that reports no Build adds nothing, as there would be nothing to copy.
+  buildResults(query: string): PaletteResult[];
   // Opens an Unnamed Session with one Tab at the home directory and makes it the Current Session.
   newSession(): void;
   // Opens a Closed Session again as the Current Session, restoring it as Restore does. One closed through its last Tab
@@ -420,7 +438,7 @@ export interface Core {
   // and every app action. `ss `, `tt ` and `pp ` narrow it to Sessions, Tabs or Panes.
   paletteResults(query: string): PaletteResult[];
   // Jumps to a Session, Tab or Pane, making its Session the Current Session with the Tab or Pane focused and reopening a
-  // Closed Session first; or runs an app action on the Current Session.
+  // Closed Session first; or runs an app action on the Current Session; or copies what a part of the Build holds.
   choosePaletteResult(result: PaletteResult): void;
   // Where each of the Tab's Panes sits, in layout order.
   paneRects(tabId: TabId): PaneRect[];
@@ -452,7 +470,7 @@ export interface Core {
   onStateChange(listener: (state: CoreState) => void): void;
 }
 
-export function createCore ({ shellHost, stateStore, clock, homeDirectory }: CoreDependencies): Core {
+export function createCore ({ shellHost, stateStore, clock, homeDirectory, build }: CoreDependencies): Core {
   let state: CoreState = { sessions: [] }
   // Kept out of the state: terminals report it far more often than anything else changes.
   let scrollback: Record<PaneId, SavedScrollback> = {}
@@ -1530,6 +1548,7 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
     importTheme: (sessionId) => emit({ type: 'pickThemeImport', sessionId }),
     changeMenuBarIcon: (sessionId) => emit({ type: 'pickMenuBarIcon', sessionId }),
     changeActivitySound: (sessionId) => emit({ type: 'pickActivitySound', sessionId }),
+    showBuild: (sessionId) => emit({ type: 'pickBuild', sessionId }),
   }
 
   // Without a Session, only the actions that don't act on one run.
@@ -1829,6 +1848,20 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       const results = activitySounds.map((sound): PaletteResult => ({ type: 'activitySound', sound, label: sound }))
       return searchResults(results, query)
     },
+    buildResults (query) {
+      const results: PaletteResult[] = [
+        { type: 'build', label: `Version: ${build.version}`, copies: build.version },
+        { type: 'build', label: `Commit: ${shortSha(build.commit)}${build.dev ? ' (dev)' : ''}`, copies: build.commit },
+      ]
+      const blindSpotBuild = shellHost.blindSpotBuild()
+      if (blindSpotBuild && blindSpotBuild.commit !== build.commit) {
+        results.push(
+          { type: 'build', label: `Blind Spot Version: ${blindSpotBuild.version}`, copies: blindSpotBuild.version },
+          { type: 'build', label: `Blind Spot Commit: ${shortSha(blindSpotBuild.commit)}`, copies: blindSpotBuild.commit }
+        )
+      }
+      return searchResults(results, query)
+    },
     choosePaletteResult: command((result) => {
       if (result.type === 'session') jumpToSession(result.sessionId)
       if (result.type === 'tab') jumpToTab(result.tabId)
@@ -1837,6 +1870,9 @@ export function createCore ({ shellHost, stateStore, clock, homeDirectory }: Cor
       if (result.type === 'theme') chooseTheme(result.name)
       if (result.type === 'menuBarIcon') chooseMenuBarIcon(result.icon)
       if (result.type === 'activitySound') chooseActivitySound(result.sound)
+      if (result.type === 'build' && state.currentSessionId !== undefined) {
+        emit({ type: 'copyToClipboard', sessionId: state.currentSessionId, text: result.copies })
+      }
     }),
     paneRects (tabId) {
       const tab = findTab(tabId)

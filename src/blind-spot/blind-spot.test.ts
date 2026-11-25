@@ -5,10 +5,10 @@ import { join } from 'node:path'
 import { Terminal } from '@xterm/xterm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ShellOnQuit } from '../core/config'
-import type { SavedScrollback, ShellEvent } from '../core/ports'
+import type { Build, SavedScrollback, ShellEvent } from '../core/ports'
 import { createBlindSpotShellHost } from '../main/blind-spot-shell-host'
 import { createBlindSpot, type KeptForNextApp, type Pty } from './blind-spot'
-import { receiveMessages, sendMessage } from './protocol'
+import { protocolVersion, receiveMessages, sendMessage } from './protocol'
 import { serveBlindSpot } from './server'
 
 // A pseudo-terminal whose Shell's output, exit and process the test decides.
@@ -95,6 +95,7 @@ function createWorld () {
       },
       kept: keptOnDisk,
       now: () => 5_000,
+      build: world.build,
       end: () => {
         instance.ended = true
         instance.server?.close()
@@ -144,7 +145,19 @@ function createWorld () {
     launchesFailing = count
   }
 
-  const world = { socketPath, ptys, inspected, inspections: 0, launched, launch, app, crash, failLaunches }
+  const world = {
+    socketPath,
+    ptys,
+    inspected,
+    inspections: 0,
+    // The Build each Blind Spot launched from now runs.
+    build: { version: '0.0.0', commit: '45e9d74b1c0a8f3e2d6b9a7c5e4f3d2c1b0a9e8f' } as Build,
+    launched,
+    launch,
+    app,
+    crash,
+    failLaunches,
+  }
   return world
 }
 
@@ -383,5 +396,39 @@ describe('Blind Spot', () => {
     expect(shutdowns).toEqual(['shutdown'])
     expect(world.launched).toHaveLength(1)
     expect(host.shellsFromBefore()).toEqual([])
+  })
+})
+
+describe("Blind Spot's Build", () => {
+  it('is what Blind Spot welcomes the app with', async () => {
+    const world = createWorld()
+    world.build = { version: '0.1.0', commit: 'b6c7143a9e8f7d6c5b4a3f2e1d0c9b8a7f6e5d4c' }
+    const { host } = world.app()
+
+    await host.connect()
+
+    expect(host.blindSpotBuild()).toEqual({ version: '0.1.0', commit: 'b6c7143a9e8f7d6c5b4a3f2e1d0c9b8a7f6e5d4c' })
+  })
+
+  it('is none from a Blind Spot of this version that welcomes without one, which the app keeps, not ending it', async () => {
+    const world = createWorld()
+    const received: string[] = []
+    // A Blind Spot from before Builds were reported: it welcomes as one of this version did then.
+    const older = createServer((socket) => {
+      receiveMessages<{ type: string }>(socket, (message) => {
+        received.push(message.type)
+        if (message.type === 'hello') sendMessage(socket, { type: 'welcome', version: protocolVersion, shells: [] })
+      })
+    })
+    servers.push(older)
+    await new Promise<void>((resolve) => older.listen(world.socketPath, resolve))
+    const { host } = world.app()
+
+    const { endedOtherVersion } = await host.connect()
+
+    expect(endedOtherVersion).toBe(false)
+    expect(host.blindSpotBuild()).toBeUndefined()
+    expect(received).toEqual(['hello'])
+    expect(world.launched).toHaveLength(0)
   })
 })

@@ -9,18 +9,20 @@ const repoRoot = '/repos/blind'
 
 interface Options {
   exitCode?: number;
-  // Exit codes by command, in place of `exitCode`.
+  // Exit codes by command, or by command and arguments, e.g. `git stash pop --index`, in place of `exitCode`.
   exitCodes?: Record<string, number>;
   editor?: string;
   configCreatable?: boolean;
   // The installed Blind's process, while it's running.
   blindPid?: number;
+  // The repo's uncommitted changes, as `git status --short` lists them.
+  changes?: string[];
 }
 
 // Runs the CLI against fakes: what it does is recorded in order, each command it runs exits with `exitCode`, and the
 // config file exists afterwards unless `configCreatable` is false.
 async function cli (argv: string[], options: Options = {}) {
-  const { exitCode = 0, exitCodes = {}, editor, configCreatable = true, blindPid } = options
+  const { exitCode = 0, exitCodes = {}, editor, configCreatable = true, blindPid, changes = [] } = options
   const events: unknown[] = []
   let stdout = ''
   let stderr = ''
@@ -36,8 +38,9 @@ async function cli (argv: string[], options: Options = {}) {
     },
     run: async (command, args, cwd) => {
       events.push({ command, args, cwd })
-      return exitCodes[command] ?? exitCode
+      return exitCodes[[command, ...args].join(' ')] ?? exitCodes[command] ?? exitCode
     },
+    uncommittedChanges: async () => changes,
     runningBlindPid: async () => blindPid,
     relaunchAfterExit: (pid) => { events.push({ relaunchAfterExit: pid }) },
     terminate: (pid) => { events.push({ terminate: pid }) },
@@ -122,6 +125,68 @@ describe('blind install', () => {
     expect(events).toEqual([installApp, { relaunchAfterExit: 42 }, { terminate: 42 }])
     expect(stdout).toBe('Installed. Blind is restarting.\n')
     expect(code).toBe(0)
+  })
+
+  describe('with uncommitted changes', () => {
+    const changes = [' M GLOSSARY.md', 'M  src/core/core.ts', '?? src/core/build.ts']
+    const stashPush = {
+      command: 'git',
+      args: ['stash', 'push', '--include-untracked', '-m', 'blind install: uncommitted changes'],
+      cwd: repoRoot,
+    }
+    const stashPop = { command: 'git', args: ['stash', 'pop', '--index'], cwd: repoRoot }
+
+    it('warns, listing them, then stashes them for the build and puts them back before restarting Blind', async () => {
+      const { code, events, stderr } = await cli(['install'], { changes, blindPid: 42 })
+      expect(stderr).toBe([
+        'Building the last commit only. These uncommitted changes are stashed during the build, then put back:',
+        '   M GLOSSARY.md',
+        '  M  src/core/core.ts',
+        '  ?? src/core/build.ts',
+        'A running `blind dev` reloads onto the last commit meanwhile.',
+        '',
+      ].join('\n'))
+      expect(events).toEqual([
+        stashPush,
+        installApp,
+        stashPop,
+        { command: 'open', args: ['-a', '/Applications/Blind.app', 'blind://restart'], cwd: undefined },
+      ])
+      expect(code).toBe(0)
+    })
+
+    it('puts them back when the build fails or is interrupted, exiting with its exit code, restarting nothing', async () => {
+      const { code, events } = await cli(['install', '--force'], { changes, blindPid: 42, exitCodes: { npm: 130 } })
+      expect(events).toEqual([stashPush, installApp, stashPop])
+      expect(code).toBe(130)
+    })
+
+    it('says how to get them back when putting them back fails, exiting 1 before restarting Blind', async () => {
+      const { code, events, stdout, stderr } = await cli(['install', '--force'], {
+        changes,
+        blindPid: 42,
+        exitCodes: { 'git stash pop --index': 1 },
+      })
+      expect(events).toEqual([stashPush, installApp, stashPop])
+      expect(stderr).toMatch(/\n$/)
+      expect(stderr.split('\n').at(-2)).toBe(
+        'Couldn\'t put the uncommitted changes back, so Blind wasn\'t restarted. They\'re still stashed as "blind install: uncommitted changes": find them with `git stash list`, then put them back with `git stash pop --index`.'
+      )
+      expect(stdout).toBe('')
+      expect(code).toBe(1)
+    })
+
+    it("builds nothing when they can't be stashed, exiting with git's exit code", async () => {
+      const { code, events } = await cli(['install'], { changes, blindPid: 42, exitCodes: { git: 128 } })
+      expect(events).toEqual([stashPush])
+      expect(code).toBe(128)
+    })
+  })
+
+  it('with no uncommitted changes, warns of nothing and stashes nothing', async () => {
+    const { events, stderr } = await cli(['install'])
+    expect(events).toEqual([installApp])
+    expect(stderr).toBe('')
   })
 })
 

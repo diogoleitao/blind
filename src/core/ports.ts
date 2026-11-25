@@ -38,6 +38,17 @@ export interface ShellHost {
   // Scrollback saved for Panes while the app was gone, e.g. a Shell's last before it exited, or before the OS
   // restarted.
   savedScrollback(): Record<PaneId, SavedScrollback>;
+  // The Build of whatever holds the Shells now, or undefined when it reported none, e.g. a Blind Spot from before
+  // Builds were reported.
+  blindSpotBuild(): Build | undefined;
+}
+
+// The version of Blind and the full SHA of the commit a running copy was made from. `dev` marks a dev run, which may
+// hold changes not yet committed.
+export interface Build {
+  version: string;
+  commit: string;
+  dev?: true;
 }
 
 // A Pane's serialized terminal and the clock's time when it was reported.

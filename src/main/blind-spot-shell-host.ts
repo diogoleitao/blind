@@ -3,7 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { type AppMessage, type BlindSpotMessage, protocolVersion, receiveMessages, sendMessage } from '../blind-spot/protocol'
 import type { ProgramStatusReport } from '../core/attention'
 import type { ShellOnQuit } from '../core/config'
-import type { SavedScrollback, ShellEvent, ShellFromBefore, ShellHost } from '../core/ports'
+import type { Build, SavedScrollback, ShellEvent, ShellFromBefore, ShellHost } from '../core/ports'
 import type { PaneId } from '../core/state'
 import type { TerminalSize } from '../shared/ipc'
 
@@ -96,6 +96,8 @@ export function createBlindSpotShellHost (options: BlindSpotShellHostOptions): B
   let waiting: AppMessage[] = []
   let fromBefore: ShellFromBefore[] = []
   let saved: Record<PaneId, SavedScrollback> = {}
+  // What the Blind Spot reached last welcomed with.
+  let blindSpotBuild: Build | undefined
 
   function emit (event: ShellEvent) {
     for (const listener of listeners) listener(event)
@@ -187,9 +189,11 @@ export function createBlindSpotShellHost (options: BlindSpotShellHostOptions): B
     throw new Error(`Blind Spot couldn't be reached at ${socketPath}`)
   }
 
-  // From here messages go to the Blind Spot reached, those that waited first. Losing it ends every Shell.
-  function connected (reached: Socket) {
+  // From here messages go to the Blind Spot reached, those that waited first, and its Build is the one its welcome
+  // reported, if any. Losing it ends every Shell.
+  function connected (reached: Socket, welcome: Extract<BlindSpotMessage, { type: 'welcome' }>) {
     socket = reached
+    blindSpotBuild = welcome.build
     reached.once('close', lost)
     for (const message of waiting) sendMessage(reached, message)
     waiting = []
@@ -205,8 +209,8 @@ export function createBlindSpotShellHost (options: BlindSpotShellHostOptions): B
     attaching.clear()
     scrollbackReports.clear()
     emit({ type: 'shellsLost' })
-    const { reached } = await establish(Infinity)
-    connected(reached)
+    const { reached, welcome } = await establish(Infinity)
+    connected(reached, welcome)
   }
 
   return {
@@ -215,11 +219,12 @@ export function createBlindSpotShellHost (options: BlindSpotShellHostOptions): B
       fromBefore = welcome.shells ?? []
       saved = welcome.scrollback ?? {}
       for (const { paneId, exited } of fromBefore) if (!exited) panes.set(paneId, { state: 'windowless' })
-      connected(reached)
+      connected(reached, welcome)
       return { endedOtherVersion }
     },
     shellsFromBefore: () => fromBefore,
     savedScrollback: () => saved,
+    blindSpotBuild: () => blindSpotBuild,
     start (paneId, { workingDirectory, shell = options.loginShell }) {
       panes.set(paneId, { state: 'awaited' })
       send({

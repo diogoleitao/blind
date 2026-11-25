@@ -482,30 +482,32 @@ function hiddenTabsActivityElement (count: number) {
   return [element]
 }
 
-const sessionBanner = document.getElementById('session-banner')!
-// How long the Session Banner shows in full before its fade, which the stylesheet times.
-const sessionBannerHoldMilliseconds = 250
-// Pending while the Session Banner shows in full.
-let sessionBannerTimer: ReturnType<typeof setTimeout> | undefined
+const banner = document.getElementById('banner')!
+// How long a Banner shows in full before its fade, which the stylesheet times.
+const bannerHoldMilliseconds = 250
+// Pending while a Banner shows in full.
+let bannerTimer: ReturnType<typeof setTimeout> | undefined
 
-// Shows the Session Banner at once, then fades it out. Showing it again, by another cycle press, starts it over.
-function showSessionBanner (label: string) {
-  clearTimeout(sessionBannerTimer)
-  sessionBanner.textContent = label
-  sessionBanner.classList.remove('fading')
-  sessionBanner.hidden = false
-  sessionBannerTimer = setTimeout(() => sessionBanner.classList.add('fading'), sessionBannerHoldMilliseconds)
+// Shows a Banner at once, then fades it out. Showing one again, e.g. by another cycle press, starts it over. The Copy
+// Banner shows over the Command Palette, which stays open beneath it.
+function showBanner (text: string, { overPalette = false } = {}) {
+  clearTimeout(bannerTimer)
+  banner.textContent = text
+  banner.classList.toggle('over-palette', overPalette)
+  banner.classList.remove('fading')
+  banner.hidden = false
+  bannerTimer = setTimeout(() => banner.classList.add('fading'), bannerHoldMilliseconds)
 }
 
-function hideSessionBanner () {
-  clearTimeout(sessionBannerTimer)
-  sessionBanner.hidden = true
-  sessionBanner.classList.remove('fading')
+function hideBanner () {
+  clearTimeout(bannerTimer)
+  banner.hidden = true
+  banner.classList.remove('fading')
 }
 
-sessionBanner.addEventListener('transitionend', hideSessionBanner)
-// Cycling away hides this window, and it keeps no banner for when it's shown again.
-window.addEventListener('blur', hideSessionBanner)
+banner.addEventListener('transitionend', hideBanner)
+// Cycling away hides this window, and it keeps no Banner for when it's shown again.
+window.addEventListener('blur', hideBanner)
 
 // Every Pane's terminal stays open, hidden but laid out, so switching Tabs keeps its scrollback and size.
 function render (view: SessionView) {
@@ -551,8 +553,8 @@ let latestSearch = Promise.resolve()
 // Set while the palette asks for a name or title instead of searching.
 let prompt: PalettePrompt | undefined
 // Set while the palette lists the Themes, the menu bar icons or the Activity sounds instead of searching, each selected
-// one previewed.
-let picking: 'theme' | 'menuBarIcon' | 'activitySound' | undefined
+// one previewed, or lists the Build.
+let picking: 'theme' | 'menuBarIcon' | 'activitySound' | 'build' | undefined
 // Set while the palette shows the Theme file an Import makes, to be saved, or why the Import was refused.
 let themeImport: ThemeImport | undefined
 // The choice the next results select, once: the one in effect when the palette started listing them.
@@ -573,6 +575,7 @@ const resultKinds: Record<PaletteResult['type'], string> = {
   theme: 'Theme',
   menuBarIcon: 'Menu Bar Icon',
   activitySound: 'Activity Sound',
+  build: 'Build',
 }
 
 // Whether the result is the Current Session, Current Tab or Current Pane, which can be selected but not chosen.
@@ -673,6 +676,7 @@ const pickerSearches = {
   theme: blind.searchThemes,
   menuBarIcon: blind.searchMenuBarIcons,
   activitySound: blind.searchActivitySounds,
+  build: blind.searchBuild,
 }
 
 function searchPalette () {
@@ -788,11 +792,12 @@ const pickerPlaceholders = {
   theme: 'Theme',
   menuBarIcon: 'Menu bar icon',
   activitySound: 'Activity sound',
+  build: 'Build',
 }
 
 // Lists the Themes, the menu bar icons or the Activity sounds with the one in effect selected. Choosing one keeps it;
-// dismissing restores the one from before.
-function openPicker (kind: NonNullable<typeof picking>, inEffect: string) {
+// dismissing restores the one from before. The Build has none in effect, so its first part is selected.
+function openPicker (kind: NonNullable<typeof picking>, inEffect?: string) {
   prompt = undefined
   picking = kind
   leaveThemeImport()
@@ -961,10 +966,11 @@ function answerPrompt (shown: PalettePrompt) {
 }
 
 // Does nothing once the palette has closed, e.g. by Escape while Enter waited for a search. Choosing where the user
-// already is does nothing either, and leaves the palette open.
+// already is does nothing either, and leaves the palette open, as copying a part of the Build does.
 function chooseResult (index: number) {
   const result = paletteResults[index]
   if (palette.hidden || !result || isCurrent(result)) return
+  if (result.type === 'build') return blind.choosePaletteResult(result)
   closePalette()
   blind.choosePaletteResult(result)
 }
@@ -1234,13 +1240,15 @@ quitBackdrop.addEventListener('mousedown', (event) => event.preventDefault())
 applyChromeColours(theme)
 blind.onAskQuit(openQuitDialog)
 blind.onWindowSettings(applyWindowSettings)
-blind.onShowSessionBanner(showSessionBanner)
+blind.onShowSessionBanner((label) => showBanner(label))
+blind.onShowCopyBanner(() => showBanner('Copied!', { overPalette: true }))
 blind.onTheme(applyTheme)
 blind.onOpenPalette(openPalette)
 blind.onToggleActivitySidebar(toggleActivitySidebar)
 blind.onPickTheme(() => openPicker('theme', theme.name))
 blind.onPickMenuBarIcon((icon) => openPicker('menuBarIcon', icon))
 blind.onPickActivitySound((sound) => openPicker('activitySound', sound))
+blind.onPickBuild(() => openPicker('build'))
 blind.onPalettePrompt(openPrompt)
 blind.onShowThemeImport(openThemeImport)
 blind.onPalettePosition(movePaletteTo)

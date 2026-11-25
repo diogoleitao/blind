@@ -16,7 +16,7 @@
     "build:native": "node-gyp rebuild --directory=native --target=$(node -p \"require('electron/package.json').version\") --dist-url=https://electronjs.org/headers",
     "dev": "npm run build:native && electron-vite dev",
     "build": "npm run build:native && electron-vite build",
-    "install-app": "npm run build && iconutil -c icns build/icon.iconset -o build/icon.icns && electron-builder --mac && rm -rf /Applications/Blind.app && ditto dist/mac*/Blind.app /Applications/Blind.app",
+    "install-app": "test -z \"$(git status --porcelain)\" || { echo 'install-app builds the last commit only, and there are uncommitted changes. Run blind install instead, which stashes them for the build.' >&2; exit 1; }; npm run build && iconutil -c icns build/icon.iconset -o build/icon.icns && electron-builder --mac && rm -rf /Applications/Blind.app && ditto dist/mac*/Blind.app /Applications/Blind.app",
     "build:cli": "vite build --config vite.cli.config.ts && chmod +x out/cli/main.js",
     "prepare": "(git config core.hooksPath .githooks || true) && npm run build:cli",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper && node node_modules/electron/install.js",
@@ -41,51 +41,6 @@
   "overrides": {
     "neostandard": {
       "typescript": "~6.0.3"
-    }
-  },
-  "build": {
-    "appId": "com.diogoleitao.blind",
-    "productName": "Blind",
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "out/**",
-      "!out/cli/**"
-    ],
-    "extraResources": [
-      {
-        "from": "resources",
-        "to": "resources"
-      },
-      {
-        "from": "native/build/Release/window_effects.node",
-        "to": "native/window_effects.node"
-      }
-    ],
-    "extraFiles": [
-      {
-        "from": "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
-        "to": "MacOS/Blind Spot"
-      }
-    ],
-    "npmRebuild": false,
-    "protocols": [
-      {
-        "name": "Blind",
-        "schemes": [
-          "blind"
-        ]
-      }
-    ],
-    "mac": {
-      "target": "dir",
-      "icon": "build/icon.icns",
-      "identity": "-",
-      "hardenedRuntime": false,
-      "extendInfo": {
-        "LSUIElement": true
-      }
     }
   },
   "dependencies": {

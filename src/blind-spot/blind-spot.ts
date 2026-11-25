@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import type { ShellOnQuit } from '../core/config'
-import type { PaneReport, SavedScrollback, ShellFromBefore } from '../core/ports'
+import type { Build, PaneReport, SavedScrollback, ShellFromBefore } from '../core/ports'
 import type { PaneId } from '../core/state'
 import { createHeadlessPane, type HeadlessPane } from './headless-pane'
 import { type AppMessage, type BlindSpotMessage, protocolVersion } from './protocol'
@@ -30,6 +30,8 @@ export interface BlindSpotDependencies {
   // What an earlier Blind Spot kept and no app has taken yet.
   kept?: KeptForNextApp;
   now(): number;
+  // Blind Spot's own Build, which it welcomes each app with.
+  build: Build;
   // No app is connected and no Shell runs, or an app asked for every Shell to end: Blind Spot has nothing left to do.
   end(): void;
   // How long after a Pane's output its working directory and running program are read again.
@@ -279,9 +281,16 @@ export function createBlindSpot (dependencies: BlindSpotDependencies): BlindSpot
   // Answers with the Shells running and what was kept for the app, which takes them over from here, when the versions
   // match.
   function welcome (version: number) {
-    if (version !== protocolVersion) return send({ type: 'welcome', version: protocolVersion })
+    const { build } = dependencies
+    if (version !== protocolVersion) return send({ type: 'welcome', version: protocolVersion, build })
     const running: ShellFromBefore[] = [...shells.values()].map(({ paneId, missed }) => ({ paneId, missed }))
-    send({ type: 'welcome', version: protocolVersion, shells: [...running, ...kept.exited], scrollback: kept.scrollback })
+    send({
+      type: 'welcome',
+      version: protocolVersion,
+      build,
+      shells: [...running, ...kept.exited],
+      scrollback: kept.scrollback,
+    })
     for (const shell of shells.values()) shell.missed = []
     keep({ scrollback: {}, exited: [] })
   }

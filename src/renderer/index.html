@@ -38,7 +38,7 @@
         position: relative;
         flex: 1;
       }
-      /* Isolated, so the layers xterm.js stacks inside a terminal stay under the Session Banner. A terminal's box can
+      /* Isolated, so the layers xterm.js stacks inside a terminal stay under the Banner. A terminal's box can
          reach past the Pane's edge, by the scroll bar's room, which the Pane clips. */
       .pane {
         position: absolute;
@@ -95,9 +95,10 @@
       .pane .xterm .xterm-viewport {
         background-color: transparent;
       }
-      /* Centred over the Panes, under the Command Palette and the find bar, which come later in the page. It shows at
-         once and, once `fading`, fades out over 250ms. */
-      #session-banner {
+      /* Centred over the Panes, under the Command Palette and the find bar, which come later in the page, except
+         `over-palette`, as the Copy Banner is, the palette staying open beneath it. It shows at once and, once
+         `fading`, fades out over 250ms. The Session Banner and the Copy Banner both show here. */
+      #banner {
         position: absolute;
         top: 50%;
         left: 50%;
@@ -115,10 +116,13 @@
         background: var(--session-banner-background);
         pointer-events: none;
       }
-      #session-banner[hidden] {
+      #banner[hidden] {
         display: none;
       }
-      #session-banner.fading {
+      #banner.over-palette {
+        z-index: 2;
+      }
+      #banner.fading {
         opacity: 0;
         transition: opacity 250ms linear;
       }
@@ -610,7 +614,7 @@
     </style>
   </head>
   <body>
-    <div id="panes"><div id="session-banner" hidden></div></div>
+    <div id="panes"><div id="banner" hidden></div></div>
     <div id="tab-bar" hidden>
       <div id="tabs"></div>
       <div id="session-label"><span class="pill"></span></div>

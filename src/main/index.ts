@@ -21,6 +21,7 @@ import { type ActivitySound, type MenuBarIcon, minimumBlurRadius } from '../core
 import { createCore, type Effect, type PaletteResult } from '../core/core'
 import { defaultPalettePosition } from '../core/palette-position'
 import type { PaneId, SessionId } from '../core/state'
+import { build } from '../shared/build'
 import { channels, type PalettePrompt, type SessionView, type TerminalSize, type WindowSettings } from '../shared/ipc'
 import { listInProse, programLabel, type QuitPrompt, quitPromptText, quitSessionLine } from '../shared/quit-prompt'
 import { createActivitySoundPlayer } from './activity-sound'
@@ -115,6 +116,7 @@ app.whenReady().then(async () => {
     stateStore: createFileStateStore(dataDirectory),
     clock: { now: () => Date.now() },
     homeDirectory: homedir(),
+    build,
   })
   const configFile = createConfigFile(configDirectory)
   const themeFiles = createThemeFiles(join(configDirectory, 'themes'))
@@ -268,6 +270,7 @@ app.whenReady().then(async () => {
     if (effect.type === 'pickActivitySound') {
       windows.get(effect.sessionId)?.webContents.send(channels.pickActivitySound, core.settings().activity.sound)
     }
+    if (effect.type === 'pickBuild') windows.get(effect.sessionId)?.webContents.send(channels.pickBuild)
     if (effect.type === 'pickThemeImport') pickThemeImport(effect.sessionId)
     if (effect.type === 'showThemeImport') {
       windows.get(effect.sessionId)?.webContents.send(channels.showThemeImport, effect.themeImport)
@@ -292,6 +295,10 @@ app.whenReady().then(async () => {
     // The clipboard is read asynchronously; a window that closed meanwhile gets nothing.
     if (effect.type === 'paste') {
       clipboard.readText().then((text) => windows.get(effect.sessionId)?.webContents.send(channels.paste, text))
+    }
+    if (effect.type === 'copyToClipboard') {
+      clipboard.writeText(effect.text)
+      windows.get(effect.sessionId)?.webContents.send(channels.showCopyBanner)
     }
     if (effect.type === 'resetPalettePosition') {
       palettePositionFile.clear()
@@ -610,6 +617,7 @@ app.whenReady().then(async () => {
   ipcMain.on(channels.previewMenuBarIcon, (_event, icon: MenuBarIcon) => core.previewMenuBarIcon(icon))
   ipcMain.handle(channels.searchActivitySounds, (_event, query: string) => core.activitySoundResults(query))
   ipcMain.on(channels.previewActivitySound, (_event, sound: ActivitySound) => core.previewActivitySound(sound))
+  ipcMain.handle(channels.searchBuild, (_event, query: string) => core.buildResults(query))
   ipcMain.on(channels.saveThemeImport, () => core.themeImportSaved())
   ipcMain.handle(channels.searchPalette, (_event, query: string) => core.paletteResults(query))
   ipcMain.on(channels.choosePaletteResult, (_event, result: PaletteResult) => core.choosePaletteResult(result))

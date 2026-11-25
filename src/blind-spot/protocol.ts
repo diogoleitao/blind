@@ -1,11 +1,12 @@
 import type { Socket } from 'node:net'
 import type { ShellOnQuit } from '../core/config'
-import type { PaneReport, SavedScrollback, ShellEvent, ShellFromBefore } from '../core/ports'
+import type { Build, PaneReport, SavedScrollback, ShellEvent, ShellFromBefore } from '../core/ports'
 import type { PaneId } from '../core/state'
 
 // How the app and Blind Spot talk: one JSON message per line over a Unix socket. Raised whenever a message changes, so
 // an app finds a Blind Spot from another version and ends it. The `hello`, `welcome` and `shutdown` messages never
-// change, so that any app can tell any Blind Spot's version and end it.
+// change, so that any app can tell any Blind Spot's version and end it, except to gain optional fields, which leaves
+// the version as it is: an app then hears none from an older Blind Spot of the same version.
 export const protocolVersion = 1
 
 export type AppMessage =
@@ -40,10 +41,11 @@ export type AppMessage =
 
 export type BlindSpotMessage =
   // Answers `hello`. The Shells that ran on with no app connected, those exited since included, and the scrollback saved
-  // meanwhile come only when the versions match.
+  // meanwhile come only when the versions match. `build` is Blind Spot's own, absent from one older than Builds.
   | {
     type: 'welcome';
     version: number;
+    build?: Build;
     shells?: ShellFromBefore[];
     scrollback?: Record<PaneId, SavedScrollback>;
   }

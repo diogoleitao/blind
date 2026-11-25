@@ -13,6 +13,9 @@ export interface CliDependencies extends SettingsEditorDependencies {
   // Runs the command in `cwd`, or the current directory without one, with this process's input and output, resolving
   // to its exit code.
   run(command: string, args: string[], cwd?: string): Promise<number>;
+  // The repo's uncommitted changes, untracked files included and ignored ones left out, each as `git status --short`
+  // lists it, e.g. ` M GLOSSARY.md`.
+  uncommittedChanges(): Promise<string[]>;
   // The installed Blind's process, while it's running; the one running from the repo is never it.
   runningBlindPid(): Promise<number | undefined>;
   // Has the installed Blind launched once the process has exited, by something that outlives this command and the Shell
@@ -58,12 +61,38 @@ async function link ({ repoRoot, run, stdout }: CliDependencies) {
 // Where `npm run install-app` puts Blind.
 export const installedApp = '/Applications/Blind.app'
 
+// What `blind install` names the stash it keeps uncommitted changes in during the build.
+const installStashMessage = 'blind install: uncommitted changes'
+
+// Builds the last commit, with any uncommitted changes stashed meanwhile, and puts it in /Applications. The changes are
+// put back however the build ends, a Ctrl+C included, as the build's command takes it and exits; failing that, the exit
+// code is the build's, or 1 after a build that succeeded, and Blind must not restart.
+async function buildCommitted ({ repoRoot, run, uncommittedChanges, stderr }: CliDependencies) {
+  const changes = await uncommittedChanges()
+  if (changes.length === 0) return run('npm', ['run', 'install-app'], repoRoot)
+  stderr([
+    'Building the last commit only. These uncommitted changes are stashed during the build, then put back:',
+    ...changes.map((change) => `  ${change}`),
+    'A running `blind dev` reloads onto the last commit meanwhile.',
+    '',
+  ].join('\n'))
+  const stashExitCode = await run('git', ['stash', 'push', '--include-untracked', '-m', installStashMessage], repoRoot)
+  if (stashExitCode !== 0) return stashExitCode
+  const installExitCode = await run('npm', ['run', 'install-app'], repoRoot)
+  if (await run('git', ['stash', 'pop', '--index'], repoRoot) === 0) return installExitCode
+  stderr(
+    "Couldn't put the uncommitted changes back, so Blind wasn't restarted. They're still stashed as " +
+      `"${installStashMessage}": find them with \`git stash list\`, then put them back with \`git stash pop --index\`.\n`
+  )
+  return installExitCode || 1
+}
+
 // Builds Blind and puts it in /Applications, then has a running Blind restart into the new copy: by asking it, which it
 // confirms like quitting, or with `force`, by stopping it, which it doesn't ask about, and launching it again. The URL
 // goes to the installed app by name, as another copy of Blind, e.g. one built into the repo, may take `blind:` URLs too.
 async function install (deps: CliDependencies, { force }: { force: boolean }) {
-  const { repoRoot, run, runningBlindPid, relaunchAfterExit, terminate, stdout, stderr } = deps
-  const installExitCode = await run('npm', ['run', 'install-app'], repoRoot)
+  const { run, runningBlindPid, relaunchAfterExit, terminate, stdout, stderr } = deps
+  const installExitCode = await buildCommitted(deps)
   if (installExitCode !== 0) return installExitCode
   const pid = await runningBlindPid()
   if (pid === undefined) {

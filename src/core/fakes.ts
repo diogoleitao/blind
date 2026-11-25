@@ -1,5 +1,5 @@
 import type { KeyPress } from './key-bindings'
-import type { Clock, SavedScrollback, ShellEvent, ShellFromBefore, ShellHost } from './ports'
+import type { Build, Clock, SavedScrollback, ShellEvent, ShellFromBefore, ShellHost } from './ports'
 import type { PaneId } from './state'
 
 // A key pressed as the keyboard reports it: the key it produces, the physical key, and the modifiers held, e.g.
@@ -16,10 +16,12 @@ export function press (key: string, code: string, ...modifiers: ('meta' | 'shift
 }
 
 // `fromBefore` and `saved` are what the app finds as it starts: the Shells from before it last quit that ran on, and the
-// scrollback saved meanwhile.
-export function createFakeShellHost (
-  { fromBefore = [], saved = {} }: { fromBefore?: ShellFromBefore[]; saved?: Record<PaneId, SavedScrollback> } = {}
-) {
+// scrollback saved meanwhile. `blindSpotBuild` is the Build Blind Spot reports, none without one.
+export function createFakeShellHost ({ fromBefore = [], saved = {}, blindSpotBuild }: {
+  fromBefore?: ShellFromBefore[];
+  saved?: Record<PaneId, SavedScrollback>;
+  blindSpotBuild?: Build;
+} = {}) {
   const started: { paneId: PaneId; workingDirectory: string; shell?: string }[] = []
   const stopped: PaneId[] = []
   const listeners: ((event: ShellEvent) => void)[] = []
@@ -35,6 +37,7 @@ export function createFakeShellHost (
     },
     shellsFromBefore: () => fromBefore,
     savedScrollback: () => saved,
+    blindSpotBuild: () => blindSpotBuild,
   }
   const emit = (event: ShellEvent) => {
     for (const listener of listeners) listener(event)

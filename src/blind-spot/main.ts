@@ -6,6 +6,7 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename } from 'node:path'
 import { promisify } from 'node:util'
 import { spawn } from 'node-pty'
+import { build } from '../shared/build'
 import { createBlindSpot, type KeptForNextApp } from './blind-spot'
 import { serveBlindSpot } from './server'
 
@@ -64,6 +65,7 @@ const blindSpot = createBlindSpot({
   },
   kept: readKept(),
   now: () => Date.now(),
+  build,
   end: () => process.exit(0),
 })
 
