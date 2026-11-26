@@ -6,7 +6,7 @@ A Pane whose Shell ran on while blind was gone shows it as it is; see [Shells th
 
 [Hidden Tabs](hidden-tabs.md) stay hidden through Restore.
 
-Restore doesn't re-run each Pane's last command; see [Limitations](limitations.md).
+When a Pane's Shell has ended, such as after an OS restart or Quit and End Shells, Restore starts a fresh Shell and doesn't re-run the program that was running; see [Limitations](limitations.md).
 
 ## Settings
 
