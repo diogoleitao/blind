@@ -4,7 +4,10 @@ What blind can do, how to set it up the way you like, and how to use it day to d
 
 ## Usage
 
-No pages yet.
+- [Getting started](usage/getting-started.md): bring blind down with the Hotkey, name a first Session, split a Pane, open the Command Palette and hide blind again.
+- [One Session per project](usage/one-session-per-project.md): name a Session, set its Root directory, open one per project and switch between them.
+- [Leaving programs running](usage/leaving-programs-running.md): close a Session or quit blind while claude or a build runs, come back to its output, and end it when you want it gone.
+- [Following Activity](usage/following-activity.md): find out when Claude Code finishes in another Session, from the Tab bar, the Activity Sidebar and the Activity Sound.
 
 ## Features
 
