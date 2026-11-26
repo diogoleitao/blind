@@ -395,13 +395,13 @@ export const configSchema = {
       properties: {
         startDirectory: {
           description:
-            "Where a new Tab starts: root is the Session's Root directory, or the current Pane's working directory without one; current is the current Pane's working directory; home is the home directory. A Session reopened with no Tabs starts its Tab at the home directory for home, and otherwise at its Root directory, or the home directory without one.",
+            "Where a new Tab starts: root is the Session's Root directory, or the Current Pane's working directory without one; current is the Current Pane's working directory; home is the home directory. A Session reopened with no Tabs starts its Tab at the home directory for home, and otherwise at its Root directory, or the home directory without one.",
           enum: startDirectories,
           default: defaultSettings.tab.startDirectory,
         },
         renameSuggestion: {
           description:
-            "Whose Program Title Rename Tab suggests, from the program running in the current Pane: claude suggests Claude Code's, which follows its /rename; all suggests any program's. When the program has none, Rename Tab suggests the Tab's current title.",
+            "Whose Program Title Rename Tab suggests, from the program running in the Current Pane: claude suggests Claude Code's, which follows its /rename; all suggests any program's. When the program has none, Rename Tab suggests the Tab's current title.",
           enum: tabRenameSuggestions,
           default: defaultSettings.tab.renameSuggestion,
         },

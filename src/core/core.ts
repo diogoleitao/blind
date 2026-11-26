@@ -158,7 +158,7 @@ export type Effect =
   | { type: 'resetPalettePosition' }
 
 // Every app action, in the order the Command Palette offers them, by its label.
-const paletteActionLabels = {
+export const paletteActionLabels = {
   newSession: 'New Session',
   renameSession: 'Rename Session',
   setSessionRoot: 'Set Session Root',
