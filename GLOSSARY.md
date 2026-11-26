@@ -112,6 +112,10 @@ _Avoid_: Unread, alert, output
 A list of the Panes with Activity across every Open Session and Closed Session, grouped by Session, with Open Sessions and Closed Sessions under separate headings, that slides over one side of the Current Session's window. Choosing a Pane in it makes that Pane the Current Pane, opening its Session first if it is a Closed Session.
 _Avoid_: Inbox, drawer, panel
 
+**Activity Sound**:
+The macOS sound played when a Pane gains Activity.
+_Avoid_: Ring, notification sound, alert
+
 ### Appearance
 
 **Theme**:
