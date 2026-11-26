@@ -27,7 +27,11 @@ What blind can do, how to set it up the way you like, and how to use it day to d
 
 ## Configuration
 
-No pages yet.
+- [Config file](configuration/config-file.md): where the config file lives, how changes apply, editor autocomplete, and how settings are named.
+- [Settings](configuration/settings.md): every setting, with its values and default.
+- [Key bindings](configuration/key-bindings.md): every action's shortcut, and how to rebind it.
+- [Theme files](configuration/theme-files.md): write a Theme file, or import one from another terminal.
+- [Activity Sound](configuration/activity-sound.md): the sound a Pane gaining Activity plays, when it plays, and how to choose it.
 
 ## The `blind` command
 

@@ -20,7 +20,7 @@ Terminal windows get buried under everything else, and each project's tabs and s
 - [**Activity**](docs/features/activity.md): a dot on every Pane whose program wants your attention, listed in the Activity Sidebar.
 - [**Inside a Pane**](docs/features/inside-a-pane.md): clickable links, Find in Pane, and `TERM_PROGRAM=blind`.
 - [**Appearance**](docs/features/appearance.md): built-in and imported Themes, and see-through, blurred windows.
-- **One config file.** `~/.config/blind/config.jsonc` comes with a schema for editor autocomplete, applies changes as you save, and rebinds any shortcut. Settings are grouped by what they act on, such as `"pane": { "scrollBar": "visible" }`, and this README names them by group and setting joined by a dot, such as `pane.scrollBar` ([ADR 0004](docs/adr/0004-settings-grouped-by-glossary-term.md)).
+- [**One config file**](docs/configuration/config-file.md): every setting and shortcut in `~/.config/blind/config.jsonc`, with editor autocomplete, applied as you save.
 - [**Menu Bar Icon**](docs/features/menu-bar-icon.md): your Open and Closed Sessions, one click away.
 - [**Show Build**](docs/features/show-build.md): the version and commit blind and Blind Spot are running.
 

@@ -35,8 +35,8 @@ Closing a Pane whose Shell runs a program, such as vim or claude, asks first, na
 
 ## Settings
 
-- `tab.startDirectory`: where a new Tab starts. `root`, the default, is the Session's Root directory, or the current Pane's directory without one; `current` is the current Pane's directory; `home` is your home directory.
-- `pane.startDirectory`: where the new Pane of a split starts. `current`, the default, is the split Pane's directory; `root` is the Session's Root directory, or the split Pane's directory without one; `home` is your home directory.
-- `tab.renameSuggestion`: `claude`, the default, has Rename Tab suggest Claude Code's Program Title alone; `all` suggests any running program's Program Title.
-- `pane.padding`: `padded`, the default, keeps each Pane's text a few pixels off its edges and dividers; `none` lets it run up to them.
-- `pane.scrollBar`: `none`, the default, shows no scroll bar; `visible` shows a thin one in the Theme's colours. Scrolling works either way.
+- [`tab.startDirectory`](../configuration/settings.md#tabstartdirectory): where a new Tab starts.
+- [`pane.startDirectory`](../configuration/settings.md#panestartdirectory): where the new Pane of a split starts.
+- [`tab.renameSuggestion`](../configuration/settings.md#tabrenamesuggestion): whose Program Title Rename Tab suggests.
+- [`pane.padding`](../configuration/settings.md#panepadding): whether each Pane's text keeps a few pixels off its edges and dividers.
+- [`pane.scrollBar`](../configuration/settings.md#panescrollbar): whether each Pane shows a scroll bar.

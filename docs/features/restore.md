@@ -10,4 +10,4 @@ Restore doesn't re-run each Pane's last command; see [Limitations](limitations.m
 
 ## Settings
 
-- `pane.scrollbackLines`: how many lines of each Pane's scrollback are kept and restored. The default is `10000`, and the most is `1000000`; `"unlimited"` keeps that many.
+- [`pane.scrollbackLines`](../configuration/settings.md#panescrollbacklines): how many lines of each Pane's scrollback are kept and restored.

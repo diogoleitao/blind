@@ -6,4 +6,4 @@ Its menu also offers New Session, Open Settings, Quit Blind and [Quit and End Sh
 
 ## Settings
 
-- `menuBarIcon`: `monochrome`, the default, follows the menu bar's colour, light or dark; `colour` keeps the icon's own colours. The Change Menu Bar Icon action sets it too.
+- [`menuBarIcon`](../configuration/settings.md#menubaricon): whether the icon follows the menu bar's colour or keeps its own, which the Change Menu Bar Icon action also sets.

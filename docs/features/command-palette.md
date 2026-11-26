@@ -15,7 +15,7 @@ Before you type, the Command Palette lists every Tab, then every Pane, after the
 
 ## Kind markers
 
-The Command Palette can mark Sessions, Tabs and Panes with Ⓢ, Ⓣ and Ⓟ before their names, unless `commandPalette.nesting` is `hidden`.
+The Command Palette can mark Sessions, Tabs and Panes with Ⓢ, Ⓣ and Ⓟ before their names, unless [`commandPalette.nesting`](../configuration/settings.md#commandpalettenesting) is `hidden`.
 
 ## Moving it
 
@@ -23,8 +23,8 @@ Drag the Command Palette by its edge to move it up or down. Every Session's wind
 
 ## Settings
 
-- `commandPalette.sessionSearchOrder`: `openFirst`, the default, has `ss` list Open Sessions before Closed ones; `cycle` lists them together.
-- `commandPalette.tabSearchScope`: `all`, the default, has `tt` search every Open Session's Tabs; `currentSession` searches only the Current Session's.
-- `commandPalette.paneSearchScope`: `all`, the default, has `pp` search every Open Session's Panes; `currentSession` searches only the Current Session's, and `currentTab` only the Current Tab's.
-- `commandPalette.nesting`: `flat`, the default, lists every Tab, then every Pane, after the Sessions; `nested` lists each Open Session's Tabs under it and each Tab's Panes under the Tab; `hidden` lists only Sessions and actions until you type.
-- `commandPalette.kindMarkers`: `true` marks Sessions, Tabs and Panes with Ⓢ, Ⓣ and Ⓟ; `false`, the default, doesn't.
+- [`commandPalette.sessionSearchOrder`](../configuration/settings.md#commandpalettesessionsearchorder): whether `ss` lists Open Sessions before Closed ones.
+- [`commandPalette.tabSearchScope`](../configuration/settings.md#commandpalettetabsearchscope): whose Tabs `tt` searches.
+- [`commandPalette.paneSearchScope`](../configuration/settings.md#commandpalettepanesearchscope): whose Panes `pp` searches.
+- [`commandPalette.nesting`](../configuration/settings.md#commandpalettenesting): how the Command Palette lists Tabs and Panes before you type.
+- [`commandPalette.kindMarkers`](../configuration/settings.md#commandpalettekindmarkers): whether Sessions, Tabs and Panes are marked with Ⓢ, Ⓣ and Ⓟ.

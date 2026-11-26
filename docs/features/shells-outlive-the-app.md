@@ -12,8 +12,8 @@ A background process, Blind Spot, holds the Shells while blind is gone. It ends 
 
 ## Quit and End Shells
 
-Quit and End Shells, in the [Command Palette](command-palette.md) and the [Menu Bar Icon](menu-bar-icon.md)'s menu, quits blind and ends every Shell, naming the programs it ends first. It has no shortcut by default; bind one in `keyBindings` as `quitAndEndShells`.
+Quit and End Shells, in the [Command Palette](command-palette.md) and the [Menu Bar Icon](menu-bar-icon.md)'s menu, quits blind and ends every Shell, naming the programs it ends first. It has no shortcut by default; bind one in [`keyBindings`](../configuration/key-bindings.md) as `quitAndEndShells`.
 
 ## Settings
 
-- `shell.onQuit`: `keepRunning`, the default, leaves every Shell running on quit. `end` has every quit end them, and Sessions come back with fresh Shells; Quit and End Shells is then not offered. A change takes effect at the next quit.
+- [`shell.onQuit`](../configuration/settings.md#shellonquit): whether quitting leaves every Shell running or ends them.

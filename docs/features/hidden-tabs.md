@@ -18,4 +18,4 @@ Choose a Hidden Tab, or one of its Panes, in the Command Palette or the Activity
 
 ## Settings
 
-- `hiddenTab.returnPosition`: `end`, the default, brings a Hidden Tab back as the rightmost Tab; `original` brings it back where it was.
+- [`hiddenTab.returnPosition`](../configuration/settings.md#hiddentabreturnposition): where a Hidden Tab goes when it comes back.

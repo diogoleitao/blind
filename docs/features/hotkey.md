@@ -12,5 +12,5 @@ blind is not in the Dock or `Cmd+Tab`. It starts on its own when you log in to m
 
 ## Settings
 
-- `loginLaunch.start`: `hidden`, the default, keeps the Login Launch hidden until the Hotkey shows it; `shown` starts it shown, as opening blind by hand does.
-- `loginLaunch.withNoOpenSessions`: what a hidden Login Launch with no Open Sessions opens. `hotkey`, the default, opens nothing and leaves it to the first Hotkey press, which opens a new Session; `new` opens a new Session for the first Hotkey press to show.
+- [`loginLaunch.start`](../configuration/settings.md#loginlaunchstart): whether a Login Launch stays hidden until the Hotkey shows it.
+- [`loginLaunch.withNoOpenSessions`](../configuration/settings.md#loginlaunchwithnoopensessions): what a hidden Login Launch with no Open Sessions opens.

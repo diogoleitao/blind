@@ -4,13 +4,13 @@
 
 A Theme colours both the terminal and blind's own chrome: the Tab bar, Tab dividers, Command Palette, Activity Sidebar, Session Banner, Pane dividers and the Bezel.
 
-blind has five built-in Themes: Default, Catppuccin, Tokyo Night, Rosé Pine and Gruvbox. You can add your own as `.jsonc` files in `~/.config/blind/themes/`.
+blind has five built-in Themes: Default, Catppuccin, Tokyo Night, Rosé Pine and Gruvbox. You can add your own as `.jsonc` files in `~/.config/blind/themes/`; see [Theme files](../configuration/theme-files.md).
 
-The Change Theme action opens the picker, which previews each Theme as you move through the list, and sets `theme`.
+The Change Theme action opens the picker, which previews each Theme as you move through the list, and sets [`theme`](../configuration/settings.md#theme).
 
 ### Importing a Theme
 
-The Import Theme action makes a Theme file in that folder from another terminal's theme: an iTerm2 `.itermcolors`, a Ghostty theme, a Kitty `.conf`, an Alacritty `.toml` or a Windows Terminal colour scheme. It's named after the file, and its Tab bar, Command Palette and Session Banner colours come from the terminal colours.
+The Import Theme action makes a Theme file in that folder from another terminal's theme: an iTerm2 `.itermcolors`, a Ghostty theme, a Kitty `.conf`, an Alacritty `.toml` or a Windows Terminal colour scheme. It's named after the file, and its Tab bar, Command Palette and Session Banner colours come from the terminal colours. See [Importing a Theme](../configuration/theme-files.md#importing-a-theme) for what it refuses.
 
 ## See-through windows
 
@@ -20,7 +20,7 @@ The blur uses a private macOS function ([ADR 0003](../adr/0003-blur-through-a-pr
 
 ## Settings
 
-- `theme`: the name of the Theme in effect, built in or from a Theme file. `Default` is the default.
-- `background.transparency`: how transparent the window's background is, from `0`, opaque, to `100`. The default is `25`.
-- `background.blurRadius`: how strongly the background blurs what's behind the window, from `1` to `64`. The default is `15`.
-- `background.effect`: `blur`, the default, blurs what's behind the window; `none` shows it with next to no blur.
+- [`theme`](../configuration/settings.md#theme): the name of the Theme in effect, built in or from a Theme file.
+- [`background.transparency`](../configuration/settings.md#backgroundtransparency): how transparent the window's background is.
+- [`background.blurRadius`](../configuration/settings.md#backgroundblurradius): how strongly the background blurs what's behind the window.
+- [`background.effect`](../configuration/settings.md#backgroundeffect): whether the background blurs what's behind the window.

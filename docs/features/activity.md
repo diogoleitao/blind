@@ -28,10 +28,10 @@ Up, Down and Enter, or a click, jump to a Pane. `Cmd+B` or a click outside close
 
 ## Activity Sound
 
-While blind is hidden, a Pane gaining Activity also plays the Activity Sound, Purr by default. The Change Activity Sound action picks another macOS sound, playing each one as you move through the list, and sets `activity.sound`.
+While blind is hidden, a Pane gaining Activity also plays the [Activity Sound](../configuration/activity-sound.md), Purr by default. The Change Activity Sound action picks another macOS sound, playing each one as you move through the list, and sets [`activity.sound`](../configuration/settings.md#activitysound).
 
 ## Settings
 
-- `activity.sound`: the macOS sound played when a Pane gains Activity. `Purr` is the default.
-- `activity.ring`: when the Activity Sound plays. `whileHidden`, the default, plays it only while blind is hidden; `always` plays it while blind is shown too; `never` turns it off.
-- `activitySidebar.side`: `right`, the default, slides the Activity Sidebar over the right of the window; `left` slides it over the left.
+- [`activity.sound`](../configuration/settings.md#activitysound): the macOS sound played when a Pane gains Activity.
+- [`activity.ring`](../configuration/settings.md#activityring): when the Activity Sound plays.
+- [`activitySidebar.side`](../configuration/settings.md#activitysidebarside): which side of the window the Activity Sidebar slides over.

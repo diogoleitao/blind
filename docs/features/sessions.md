@@ -28,6 +28,6 @@ The Delete Session action removes a Session for good, open or closed, and stops 
 
 ## Settings
 
-- `sessionBanner`: `true`, the default, shows the Session Banner as you cycle; `false` turns it off.
-- `session.cycleOrder`: the order Open Sessions are cycled through and listed in. `alphabetical`, the default, goes by name; `recent` by most recent use; `created` by creation.
-- `session.withoutNameOrRootOnClose`: `keep`, the default, keeps a closed Session with neither a name nor a Root directory as a Closed Session. `delete` has closing or quitting delete such Sessions instead; the quit confirmation names them, with the programs that end.
+- [`sessionBanner`](../configuration/settings.md#sessionbanner): whether cycling shows the Session Banner.
+- [`session.cycleOrder`](../configuration/settings.md#sessioncycleorder): the order Open Sessions are cycled through and listed in.
+- [`session.withoutNameOrRootOnClose`](../configuration/settings.md#sessionwithoutnameorrootonclose): what closing a Session with neither a name nor a Root directory does to it.
