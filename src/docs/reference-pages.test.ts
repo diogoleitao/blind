@@ -22,6 +22,17 @@ describe('the Settings page', () => {
     expect(page.endsWith('\n')).toBe(true)
   })
 
+  it('says, before the first setting, that the blind settings command changes them from the terminal', () => {
+    const page = settingsPage({
+      properties: { theme: { description: "The Theme's name.", type: 'string', default: 'Default' } },
+    })
+    const fromTheTerminal =
+      'From the terminal: [`blind settings`](../blind-command/settings.md) lists every setting but `keyBindings` and changes them as you go.'
+
+    expect(page.split('\n')).toContain(fromTheTerminal)
+    expect(page.indexOf(fromTheTerminal)).toBeLessThan(page.indexOf('## `theme`'))
+  })
+
   it('lists a group under its name and description, and each of its settings by its dotted name', () => {
     const page = settingsPage({
       properties: {

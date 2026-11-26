@@ -4,6 +4,8 @@
 
 Every setting the [config file](config-file.md) takes, in the order the file's schema lists them. A setting in a group is named by the group and the setting joined by a dot, such as `pane.scrollBar`, and one in no group, such as `theme`, by its name alone. A setting the file leaves out is at its default.
 
+From the terminal: [`blind settings`](../blind-command/settings.md) lists every setting but `keyBindings` and changes them as you go.
+
 ## `session`
 
 How Open Sessions are cycled through, and what closing a Session keeps.

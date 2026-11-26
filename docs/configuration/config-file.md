@@ -2,6 +2,8 @@
 
 Every setting lives in one file, `~/.config/blind/config.jsonc`: JSON with comments allowed. The Open Settings action, in the [Command Palette](../features/command-palette.md) and the [Menu Bar Icon](../features/menu-bar-icon.md)'s menu, opens it in the app macOS opens `.jsonc` files with, creating it first if it's missing, or shows it in Finder when no app opens them.
 
+From the terminal: [`blind settings open`](../blind-command/settings.md#blind-settings-open) opens it in `$EDITOR`, or in its default app without one, creating it first if it's missing.
+
 A setting the file leaves out is at its default, so the file only needs what you change.
 
 ## Running from the repo

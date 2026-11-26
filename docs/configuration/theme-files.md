@@ -43,3 +43,5 @@ The Import Theme action, in the [Command Palette](../features/command-palette.md
 Pick the file, and blind shows the Theme it makes: a sample in its colours, its 16 ANSI colours, its main chrome colours, and the name of the file it will be saved as. Enter saves it to the themes folder, and Escape cancels. The Theme is named after the file it came from, without its extension, and its chrome colours come from its terminal colours. Change Theme lists it once saved.
 
 Import refuses a file that isn't one of those themes, such as a Windows Terminal `settings.json`; one that leaves out colours the rest are drawn from, naming them as the file does; and one whose name another Theme, or another file in the themes folder, already has, ignoring case. Rename such a file and import it again; Enter picks another file.
+
+From the terminal: [`blind themes import <file>`](../blind-command/themes-import.md) imports a Theme the same way, without showing it first.

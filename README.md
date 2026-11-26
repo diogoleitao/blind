@@ -32,7 +32,9 @@ What blind can't do yet is in [Limitations](docs/features/limitations.md).
 npm run install-app
 ```
 
-Builds `Blind.app` from the last commit and copies it to `/Applications`, replacing any previous copy. It refuses to run while the repo has uncommitted changes, untracked files included; `blind install` (below) stashes them for the build. Quit a running Blind and open it again to use the new copy, or use `blind install`, which does both.
+Builds `Blind.app` from the last commit and copies it to `/Applications`, replacing any previous copy. It refuses to run while the repo has uncommitted changes, untracked files included; `blind install` stashes them for the build. Quit a running Blind and open it again to use the new copy, or use `blind install`, which does both.
+
+From the terminal: [`blind install`](docs/blind-command/install.md) builds and installs the last commit with uncommitted changes stashed, and restarts a running Blind into the new copy.
 
 The installed app records the Build it was made from: its `Info.plist` names the commit's full SHA under `BlindCommit`, beside the version in `CFBundleShortVersionString`, and `Blind.app/Contents/Resources/version` holds the version on its first line and the full SHA on its second.
 
@@ -51,19 +53,7 @@ The app icon is made from `build/icon.iconset`. The app registers itself as a lo
 
 ### The `blind` command
 
-```sh
-npm link
-```
-
-Run once from the repo, this builds the `blind` command and puts it on your `PATH`. It runs from the repo, so it stays linked to this checkout. If you switch Node versions with a version manager such as nvm, run `npm link` again under the new one.
-
-`blind settings` lists every setting but `keyBindings` with its value and description, each group's under a heading of its name, and changes them as you go: arrow keys move and pick values, and Enter types a number or the `shell.program` setting. Changes are saved when you quit with `q` or Escape, and a running Blind applies them then; Ctrl+C quits without saving them. Settings changed since the editor opened show in bold yellow with a `*`, and quitting lists them, by group and setting joined by a dot, with their old and new values, under `Discarded:` after Ctrl+C. `blind settings open` opens `~/.config/blind/config.jsonc` in `$EDITOR`, or in its default app without one, creating it first if it's missing.
-
-`blind themes import <file>` makes a Theme file in `~/.config/blind/themes` from an iTerm2, Ghostty, Kitty, Alacritty or Windows Terminal theme, as the Command Palette's Import Theme does, and says where it saved it. It saves the file without showing the Theme first, and refuses a file that isn't a theme, one that leaves out colours the rest are drawn from, and one whose name another Theme or file in the folder has, ignoring case. A running Blind lists the new Theme in Change Theme straight away.
-
-`blind install` runs `npm run install-app`, then has a running Blind restart into the new copy. With uncommitted changes, untracked files included, it first lists them and stashes them as `blind install: uncommitted changes`, so only the last commit is built, and puts them back once the build ends, staged changes staged again, whether the build succeeded, failed or was stopped with Ctrl+C. A running `blind dev` reloads onto the last commit meanwhile. Should putting them back fail, it says so and leaves Blind running as it is; `git stash list` and `git stash pop --index` get them back. To restart, Blind asks you to confirm, as quitting does, and starts again once you do. Cancel and the old copy keeps running until you next quit. `blind install --force` restarts it without asking, saving your Sessions first. A Blind that isn't running is left that way.
-
-`blind link` runs `npm link` in the repo, which rebuilds the `blind` command first. Run it after changing the command's source. It needs `blind` on your `PATH` already, so the first link, and the one after switching Node versions, is still the one above.
+[The `blind` command](docs/blind-command/README.md): put it on your `PATH` with `npm link` from the repo, then change settings, import Themes, install, relink and run blind from the terminal.
 
 ## Develop
 
@@ -72,7 +62,7 @@ npm install
 npm run dev
 ```
 
-With [the `blind` command](#the-blind-command) linked, `blind dev` does the same as `npm run dev` from any directory. Running from the repo, the Hotkey is F7. The app keeps its data in `~/Library/Application Support/Blind Dev/` and its config and Themes in `~/.config/blind-dev/`, apart from the installed app's, so the two never share Sessions or settings. `dev` and `build` first build the native addon in `native/`, which needs the Xcode Command Line Tools (`xcode-select --install`); the first build downloads Electron's headers.
+With [the `blind` command](docs/blind-command/README.md) linked, [`blind dev`](docs/blind-command/dev.md) does the same as `npm run dev` from any directory. Running from the repo, the Hotkey is F7. The app keeps its data in `~/Library/Application Support/Blind Dev/` and its config and Themes in `~/.config/blind-dev/`, apart from the installed app's, so the two never share Sessions or settings. `dev` and `build` first build the native addon in `native/`, which needs the Xcode Command Line Tools (`xcode-select --install`); the first build downloads Electron's headers.
 
 ## Stack
 

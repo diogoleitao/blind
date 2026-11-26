@@ -35,4 +35,9 @@ What blind can do, how to set it up the way you like, and how to use it day to d
 
 ## The `blind` command
 
-No pages yet.
+- [The `blind` command](blind-command/README.md): put the command on your `PATH` with `npm link`, and every command it has.
+- [`blind settings`](blind-command/settings.md): list every setting and change it in the terminal, or open the config file in your editor.
+- [`blind themes import`](blind-command/themes-import.md): make a Theme file from another terminal's theme.
+- [`blind install`](blind-command/install.md): build and install the last commit, and restart a running Blind into it.
+- [`blind link`](blind-command/link.md): rebuild the `blind` command and link it again.
+- [`blind dev`](blind-command/dev.md): run blind from the repo, from any directory.
